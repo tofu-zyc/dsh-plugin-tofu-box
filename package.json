@@ -1,0 +1,1 @@
+{"name":"dsh-plugins-dev","private":true,"dependencies":{"@deepseek-ai/dsh-tools":"^0.1.6-alpha.1","@deepseek-ai/schemastery":"^3.18.2"}}

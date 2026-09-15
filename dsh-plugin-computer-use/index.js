@@ -46,15 +46,15 @@ export const inject = ['tools', 'shell', 'fs', 'attachments']
 
 export const Config = z.object({
   /** Where capture PNGs are staged before they become attachments. */
-  outDir: z.string().min(1).optional(),
+  outDir: z.string().min(1),
   /** Staged PNGs to keep (oldest pruned after each capture). */
-  keep: z.number().int().min(5).max(500).optional(),
+  keep: z.natural().min(5).max(500),
   /** Long-edge cap of the model-visible frame, in px. */
-  maxDim: z.number().int().min(320).max(3840).optional(),
+  maxDim: z.natural().min(320).max(3840),
   /** Settle time between the gesture and the result screenshot. */
-  settleMs: z.number().int().min(0).max(5000).optional(),
+  settleMs: z.natural().max(5000),
   /** 'once-per-agent': the first mutating call asks, later ones run. */
-  askPolicy: z.enum(['once-per-agent', 'always']).optional(),
+  askPolicy: z.union([z.const('once-per-agent'), z.const('always')]),
 })
 
 const CAP = fileURLToPath(new URL('./scripts/capture.ps1', import.meta.url))
