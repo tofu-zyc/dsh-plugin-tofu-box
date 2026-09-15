@@ -12,6 +12,7 @@ dist/
 /UPGRADE-CHECK.md
 /check-compat.mjs
 /publish.ps1
+/.doctor-selftest/
 
 # 系统与编辑器
 .DS_Store
