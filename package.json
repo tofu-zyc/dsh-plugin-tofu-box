@@ -1,1 +1,1 @@
-{"name":"dsh-plugins-dev","private":true,"dependencies":{"@deepseek-ai/dsh-tools":"^0.1.6-alpha.1","@deepseek-ai/dsh-typert-protocol":"0.1.6-alpha.1","@deepseek-ai/schemastery":"^3.18.2","@trycua/cua-driver":"^0.28.1"}}
+{"name":"dsh-plugins-dev","private":true,"dependencies":{"@deepseek-ai/dsh-tools":"^0.1.6-alpha.1","@deepseek-ai/dsh-typert-protocol":"0.1.6-alpha.1","@deepseek-ai/schemastery":"^3.18.2","@trycua/cua-driver":"^0.28.1"},"devDependencies":{"koffi":"^3.2.1"}}

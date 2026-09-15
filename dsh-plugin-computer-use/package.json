@@ -1,17 +1,18 @@
 {
   "name": "dsh-plugin-computer-use",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "license": "MIT",
   "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "computer-use", "desktop", "automation", "screenshot", "input"],
   "publishConfig": { "registry": "https://registry.npmjs.org" },
   "repository": { "type": "git", "url": "git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git", "directory": "dsh-plugin-computer-use" },
   "bugs": { "url": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/issues" },
   "homepage": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/tree/main/dsh-plugin-computer-use",
-  "description": "computer-use v2：基于 Cua Driver 进程内 SDK 的跨平台桌面操作。13 个工具（截图/窗口列表/缩放/光标/移动/点击/拖拽/滚动/输入/按键/启动应用/连续动作/等待），默认后台注入不抢焦点，元素树+element_token 精确操作，失败自动升级前台投递。无需守护进程/MCP/PowerShell。写操作走原生 tools/pre-execute 审批。",
+  "description": "computer-use v2.2：基于 Cua Driver 进程内 SDK 的跨平台桌面操作。13 个工具（截图/窗口列表/缩放/光标/移动/点击/拖拽/滚动/输入/按键/启动应用/连续动作/等待），Windows 宿主进程自动切换 Per-Monitor-V2 DPI 感知（高缩放屏截图/坐标不再错位），命名驱动会话自动续命，默认后台注入不抢焦点，元素树+element_token 精确操作，失败自动升级前台投递。无需守护进程/MCP/PowerShell。写操作走原生 tools/pre-execute 审批。",
   "type": "module",
   "main": "index.js",
   "dependencies": {
-    "@trycua/cua-driver": "^0.28.1"
+    "@trycua/cua-driver": "^0.28.1",
+    "koffi": "^3.2.1"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": ">=0.1.5-rc.1",

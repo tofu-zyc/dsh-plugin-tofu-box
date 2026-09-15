@@ -143,6 +143,11 @@ try {
   const desk = await run('computer_screenshot', {})
   ok(desk.image && desk.image.width > 0 && desk.image.width <= 1568, 'desktop capture returns frame ≤ maxDim (' + desk.image.width + 'x' + desk.image.height + ')')
   ok(desk.frameText.includes('PRIMARY'), 'desktop frame guidance mentions primary display')
+  if (process.platform === 'win32') {
+    ok(!logs.some((l) => l[0] === 'info' && /DPI awareness = UNAWARE/.test(l[1])) && !logs.some((l) => l[0] === 'info' && /DPI awareness = unknown/.test(l[1])), 'host process became DPI aware at boot (log: ' + (logs.find((l) => l[1].includes('DPI awareness'))?.[1] ?? '—') + ')')
+    ok(/@2x|@1x|@[0-9.]+x/.test(desk.summary), 'desktop summary reports true size + scale factor (' + desk.summary + ')')
+    ok(!desk.summary.includes('DPI awareness inactive'), 'desktop capture carries no DPI degradation warning')
+  }
 
   const cur = await run('computer_cursor', {})
   ok(/^-?\d+,-?\d+$/.test(cur.physical), 'cursor position reads ' + cur.physical)

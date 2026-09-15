@@ -7,6 +7,26 @@
  * package per OS/arch and the tools just work (Windows tested; the same code
  * path drives the macOS / Linux natives).
  *
+ * v2.2 fixes the two things that made v2 unusable on a real Windows desktop:
+ *
+ * - **DPI bootstrap.** The driver's whole Windows backend measures screens,
+ *   captures pixels and maps coordinates through GetSystemMetrics/
+ *   GetWindowRect — APIs that return DPI-VIRTUALIZED values unless the host
+ *   process declared Per-Monitor-V2 awareness (upstream assumes the daemon
+ *   exe; an in-process SDK inherits the HOST, and node.exe is unaware). On a
+ *   200%-scaled primary the driver then captured only the top-left quarter of
+ *   the display and every desktop coordinate was off by the scale factor.
+ *   The plugin now flips the process to Per-Monitor-V2 via a tiny FFI call
+ *   (koffi, prebuilt binaries, no compiler) BEFORE the driver runtime is
+ *   created — after that the driver's own numbers are correct
+ *   (`get_desktop_state` returns the true 3200x2000 @2x, not a crop).
+ * - **Session lifecycle.** The driver's implicit session dies after 5 min of
+ *   idle and ended names are never revived by ordinary actions — every call
+ *   then failed with "session has ended" until the process restarted. The
+ *   plugin now runs one named session (`dsh-computer-use`) that it starts at
+ *   boot, passes explicitly on every call that accepts it, and revives with
+ *   `start_session` + one retry whenever the driver reports `session_ended`.
+ *
  * The driver's native paradigm is window-centric and background-first, so the
  * tool surface speaks it now:
  *
@@ -50,6 +70,10 @@ export const Config = z.object({
   askPolicy: z.union([z.const('once-per-agent'), z.const('always'), z.const('never')]),
   /** Content-free product telemetry of the bundled Cua Driver runtime. */
   telemetry: z.boolean(),
+  /** Windows: switch the host process to Per-Monitor-V2 DPI awareness before the
+   * driver starts (strongly recommended; set false only if some other component
+   * already owns process DPI awareness and you must not touch it). */
+  dpiAware: z.boolean(),
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -203,7 +227,73 @@ export function apply(ctx, config) {
   const settleMs = config && config.settleMs !== undefined ? config.settleMs : 600
   const askPolicy = config && config.askPolicy === 'always' ? 'always' : config && config.askPolicy === 'never' ? 'never' : 'once-per-agent'
   const telemetry = !!(config && config.telemetry === true)
+  const dpiAwareCfg = !(config && config.dpiAware === false)
   if (!telemetry) process.env.CUA_DRIVER_RS_TELEMETRY_ENABLED = '0'
+
+  // ── DPI bootstrap (Windows) ────────────────────────────────────────────────
+  // The driver assumes a Per-Monitor-V2-aware host (its daemon exe ships that
+  // manifest; upstream capture/input code comments say so outright). The
+  // in-process SDK instead inherits THIS process — and node.exe is DPI-unaware.
+  // Every screen metric the driver reads is then DPI-virtualized while BitBlt
+  // and SendInput still work in physical pixels: on a 200%-scaled primary the
+  // desktop capture silently covers only the top-left quarter of the display
+  // and all desktop coordinates drift by the scale factor. Flip the process
+  // BEFORE the driver runtime creates its worker threads (threads inherit the
+  // process context at creation); afterwards every driver number is physical.
+  /** { text, aware } — filled during the first getDriver() chain. */
+  const dpiState = { text: 'pending', aware: false }
+  const ensureProcessDpiAware = async () => {
+    if (process.platform !== 'win32') { dpiState.text = 'n/a (not Windows)'; dpiState.aware = true; return }
+    if (!dpiAwareCfg) { dpiState.text = 'skipped (dpiAware: false)'; dpiState.aware = false; return }
+    try {
+      const m = await import('koffi')
+      const koffi = m.default && m.default.load ? m.default : m
+      const user32 = koffi.load('user32.dll')
+      let shcore = null
+      try { shcore = koffi.load('shcore.dll') } catch {}
+      // PROCESS_DPI_AWARENESS: 0 unaware, 1 system, 2 per-monitor; NULL handle = this process.
+      const query = () => {
+        if (!shcore) return -1
+        try {
+          const getProc = shcore.func('int32_t GetProcessDpiAwareness(void*, int32_t*)')
+          const out = koffi.alloc('int32_t', 1)
+          if (getProc(null, out) !== 0) return -1
+          return koffi.decode(out, 'int32_t')
+        } catch { return -1 }
+      }
+      let now = query()
+      if (now !== 2) {
+        try { user32.func('bool SetProcessDpiAwarenessContext(intptr_t)')(-4) } catch {} // PER_MONITOR_AWARE_V2
+        now = query()
+        if (now === 0 || now === -1) {
+          try { user32.func('bool SetProcessDPIAware()')() } catch {}
+          now = query()
+        }
+      }
+      dpiState.aware = now >= 1
+      dpiState.text = now === 2
+        ? 'per-monitor-v2'
+        : now === 1
+          ? 'system-DPI-aware (fallback: metrics are physical, mixed-scale window captures may stretch)'
+          : now === 0
+            ? 'UNAWARE (runtime switch refused — HiDPI captures/coordinates are unreliable)'
+            : 'unknown (shcore query unsupported)'
+    } catch (e) {
+      dpiState.aware = false
+      dpiState.text = 'unknown (koffi unavailable: ' + (e && e.message ? e.message : e) + ')'
+    }
+  }
+
+  // ── named driver session ───────────────────────────────────────────────────
+  // The implicit session the runtime creates for a transport is private and,
+  // once it ends (5-minute idle TTL / explicit end), ordinary calls against it
+  // fail forever: “this session has ended; call start_session explicitly”.
+  // A public label survives that: start_session revives it and is idempotent,
+  // so the plugin tags every session-capable call with it and self-heals on
+  // `session_ended`. (`session` is not sticky server-side — repeat it.)
+  const SESSION_LABEL = 'dsh-computer-use'
+  const SESSION_TOOLS = new Set(['get_desktop_state', 'get_window_state', 'click', 'double_click', 'right_click', 'drag', 'type_text', 'press_key', 'hotkey', 'scroll', 'set_value', 'move_cursor', 'get_cursor_position'])
+  const isSessionEnded = (r) => r.errorCode === 'session_ended' || /session has ended|call start_session/i.test(String((r && r.text) ?? ''))
 
   /** Lazily-created in-process Cua Driver runtime (one per profile process). */
   let driver = null
@@ -213,16 +303,22 @@ export function apply(ctx, config) {
     if (driver) return Promise.resolve(driver)
     if (driverDead) throw new Error('Cua Driver runtime was shut down; restart dsh to reactivate computer-use')
     if (!driverPromise) {
-      driverPromise = import('@trycua/cua-driver').then((m) => {
+      driverPromise = ensureProcessDpiAware().then(() => {
+        ctx.logger.info('computer-use: host process DPI awareness = ' + dpiState.text)
+        return import('@trycua/cua-driver')
+      }).then((m) => {
         const created = m.CuaDriver.create()
         driver = created
         ctx.effect(() => () => {
           driverDead = true
           driver = null
           driverPromise = null
+          Promise.resolve(created.callTool('end_session', JSON.stringify({ session: SESSION_LABEL }))).catch(() => {})
           Promise.resolve(created.shutdown()).catch(() => {})
         })
-        return created
+        return Promise.resolve(created.callTool('start_session', JSON.stringify({ session: SESSION_LABEL })))
+          .then((r) => { if (r && r.isError) ctx.logger.warn('computer-use: start_session failed: ' + String(r.text).slice(0, 160)) }, () => {})
+          .then(() => created)
       }, (e) => { driverPromise = null; throw new Error('cannot load @trycua/cua-driver native runtime: ' + (e && e.message ? e.message : e)) })
     }
     return driverPromise
@@ -231,7 +327,16 @@ export function apply(ctx, config) {
   /** Call one driver tool by name; returns the parsed ToolResult. */
   const raw = async (tool, args) => {
     const d = await getDriver()
-    return await d.callTool(tool, JSON.stringify(args ?? {}))
+    let a = args ?? {}
+    if (SESSION_TOOLS.has(tool) && a.session === undefined) a = { ...a, session: SESSION_LABEL }
+    const json = JSON.stringify(a)
+    let r = await d.callTool(tool, json)
+    if (r && r.isError && isSessionEnded(r)) {
+      // Idle TTL tripped: revive the label once, retry the exact call once.
+      await Promise.resolve(d.callTool('start_session', JSON.stringify({ session: SESSION_LABEL }))).catch(() => {})
+      r = await d.callTool(tool, json)
+    }
+    return r
   }
   /** Same, but throws on isError with the driver's own message. */
   const call = async (tool, args) => {
@@ -239,7 +344,10 @@ export function apply(ctx, config) {
     if (r.isError) throw new Error(tool + ': ' + String(r.text ?? 'failed').slice(0, 400))
     return r
   }
-  const structured = (r) => { try { return JSON.parse(r.rawJson ?? '{}').structuredContent ?? {} } catch { return {} } }
+  const structured = (r) => {
+    try { return JSON.parse(r.structuredJson) } catch {}
+    try { return JSON.parse(r.rawJson ?? '{}').structuredContent ?? {} } catch { return {} }
+  }
 
   const sleep = (ms, signal) => new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -362,8 +470,10 @@ export function apply(ctx, config) {
     const long = Math.max(img.width, img.height)
     if (long > maxDim) img = resizeRgba(img, Math.round((img.width * maxDim) / long), Math.round((img.height * maxDim) / long))
     deskFrame = { sw: sc.screen_width ?? img.width, sh: sc.screen_height ?? img.height, fw: img.width, fh: img.height }
+    const scale = typeof sc.scale_factor === 'number' && sc.scale_factor > 0 ? ' @' + sc.scale_factor + 'x' : ''
+    const dpiWarn = dpiState.aware ? '' : ' ⚠ host DPI awareness inactive (' + dpiState.text + ') — on scaled displays this frame may cover only part of the primary display and desktop coordinates drift; prefer window-scoped actions via app=.'
     return {
-      summary: summary ?? ('Primary display captured (' + sc.screen_width + 'x' + sc.screen_height + ').'),
+      summary: (summary ?? 'Primary display captured') + ' (' + sc.screen_width + 'x' + sc.screen_height + scale + ' px' + dpiWarn + ')',
       frameText: 'Desktop coordinate frame = pixels of THIS image (top-left origin of the PRIMARY display). Windows on OTHER monitors are NOT in this image — capture and act on them via app=/computer_windows.',
       image: await attach(pngEncode(img), 'desktop.png'),
     }
@@ -555,8 +665,9 @@ export function apply(ctx, config) {
       y: { type: 'number', description: 'Y px of the last screenshot of the SAME target.' },
       button: { type: 'string', description: 'left | right | middle. Default left.' },
       clicks: { type: 'number', description: 'Click count 1-3. Default 1.' },
-      keys: { type: 'string', description: 'Optional held modifiers, e.g. "ctrl" or "ctrl+shift".' },
+      keys: { type: 'string', description: 'Optional held modifiers, e.g. "ctrl" or "ctrl+shift". Windows background clicks DROP modifiers (UIA/PostMessage carry no key state) — they land only when the click escalates to foreground.' },
       desktop: { type: 'boolean', description: 'true = click on the primary desktop at desktop-screenshot x,y (moves the real pointer).' },
+      from_zoom: { type: 'boolean', description: 'true = x,y are pixels of the latest computer_zoom image of this window (the driver maps them back to window coordinates).' },
     },
     output: SHOT_RENDER,
     timeoutMs: 30000,
@@ -583,7 +694,7 @@ export function apply(ctx, config) {
       }
       const desc = 'Clicked ' + button + (count > 1 ? ' x' + count : '') + (a.keys ? ' holding ' + a.keys : '') + (a.element ? ' on element ' + a.element : a.x !== undefined ? ' at (' + a.x + ',' + a.y + ')' : '') + '.'
       return await actAndShot(exec, () => granting(exec), desc, async () => {
-        const r = await action('click', { ...where, button, count, ...(modifier ? { modifier } : {}) })
+        const r = await action('click', { ...where, button, count, ...(modifier ? { modifier } : {}), ...(a.from_zoom === true ? { from_zoom: true } : {}) })
         r.scopeView = where.target && where.target.kind === 'desktop' ? 'desktop' : 'window'
         return r
       })
@@ -942,7 +1053,7 @@ export function apply(ctx, config) {
     return { kind: 'ask', reason: '允许 computer-use 操作应用？一次批准覆盖同一会话的后续动作（askPolicy: always 可改为每次一询）；默认后台注入——不移动你的鼠标、不抢焦点，仅个别拒收后台输入的应用会短暂前置。首个动作: ' + exec.name + '。' }
   })
 
-  ctx.logger.info('computer-use v2: cua-driver backend; ' + MUTATING.size + ' mutating tools gated; askPolicy=' + askPolicy + '; telemetry=' + telemetry)
+  ctx.logger.info('computer-use v2.2: cua-driver backend (session "' + SESSION_LABEL + '"); ' + MUTATING.size + ' mutating tools gated; askPolicy=' + askPolicy + '; telemetry=' + telemetry)
 
   // Best-effort: push the model-frame cap into the driver for window captures
   // (the driver resizes window screenshots AND keeps x,y/zoom coordinates
