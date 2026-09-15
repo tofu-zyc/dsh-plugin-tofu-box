@@ -31,6 +31,8 @@ dsh plugin --profile web add \
 
 目前基于 dsh 0.1.5-rc 开发，dsh 版本更新概率影响稳定性。并且插件均由 AI 完成，肯定会有很多潜在 bug。
 
+平台：Windows 11 实测通过。model-search / model-tuning / read-image-preview 是纯 UI 插件，Linux / macOS 理论上可用但我没测过，欢迎反馈；computer-use 依赖 PowerShell 和 Win32 API（GDI 截屏、SendInput），只有 Windows 能用。
+
 未来可能新增更多插件。
 
 ---
@@ -58,6 +60,8 @@ dsh plugin --profile web add \
 
 Restart dsh after installing. Registration is bundled in each package (`dsh.bundle.patch`), nothing to wire up. To remove: `dsh plugin --profile web remove <name>`.
 
-Built against dsh 0.1.5-rc. The probability of dsh version updates affects stability.
+Built against dsh 0.1.5-rc. dsh updates frequently, which may affect stability.
+
+Platforms: tested on Windows 11. model-search / model-tuning / read-image-preview are pure UI plugins and should work on Linux / macOS, but I haven't tested there — feedback welcome. computer-use relies on PowerShell and the Win32 API (GDI capture, SendInput), so it is Windows-only.
 
 More plugins may be added in the future. All the plugins are completed by AI, so there will certainly be many potential bugs.
