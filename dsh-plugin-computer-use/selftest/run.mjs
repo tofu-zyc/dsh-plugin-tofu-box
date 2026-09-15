@@ -24,6 +24,7 @@ const info = (msg) => console.log('     · ' + msg)
 const warn = (msg) => { console.log('WARN ' + msg); soft++ }
 
 // ── fake plugin context ──────────────────────────────────────────────────────
+let approvalPolicy = 'ask' // flipped live during the gate tests
 function makeCtx() {
   const logs = []
   const tools = new Map()
@@ -31,6 +32,10 @@ function makeCtx() {
   const disposers = []
   let attN = 0
   const ctx = {
+    get(name) {
+      if (name === 'approval') return { effectivePolicy: () => approvalPolicy }
+      return undefined
+    },
     logger: {
       info: (...a) => logs.push(['info', a.join(' ')]),
       warn: (...a) => logs.push(['warn', a.join(' ')]),
@@ -110,7 +115,7 @@ const run = (tool, args) => tools.get(tool).execute(args ?? {}, EXEC)
 const gate = (name, agent) => {
   const hs = events.get('tools/pre-execute') ?? []
   if (hs.length !== 1) throw new Error('expected exactly 1 pre-execute handler, got ' + hs.length)
-  return hs[0]({ name, agent, signal: undefined }, () => 'PASSED')
+  return hs[0]({ name, agent: { ...agent, session: {} }, signal: undefined }, () => 'PASSED')
 }
 /** First editable-looking element token from a SHOT value's element list. */
 const pickToken = (shot) => {
@@ -126,6 +131,9 @@ const pickToken = (shot) => {
   const r = gate('computer_click', { id: 'fresh-agent' })
   ok(r && r.kind === 'ask', 'pre-execute gate asks before first mutating call')
   ok(gate('computer_screenshot', { id: 'fresh-agent' }) === 'PASSED', 'read-only tools never ask')
+  approvalPolicy = 'never' // full-access session: no prompt could ever appear
+  ok(gate('computer_click', { id: 'fresh-agent' }) === 'PASSED', 'never-policy session passes through instead of self-blocking')
+  approvalPolicy = 'ask'
 }
 
 // ── 4. live driver: window-centric flows ─────────────────────────────────────

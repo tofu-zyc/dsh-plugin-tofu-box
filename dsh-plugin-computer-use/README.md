@@ -35,7 +35,9 @@
 
 ## 审批
 
-8 个动作类工具（move/click/drag/scroll/type/key/open/sequence）挂在原生 `tools/pre-execute` 审批水路上，默认 `askPolicy: once-per-agent`——**同一会话第一次写操作弹一次批准，之后整轮免批**；行 config 可改 `always` 每次一询。截图、列窗口、读光标、zoom、wait 是只读，不审批。审批理由文案会说明"后台注入，不动鼠标不抢焦点"。
+8 个动作类工具（move/click/drag/scroll/type/key/open/sequence）挂在原生 `tools/pre-execute` 审批水路上，默认 `askPolicy: once-per-agent`——**同一会话第一次写操作弹一次批准，之后整轮免批**；行 config 可改 `always` 每次一询、`never` 完全撤掉本插件闸门。截图、列窗口、读光标、zoom、wait 是只读，不审批。审批理由文案会说明"后台注入，不动鼠标不抢焦点"。
+
+闸门**自动跟随会话审批策略**：会话本身处于"不弹审批"模式时（如完全权限下 `approval: never`——此时任何 ask 都会被自动拒绝），本闸门直接放行、由全局权限策略把关，不会自己把自己锁死。
 
 ## 行配置（可全部省略）
 
@@ -46,7 +48,7 @@
   config:
     maxDim: 1568               # 模型帧长边上限（px）
     settleMs: 600              # 动作后到结果图的等待（毫秒）
-    askPolicy: once-per-agent  # 或 always
+    askPolicy: once-per-agent  # 或 always / never
     telemetry: false           # Cua Driver 运行时的无内容产品遥测，默认关
 ```
 

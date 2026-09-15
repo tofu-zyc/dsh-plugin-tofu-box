@@ -46,8 +46,8 @@ export const Config = z.object({
   maxDim: z.natural().min(320).max(3840),
   /** Settle time between the gesture and the result screenshot. */
   settleMs: z.natural().max(5000),
-  /** 'once-per-agent': the first mutating call asks, later ones run. */
-  askPolicy: z.union([z.const('once-per-agent'), z.const('always')]),
+  /** 'once-per-agent': the first mutating call asks, later ones run; 'never': no own gate. */
+  askPolicy: z.union([z.const('once-per-agent'), z.const('always'), z.const('never')]),
   /** Content-free product telemetry of the bundled Cua Driver runtime. */
   telemetry: z.boolean(),
 })
@@ -201,7 +201,7 @@ export function cropRgba(img, x, y, w, h) {
 export function apply(ctx, config) {
   const maxDim = config && config.maxDim !== undefined ? config.maxDim : 1568
   const settleMs = config && config.settleMs !== undefined ? config.settleMs : 600
-  const askPolicy = (config && config.askPolicy === 'always') ? 'always' : 'once-per-agent'
+  const askPolicy = config && config.askPolicy === 'always' ? 'always' : config && config.askPolicy === 'never' ? 'never' : 'once-per-agent'
   const telemetry = !!(config && config.telemetry === true)
   if (!telemetry) process.env.CUA_DRIVER_RS_TELEMETRY_ENABLED = '0'
 
@@ -380,6 +380,17 @@ export function apply(ctx, config) {
   // ── action plumbing ────────────────────────────────────────────────────────
   const agentsGranted = new Set()
   const agentKey = (agent) => (agent && typeof agent.id === 'string' && agent.id !== '') ? agent.id : '__no-agent__'
+
+  // The harness approval service ('approval') owns a per-session policy: 'ask'
+  // prompts, 'never' (approvals disabled / full-access mode) auto-REJECTS every
+  // ask. Emitting ask there would only self-block, so when the session cannot
+  // prompt we pass actions through — the user's global policy is the gate.
+  const approval = ctx.get('approval')
+  const sessionRefusesPrompt = (exec) => {
+    const session = exec && exec.agent && exec.agent.session
+    if (session === undefined || !approval || typeof approval.effectivePolicy !== 'function') return false
+    try { return approval.effectivePolicy(session) === 'never' } catch { return false }
+  }
 
   const isEscalationHint = (r) => {
     const blob = String(r.text ?? '') + String(r.rawJson ?? '')
@@ -922,10 +933,13 @@ export function apply(ctx, config) {
 
   const MUTATING = new Set(['computer_move', 'computer_click', 'computer_drag', 'computer_scroll', 'computer_type', 'computer_key', 'computer_open', 'computer_sequence'])
   ctx.on('tools/pre-execute', (exec, next) => {
-    if (MUTATING.has(exec.name) && (askPolicy === 'always' || !agentsGranted.has(agentKey(exec.agent)))) {
-      return { kind: 'ask', reason: '允许 computer-use 操作应用？一次批准覆盖同一会话的后续动作（askPolicy: always 可改为每次一询）；默认后台注入——不移动你的鼠标、不抢焦点，仅个别拒收后台输入的应用会短暂前置。首个动作: ' + exec.name + '。' }
-    }
-    return next()
+    if (!MUTATING.has(exec.name)) return next()
+    if (askPolicy === 'never') return next()
+    if (askPolicy === 'once-per-agent' && agentsGranted.has(agentKey(exec.agent))) return next()
+    // Full-access / approvals-disabled session: asking would be auto-rejected by
+    // the approval service — honor the session's mode instead of self-blocking.
+    if (sessionRefusesPrompt(exec)) return next()
+    return { kind: 'ask', reason: '允许 computer-use 操作应用？一次批准覆盖同一会话的后续动作（askPolicy: always 可改为每次一询）；默认后台注入——不移动你的鼠标、不抢焦点，仅个别拒收后台输入的应用会短暂前置。首个动作: ' + exec.name + '。' }
   })
 
   ctx.logger.info('computer-use v2: cua-driver backend; ' + MUTATING.size + ' mutating tools gated; askPolicy=' + askPolicy + '; telemetry=' + telemetry)
