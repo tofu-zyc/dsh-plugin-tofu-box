@@ -273,6 +273,33 @@ try {
   // gate is now open for this agent (first mutating call granted it)
   ok(gate('computer_click', { id: 'selftest' }) === 'PASSED', 'approval gate opens after first grant (once-per-agent)')
   ok(gate('computer_click', { id: 'other-agent' }).kind === 'ask', 'a different agent still gets asked')
+
+  // The ordering rule under test: PROCESS FIRST, window second. A live
+  // tray-only app (running, zero windows) must be REPORTED and must not gain
+  // processes — deciding from a window lookup alone relaunched exactly this case
+  // in the field (WeChat: process alive since 11:47, no window, relaunch →
+  // login screen). Skipped when no such app is present.
+  if (process.platform === 'win32') {
+    const countWeixin = () => {
+      const t = spawnSync('powershell', ['-NoProfile', '-Command', '@(Get-Process Weixin -ErrorAction SilentlyContinue).Count'], { encoding: 'utf8' })
+      const n = parseInt(String(t.stdout ?? '').trim(), 10)
+      return Number.isFinite(n) ? n : 0
+    }
+    const before = countWeixin()
+    if (before > 0) {
+      const winRow2 = await run('computer_windows', { app: 'weixin' })
+      if (!/pid=\d+/.test(winRow2.table)) {
+        const r = await run('computer_open', { name: '微信' }).catch((e) => ({ summary: 'THREW ' + String(e.message) }))
+        const after = countWeixin()
+        ok(/ALREADY RUNNING/i.test(r.summary), 'tray-only app is reported, not relaunched: ' + r.summary.slice(0, 120))
+        ok(after <= before, 'tray-only app did not gain processes (' + before + ' → ' + after + ')')
+      } else {
+        info('WeChat has a window right now — tray-only ordering not exercised')
+      }
+    } else {
+      info('WeChat not running — tray-only ordering not exercised')
+    }
+  }
 } catch (e) {
   ok(false, 'live driver flow threw: ' + (e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : e))
 } finally {
