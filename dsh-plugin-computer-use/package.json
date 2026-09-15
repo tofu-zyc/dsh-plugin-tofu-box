@@ -11,8 +11,8 @@
   "type": "module",
   "main": "index.js",
   "peerDependencies": {
-    "@deepseek-ai/dsh-tools": "0.1.6-alpha.1",
-    "@deepseek-ai/schemastery": "3.18.2"
+    "@deepseek-ai/dsh-tools": ">=0.1.5-rc.1",
+    "@deepseek-ai/schemastery": "^3.18.2"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-tools": { "optional": true },
