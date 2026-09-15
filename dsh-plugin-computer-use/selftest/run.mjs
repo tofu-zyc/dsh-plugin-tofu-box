@@ -154,10 +154,46 @@ try {
 
   // launch notepad in background
   const openShot = await run('computer_open', { name: 'Notepad', settle_seconds: 3 })
-  const pidMatch = /pid (\d+)/.exec(openShot.summary)
-  ok(pidMatch !== null, 'computer_open returned a pid: ' + (pidMatch ? pidMatch[1] : '—'))
-  notepadPid = pidMatch ? Number(pidMatch[1]) : null
-  ok(openShot.image && openShot.image.width > 0, 'open returned a window capture')
+  // Assert the INVARIANT (a window for the app exists right after opening), not
+  // a specific returned shape: the driver reports pid 0 and an empty windows[]
+  // for packaged-app launches, so the first call may legitimately settle on the
+  // desktop fallback while the window shows up moments later.
+  let winRow = ''
+  {
+    const w = await run('computer_windows', { app: 'notepad' })
+    winRow = w.table
+    for (let i = 0; i < 10 && !/pid=\d+/.test(winRow); i++) {
+      await run('computer_wait', { seconds: 1 })
+      winRow = (await run('computer_windows', { app: 'notepad' })).table
+    }
+  }
+  ok(/pid=\d+/.test(winRow), 'a notepad window exists after computer_open (' + (winRow.split('\n')[0] ?? 'none').slice(0, 90) + ')')
+  ok(openShot.image && openShot.image.width > 0, 'open returned a capture')
+  {
+    // The driver reports pid 0 for packaged-app launches, so a name-based
+    // window lookup must supply the pid for cleanup (see finally below).
+    const row = /pid=(\d+)/.exec(winRow)
+    if (row) { notepadPid = Number(row[1]); info('resolved notepad pid from window table: ' + notepadPid) }
+  }
+
+  // Reopening an app that is ALREADY running must reuse it: on Windows
+  // launch_app always creates a new process, so a naive relaunch of a chat app
+  // spawns a second, logged-out instance that demands a fresh login.
+  if (notepadPid) {
+    let again = null
+    let againErr = ''
+    again = await run('computer_open', { name: 'Notepad' }).catch((e) => { againErr = String(e.message); return null })
+    // Packaged-app launches report pid 0, so identity is checked by the reuse
+    // markers (and the process count below) rather than by pid equality.
+    const reused = again !== null && /Reused|no new instance|already running|already visible|Activated/i.test(again.summary)
+    ok(reused, 'reopening a running app reuses it (no second instance): ' + (again ? again.summary.slice(0, 150) : againErr.slice(0, 150)))
+    ok(again !== null && /no new instance|already running|already visible|Activated/i.test(again.summary), 'reuse is reported explicitly in the summary')
+    if (process.platform === 'win32') {
+      const list = spawnSync('tasklist', ['/FI', 'IMAGENAME eq notepad.exe', '/NH'], { encoding: 'utf8' })
+      const lines = String(list.stdout ?? '').split('\n').filter((l) => /notepad\.exe/i.test(l) && !/No tasks|没有运行|无运行/i.test(l))
+      ok(lines.length <= 1, 'exactly one notepad.exe process after two opens (' + lines.length + ' seen)')
+    }
+  }
 
   const token = pickToken(openShot)
   ok(token !== null, 'window tree exposed elements, picked token ' + token)
@@ -223,10 +259,19 @@ try {
 } catch (e) {
   ok(false, 'live driver flow threw: ' + (e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : e))
 } finally {
-  // reclaim the notepad this test started (stdio:ignore keeps it sandbox-safe)
+  // Reclaim the notepad this test started (stdio:ignore keeps it sandbox-safe).
+  // Packaged-app launches report pid 0, so fall back to an image-name sweep:
+  // this test only ever drives notepad, and a leftover window would poison the
+  // next run's window lookups.
+  let killed = false
   if (notepadPid) {
     const k = spawnSync('taskkill', ['/PID', String(notepadPid), '/F'], { stdio: 'ignore' })
-    info(k.status === 0 ? 'cleanup: killed notepad ' + notepadPid : 'cleanup: notepad ' + notepadPid + ' not killed (status ' + k.status + ')')
+    killed = k.status === 0
+    info(killed ? 'cleanup: killed notepad ' + notepadPid : 'cleanup: pid ' + notepadPid + ' not killed (status ' + k.status + '), sweeping by image name')
+  }
+  if (!killed) {
+    const s = spawnSync('taskkill', ['/IM', 'notepad.exe', '/F'], { stdio: 'ignore' })
+    info('cleanup: swept notepad.exe by image name (status ' + s.status + ')')
   }
 }
 

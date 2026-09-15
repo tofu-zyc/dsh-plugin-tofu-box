@@ -2,6 +2,18 @@
 
 让模型**看见窗口和桌面并操作鼠标键盘**——v2 起整个后端换装 [Cua Driver](https://cua.ai) 的**进程内 SDK**（`@trycua/cua-driver`，Rust 原生运行时随 npm 包按平台分发，直接加载进 dsh 宿主进程）：**无守护进程、无 MCP、无 PowerShell**，装上即用，跨 Windows / macOS / Linux。
 
+## v2.3：打开已登录的应用，不再逼你重新登录
+
+`computer_open` 原来无条件调驱动的 `launch_app`，而它在 Windows 上**只会 `ShellExecuteEx` 创建新进程**——上游文档原文：`creates_new_application_instance` "**no-op on Windows (ShellExecuteEx always creates a new process)**"。实测对同一应用连调两次，返回两个不同 pid，没有任何复用。于是"打开微信"= 又拉起一个没有登录态的新实例 = **要你重新登录**，尽管你的微信明明登录着、窗口只是缩在托盘里。
+
+v2.3 把"打开"改成三步，且**只有第三步才真的启动**：
+
+1. **先在窗口表里找已有窗口**（官方文档明说窗口级判断要用 `list_windows` 而非 `list_apps`）：找到就**复用它**，最小化的先用驱动的 `bring_to_front` 唤醒（上游 `capture.rs` 自己就是这么建议的），**绝不启动第二个实例**；
+2. 窗口表找不到时，用 `list_apps` 的运行标记判定"它其实在跑"——在跑就**走应用自己的启动入口**去激活已有实例（UWP 用 `aumid`，桌面应用用快捷方式里的完整命令行），而不是盲启动；
+3. 确认确实没在跑，才按应用的 `launch_path`/`aumid` 启动；并按日志区分"**启动即退出的假成功**"（驱动按名字启动时实测会发生）与"还没起来"，不再把死掉的启动报成成功。
+
+顺带两个稳定性修复：窗口捕获遇到 UIA 无响应会自动降级为纯截图（原来直接把驱动的报错丢给模型）；`computer_sequence` 的 `open:` 步骤遵循同一套复用规则。
+
 ## v2.2：修好"截屏截不明白"的两个根因
 
 - **Windows 高 DPI 自举。** 驱动的 Windows 后端整套按"宿主进程已是 Per-Monitor-V2 DPI 感知"编写（它自己的源码注释明说；官方部署形态是带该 manifest 的 daemon exe）。进程内 SDK 继承的却是宿主——node.exe 是 DPI-unaware：驱动拿到的屏幕尺寸被缩放倍率**虚化**（3200×2000@200% 看成 1600×1000），而 BitBlt / SendInput 仍按物理像素工作——**桌面截图只剩主屏左上角四分之一，坐标全部错位**。v2.2 在驱动运行前用 koffi（纯预编译 FFI，无需编译链）把宿主进程切到 Per-Monitor-V2，之后驱动报的每个数字都是真实物理值（桌面截图 `3200x2000 @2x`）。开关：行配置 `dpiAware`（默认开）。
@@ -25,7 +37,7 @@
 | `computer_scroll` | 窗口滚动（后台投递，指针不动） |
 | `computer_type` | 后台文本注入（字段元素令牌走 UIA SetValue 最稳；`desktop=true` 改为打给当前前台应用） |
 | `computer_key` | 按键/组合键（XAML 应用自动走前台 SendInput 兜底，见上），`repeat` 1-10 |
-| `computer_open` | 按名启动应用（含 Store 打包的 AUMID 应用），回其 pid + 首窗截图，前台不动 |
+| `computer_open` | **打开应用但绝不重复启动**：先在窗口表找已有窗口→复用/唤醒（最小化时 `bring_to_front`），窗口表不可用时用 `list_apps` 判定"其实在跑"并走应用自己的启动入口激活；确认没跑才按 `launch_path`/`aumid` 启动 |
 | `computer_sequence` | 多步 DSL 一气呵成：`key: / type: / wait: / click:x,y / scroll:dir,n / open:name`，全步先校验后执行，**一次审批一张终图** |
 | `computer_zoom` | 窗口区域原生分辨率放大（读小字）；配 `from_zoom=true` 可在放大图上直接点 |
 | `computer_cursor` / `computer_move` | 读 / 移动**真实**指针（桌面坐标；后台窗口操作根本不经过指针） |
@@ -57,6 +69,7 @@
     askPolicy: once-per-agent  # 或 always / never
     telemetry: false           # Cua Driver 运行时的无内容产品遥测，默认关
     dpiAware: true             # Windows：驱动启动前把宿主进程切到 Per-Monitor-V2 DPI 感知
+    restore: true              # 允许把已运行应用的最小化窗口唤醒到前台（false = 永不抢焦点）
 ```
 
 包内 `cordis.patch.yml` 经 `dsh.bundle.patch` 自 wiring，安装即注册这一行，不用手改 profile 配置。
@@ -69,7 +82,8 @@
 
 - **Windows 11 实测**（自测脚本见下）；macOS / Linux 走同一代码路径但**未实测**——macOS 需给运行 dsh 的宿主进程授予"辅助功能/屏幕录制"（TCC）权限，且驱动的 macOS 前台叠加层在进程内形态不可用。
 - Windows 高 DPI：启动日志会打印 `host process DPI awareness = …`；正常为 `per-monitor-v2`。若显示 `UNAWARE`（宿主 manifest 或他方抢先固定了感知级别），桌面截图/坐标在缩放屏上不可靠，插件会在每张桌面截图摘要里带显式警告——优先改用 `app=` 窗口操作。
-- 桌面截图仅主显示器（窗口级截图不受限）；被最小化的窗口可读无障碍树，但截图需要驱动先恢复窗口。
+- 桌面截图仅主显示器（窗口级截图不受限）；被最小化的窗口**读树可以、截图不行**（驱动会明确报"capture minimized window"，插件此时会先用 `bring_to_front` 唤醒再截——这是唯一会短暂占用前台的动作，`restore: false` 可关掉）。
+- **窗口枚举可能"瞎"掉**：长生命周期的宿主里实测出现过驱动的 `list_windows` 长时间恒返回 0 窗口（同一进程的桌面截图/光标读取/指定 hwnd 的窗口截图都正常，另起进程枚举同一桌面有 450+ 窗口）。此时 `computer_open` 会退回用 `list_apps` 判定"其实在跑"从而**避免重复启动**，但没法定位/点击那个窗口——重启 dsh 可重建枚举。
 - 无法向"以管理员权限运行"的窗口注入（Windows UIPI）；前台被终端等前台锁持有者抢占时，需要前台的兜底路径会带回驱动的指引。
 - 原生包**没有构建脚本**（纯预编译 DLL/.node/.dylib），pnpm 安装即成功，不需要编译链。
 

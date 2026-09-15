@@ -228,6 +228,9 @@ export function apply(ctx, config) {
   const askPolicy = config && config.askPolicy === 'always' ? 'always' : config && config.askPolicy === 'never' ? 'never' : 'once-per-agent'
   const telemetry = !!(config && config.telemetry === true)
   const dpiAwareCfg = !(config && config.dpiAware === false)
+  // May computer_open / window captures bring an ALREADY-RUNNING app's
+  // minimized window back to the foreground? Off = never touch the foreground.
+  const restoreCfg = !(config && config.restore === false)
   if (!telemetry) process.env.CUA_DRIVER_RS_TELEMETRY_ENABLED = '0'
 
   // ── DPI bootstrap (Windows) ────────────────────────────────────────────────
@@ -397,6 +400,158 @@ export function apply(ctx, config) {
     throw new Error('no target: pass app (e.g. app="notepad") or pid/window_id, or capture first — see computer_windows')
   }
 
+  // ── "is it already running?" ───────────────────────────────────────────────
+  // `launch_app` on Windows ALWAYS creates a new process (ShellExecuteEx; the
+  // `creates_new_application_instance` flag is a documented no-op there), so it
+  // can never "focus-resolve" anything. Re-running a chat app that way spawns a
+  // second, logged-out instance that begs for a fresh login — the app is
+  // already running, its (minimized / tray) window just isn't the one the model
+  // ended up looking at. Every "open this app" path therefore asks the driver's
+  // own app inventory first and reuses the live instance when there is one.
+  const normApp = (s) => String(s ?? '').trim().toLowerCase().replace(/\.exe$/, '')
+  const scoreApp = (want, cand) => {
+    const w = normApp(want)
+    const name = normApp(cand && cand.name)
+    const exe = normApp(String((cand && cand.bundle_id) ?? '').split(/[\\/]/).pop())
+    if (name === '' && exe === '') return 0
+    if (name === w || exe === w) return 100
+    if (w.length < 3) return 0
+    if (name.includes(w) || exe.includes(w)) return 60
+    if (w.includes(name) && name !== '') return 40
+    return 0
+  }
+  /**
+   * The installed-app inventory entry for `want`, or null.
+   * Only consulted on the launch path (it is the slow call); its running flags
+   * are NOT used for the "already running?" decision — the official guidance is
+   * to reason about windows from `list_windows`, and that view is also the one
+   * a reuse decision actually needs.
+   */
+  const findInstalledApp = async (want) => {
+    let apps = []
+    try {
+      const r = await raw('list_apps', {})
+      apps = structured(r).apps ?? []
+    } catch {
+      return null
+    }
+    let best = null
+    let bestScore = 0
+    for (const entry of apps) {
+      const s = scoreApp(want, entry)
+      if (s > bestScore) { bestScore = s; best = entry }
+    }
+    return best === null || bestScore <= 0 ? null : best
+  }
+
+  /**
+   * How to launch an app that is not running yet.
+   * - UWP/Store: `aumid` — the docs' own advice for capturing the packaged pid;
+   *   its `launch_path` is the same `shell:appsFolder\…` string but activates
+   *   through the broker and reports pid 0.
+   * - desktop: the shortcut's full commandline (`launch_path`), so arguments
+   *   survive; falls back to the bare name.
+   */
+  const launchSelectorFor = async (want) => {
+    const entry = await findInstalledApp(want)
+    const lp = entry !== null && typeof entry.launch_path === 'string' ? entry.launch_path : ''
+    if (entry !== null && entry.kind === 'uwp') {
+      const aumid = lp.startsWith('shell:appsFolder\\') ? lp.slice('shell:appsFolder\\'.length) : ''
+      if (aumid !== '') return { aumid }
+      if (typeof entry.bundle_id === 'string' && entry.bundle_id.includes('!')) return { aumid: entry.bundle_id }
+    }
+    if (lp !== '' && !lp.startsWith('shell:appsFolder')) return { launch_path: lp }
+    return { name: want }
+  }
+
+  const windowsOf = async (pid) => {
+    const w = structured(await raw('list_windows', { pid }))
+    const mine = (w.windows ?? []).filter((x) => x.pid === pid)
+    const onScreen = mine.filter((x) => x.is_on_screen !== false)
+    const pick = (onScreen.length > 0 ? onScreen : mine).slice()
+    pick.sort((x, y) => (y.z_index ?? 0) - (x.z_index ?? 0))
+    return pick
+  }
+
+  /**
+   * Find an EXISTING window for an app by name / exe / title, across every pid.
+   * Never bind to the pid `list_apps` reports: for freshly started packaged apps
+   * that pid can be a launcher that owns no window (Win11 Notepad: the app entry
+   * points at one process while the window belongs to another that appears a
+   * moment later), so a pid-scoped lookup silently finds nothing and the caller
+   * would launch a second instance.
+   */
+  const findAppWindow = async (want, preferPid) => {
+    const w = structured(await raw('list_windows', { on_screen_only: false }))
+    const w0 = normApp(want)
+    const scored = []
+    for (const x of w.windows ?? []) {
+      const app = normApp(x.app_name)
+      const title = String(x.title ?? '').toLowerCase()
+      let score = 0
+      if (app !== '' && app === w0) score = 100
+      else if (app !== '' && w0.length >= 3 && app.includes(w0)) score = 70
+      else if (title !== '' && w0.length >= 3 && title.includes(w0)) score = 45
+      if (score === 0) continue
+      if (x.is_on_screen !== false) score += 10
+      if (preferPid !== undefined && x.pid === preferPid) score += 25
+      scored.push({ score, z: x.z_index ?? 0, x })
+    }
+    if (scored.length === 0) return null
+    scored.sort((a, b) => (b.score - a.score) || (b.z - a.z))
+    const win = scored[0].x
+    return { pid: win.pid, windowId: win.window_id ?? win.windowId, title: win.title ?? '', app: want }
+  }
+
+  /** windowsOf(pid), falling back to a name match (see findAppWindow). */
+  const windowFor = async (want, pid) => {
+    if (pid !== undefined && pid !== null && Number(pid) > 0) {
+      const mine = await windowsOf(Math.round(Number(pid)))
+      if (mine.length > 0) return { pid: Math.round(Number(pid)), windowId: mine[0].window_id ?? mine[0].windowId, title: mine[0].title ?? '', app: want }
+    }
+    return await findAppWindow(want, pid)
+  }
+
+  /**
+   * launch_app + wait for a window to show up.
+   * `selector` is an app name string or a full argument object ({name}|{path}|{aumid}|{launch_path}).
+   * Returns { pid, target } where `target` is a resolvable window (or null).
+   */
+  const launchAndSettle = async (selector, settle, signal) => {
+    const args = typeof selector === 'string' ? { name: selector } : selector
+    const want = typeof args.name === 'string' ? args.name : String(args.path ?? args.aumid ?? args.launch_path ?? '')
+    const r = await call('launch_app', args)
+    const sc = structured(r)
+    const pid = sc.pid
+    const first = (sc.windows ?? [])[0]
+    if (first !== undefined) {
+      return { pid, target: { pid: first.pid ?? pid, windowId: first.window_id ?? first.windowId, title: first.title ?? '', app: want } }
+    }
+    // A packaged-app launch (launch_path/aumid) reports pid 0 and no windows —
+    // measured behaviour — so a name lookup must come first instead of burning
+    // the whole settle budget on a pid that cannot ever match. Such launches are
+    // also slow to settle (measured ~9 s for Win11 Notepad), so pid 0 gets a
+    // longer window than the pid-scoped path.
+    const budget = (pid === 0 ? settle + 10000 : settle + 4000)
+    for (let waited = 0; waited < budget; waited += 400) {
+      // Not pid-scoped on purpose: the launcher pid may own no window at all.
+      const t = await windowFor(want, pid)
+      if (t !== null) return { pid: t.pid, target: t }
+      await sleep(400, signal)
+    }
+    // The launch reported success but nothing appeared. Distinguish "still
+    // starting" from "started and died" so the model is not told a dead launch
+    // succeeded (a name-only launch on this driver can exit within seconds).
+    let died = false
+    if (Number(pid) > 0) {
+      try {
+        const seen = structured(await raw('list_apps', {})).apps ?? []
+        died = !seen.some((x) => Math.round(Number(x.pid)) === Math.round(Number(pid)))
+      } catch {}
+    }
+    return { pid, target: null, died }
+  }
+
   // ── capture ────────────────────────────────────────────────────────────────
   const IMAGE_VALUE = {
     type: 'object', additionalProperties: false, required: true,
@@ -441,22 +596,67 @@ export function apply(ctx, config) {
     return out
   }
 
+  /** Best-effort: bring an existing window back from minimized / off-screen. */
+  const restoreWindow = async (pid, windowId) => {
+    if (!restoreCfg) return { ok: false, detail: 'disabled (config restore: false)' }
+    try {
+      const r = await call('bring_to_front', { pid, window_id: windowId })
+      const sc = structured(r)
+      return { ok: true, detail: 'previous_fg=' + String(sc.previous_fg_hwnd ?? '?') + ' now_fg=' + String(sc.now_fg_hwnd ?? '?') }
+    } catch (e) {
+      return { ok: false, detail: String(e && e.message ? e.message : e).slice(0, 200) }
+    }
+  }
+
   /** Window capture → screenshot (+ optional element tree) SHOT value. */
   const captureWindow = async (t, opts) => {
     const includeTree = !(opts && opts.tree === false)
-    const args = { pid: t.pid, window_id: t.windowId, include_accessibility_tree: includeTree }
-    if (opts && opts.query) args.query = opts.query
-    const r = await call('get_window_state', args)
+    const build = () => {
+      const args = { pid: t.pid, window_id: t.windowId, include_accessibility_tree: includeTree }
+      if (opts && opts.query) args.query = opts.query
+      return args
+    }
+    let restored = ''
+    let r
+    const grab = () => call('get_window_state', build())
+    try {
+      r = await grab()
+    } catch (e) {
+      // A minimized window has no rendered content: the driver bails instead of
+      // handing back an all-black PNG. When the caller allows it, restore the
+      // window once and retry — otherwise teach the model the exact remedy.
+      const msg = String(e && e.message ? e.message : e)
+      if (!(opts && opts.restoreMinimized === true) || !/minimized window/i.test(msg)) throw e
+      const res = await restoreWindow(t.pid, t.windowId)
+      if (!res.ok) {
+        throw new Error('window ' + t.windowId + ' is minimized and could not be restored (' + res.detail + ') — the app is running, but its window is not visible; ask the user to restore it, then retry ' + msg.slice(0, 160))
+      }
+      restored = ' [was minimized — restored via bring_to_front (' + res.detail + '); the no-foreground contract is broken for this call]'
+      await sleep(settleMs, opts && opts.signal)
+      r = await grab()
+    }
     const sc = structured(r)
     const png = Buffer.from((r.images[0] && r.images[0].dataBase64) ?? '', 'base64')
     if (png.length === 0) throw new Error('window capture returned no image')
     const els = sc.elements ?? []
     if (els.length > 0) last = { ...t, tokensByIndex: Object.fromEntries(els.map((e) => [e.element_index, e.element_token])) }
     return {
-      summary: (opts && opts.summary) || ('Window "' + (sc.window_title ?? t.title ?? '') + '" captured (pid ' + t.pid + ', window ' + t.windowId + ').'),
+      summary: ((opts && opts.summary) || ('Window "' + (sc.window_title ?? t.title ?? '') + '" captured (pid ' + t.pid + ', window ' + t.windowId + ').')) + restored,
       frameText: 'Coordinates for this window = pixels of THIS image (window-local, top-left origin). Screen bounds: ' + JSON.stringify(sc.window_bounds ?? {}) + '.',
       elements: renderElements(els, sc.total_element_count ?? els.length),
       image: await attach(png, 'win.png'),
+    }
+  }
+
+  /** Window capture that still returns an image when the UIA tree is unusable. */
+  const shotFor = async (target, opts) => {
+    try {
+      return await captureWindow(target, opts)
+    } catch (e) {
+      const msg = String(e && e.message ? e.message : e)
+      if (!/timed out|unresponsive/i.test(msg)) throw e
+      const shot = await captureWindow(target, { ...opts, tree: false })
+      return { ...shot, summary: shot.summary + ' (element tree unavailable: the UIA provider did not answer — act by pixel from this screenshot, or re-capture later)' }
     }
   }
 
@@ -595,7 +795,7 @@ export function apply(ctx, config) {
     await sleep(settleMs, exec.signal)
     let value
     if (r.scopeView === 'desktop') value = await captureDesktop(summary + note)
-    else value = await captureWindow(r.target ?? last, { tree: false, summary: summary + note })
+    else value = await shotFor(r.target ?? last, { tree: false, summary: summary + note })
     return value
   }
   const granting = (exec) => { agentsGranted.add(agentKey(exec.agent)) }
@@ -620,10 +820,10 @@ export function apply(ctx, config) {
         return await captureDesktop()
       }
       if (a.desktop === undefined && a.app === undefined && a.pid === undefined && a.window_id === undefined) {
-        return await captureWindow(last, { tree: a.elements !== false })
+        return await shotFor(last, { tree: a.elements !== false })
       }
       const t = await resolveWindow(a)
-      return await captureWindow(t, { tree: a.elements !== false, query: typeof a.query === 'string' ? a.query : undefined })
+      return await shotFor(t, { tree: a.elements !== false, query: typeof a.query === 'string' ? a.query : undefined })
     },
   })
 
@@ -833,10 +1033,10 @@ export function apply(ctx, config) {
 
   register({
     name: 'computer_open',
-    description: 'Launch (or focus-resolve) an app by name without stealing your foreground — returns the app pid and its first window captured. PREFERRED over Start-menu clicking. On Windows this activates Store-packaged apps (Notepad/Calculator/Settings) correctly via AUMID.',
+    description: 'Open an app by name WITHOUT ever starting a second instance of something that is already running (running app → reuse its window; minimized → restore it; only a truly absent app is launched). Returns that window captured, with the element tree. PREFERRED over Start-menu clicking. On Windows, genuinely new launches activate Store-packaged apps (Notepad/Calculator/Settings) correctly via AUMID. Launching is always background; restoring a minimized window is the one path that takes the foreground.',
     parameters: {
       name: { type: 'string', required: true, description: 'App name as the OS knows it, e.g. "notepad", "微信", "Chrome". Max 100 chars.' },
-      settle_seconds: { type: 'number', description: 'Extra wait for the window to materialize, 0-15. Default 2.' },
+      settle_seconds: { type: 'number', description: 'Extra wait for a newly launched window to materialize, 0-15. Default 2.' },
     },
     output: SHOT_RENDER,
     timeoutMs: 45000,
@@ -845,18 +1045,72 @@ export function apply(ctx, config) {
       if (appName === '' || appName.length > 100) throw new Error('name must be 1-100 chars')
       const settle = a.settle_seconds === undefined ? 2000 : Math.min(15000, Math.max(0, Number(a.settle_seconds) * 1000))
       granting(exec)
-      const r = await call('launch_app', { name: appName })
-      const sc = structured(r)
-      const pid = sc.pid
-      let win = (sc.windows ?? [])[0]
-      for (let waited = 0; !win && waited < settle + 4000; waited += 400) {
+
+      // 1) Is it already open? Ask the WINDOW list — the official guidance is to
+      //    reason about windows from list_windows, not from list_apps (whose
+      //    running flags are a derived, slower view). Reuse, never relaunch:
+      //    `launch_app` on Windows always creates a new process, so relaunching
+      //    a chat app spawns a second, logged-out instance that demands a login.
+      let target = await windowFor(appName)
+      for (let waited = 0; target === null && waited < 2000; waited += 400) {
         await sleep(400, exec.signal)
-        const w = structured(await raw('list_windows', { pid }))
-        win = (w.windows ?? [])[0]
+        target = await windowFor(appName)
       }
-      if (!win) return await captureDesktop('Launched "' + appName + '" (pid ' + pid + ') but no window showed up — check computer_windows.')
-      last = { pid, windowId: win.window_id ?? win.windowId, title: win.title ?? '', app: appName }
-      return await captureWindow(last, { summary: 'Launched "' + appName + '" (pid ' + pid + ', background — foreground untouched).' })
+      if (target !== null) {
+        last = target
+        const shot = await shotFor(target, { restoreMinimized: true, signal: exec.signal, summary: 'Reused the window of the already-running "' + appName + '" (pid ' + target.pid + ') — no new instance was started.' })
+        return { ...shot, summary: shot.summary + ' Nothing was relaunched.' }
+      }
+
+      // 2) No window found. Before launching anything, ask the app inventory
+      //    whether the app is ALREADY running: if it is, route through its own
+      //    launcher so the existing instance is activated instead of a second
+      //    one being started. This is the safety net for when window
+      //    enumeration is unavailable in this process (measured: the driver's
+      //    list_windows can report zero windows for hours in a long-lived host,
+      //    which is exactly how reopening a chat app turned into a re-login).
+      const entry = await findInstalledApp(appName)
+      if (entry !== null && entry.running === true) {
+        const activate = entry.kind === 'uwp'
+          ? await launchSelectorFor(appName)
+          : (typeof entry.launch_path === 'string' && entry.launch_path !== '' ? { launch_path: entry.launch_path } : (typeof entry.bundle_id === 'string' && entry.bundle_id !== '' ? { path: entry.bundle_id } : null))
+        if (activate !== null) {
+          await call('launch_app', { ...activate, start_minimized: true }).catch(() => null)
+          for (let waited = 0; waited < 6000; waited += 600) {
+            await sleep(600, exec.signal)
+            const t = await windowFor(appName)
+            if (t !== null) {
+              last = t
+              return await shotFor(last, { restoreMinimized: true, signal: exec.signal, summary: 'Activated the already-running "' + appName + '" through its own launcher (pid ' + t.pid + ') — no second instance.' })
+            }
+          }
+        }
+        return await captureDesktop('"' + appName + '" is already running (pid ' + entry.pid + ') and was NOT started again — but no window could be located for it in this process, so there is nothing to click. Ask the user to open it, or restart dsh to rebuild the driver\'s window enumeration.')
+      }
+
+      // 3) Not running: launch it (aumid for Store apps, shortcut commandline
+      //    for desktop apps — see launchSelectorFor).
+      const launched = await launchAndSettle(await launchSelectorFor(appName), settle, exec.signal)
+      if (launched.target !== null) {
+        last = launched.target
+        return await shotFor(last, { restoreMinimized: true, signal: exec.signal, summary: 'Launched "' + appName + '" (pid ' + last.pid + ', background — foreground untouched).' })
+      }
+
+      // 4) Launch produced no window. It may still be starting (slow packaged
+      //    apps take ~10 s) — give it one more patient look before giving up.
+      let late = await windowFor(appName)
+      for (let waited = 0; late === null && waited < 6000; waited += 600) {
+        await sleep(600, exec.signal)
+        late = await windowFor(appName)
+      }
+      if (late !== null) {
+        last = late
+        return await shotFor(last, { restoreMinimized: true, signal: exec.signal, summary: 'Launched "' + appName + '" (slow start; pid ' + late.pid + ').' })
+      }
+      const why = launched.died === true
+        ? 'its process exited immediately — the app did NOT start (check the app name, or launch it by path)'
+        : 'no window appeared'
+      return await captureDesktop('Tried to open "' + appName + '" but ' + why + '. Nothing to show; check computer_windows, or ask the user to open it.')
     },
   })
 
@@ -934,12 +1188,23 @@ export function apply(ctx, config) {
       for (const step of compiled) {
         if (step.kind === 'wait') { await sleep(step.ms, exec.signal); continue }
         if (step.kind === 'open') {
-          const r = await call('launch_app', { name: step.name })
+          // Same rule as computer_open: if a window for that app already exists,
+          // adopt it and never launch a second instance.
+          let t = await windowFor(step.name)
+          if (t !== null) {
+            last = t
+            view = 'window'
+            // Only un-minimize; the single final capture at the end covers it.
+            const w = structured(await raw('list_windows', { pid: t.pid }))
+            const me = (w.windows ?? []).find((x) => (x.window_id ?? x.windowId) === t.windowId)
+            if (me !== undefined && me.minimized === true && restoreCfg) await restoreWindow(t.pid, t.windowId)
+            continue
+          }
+          const r = await call('launch_app', await launchSelectorFor(step.name))
           const sc = structured(r)
           await sleep(1200, exec.signal)
-          const w = structured(await raw('list_windows', { pid: sc.pid }))
-          const win = (w.windows ?? [])[0]
-          if (win) { last = { pid: sc.pid, windowId: win.window_id ?? win.windowId, title: win.title ?? '', app: step.name }; view = 'window' }
+          t = await windowFor(step.name, sc.pid)
+          if (t !== null) { last = t; view = 'window' }
           continue
         }
         if (!last) throw new Error('sequence step needs a window target (pass app= or open: first): ' + step.kind)
@@ -956,7 +1221,7 @@ export function apply(ctx, config) {
       }
       await sleep(settleMs, exec.signal)
       const summary = 'Ran ' + a.steps.length + ' steps: ' + a.steps.join(' → ').slice(0, 300)
-      return view === 'window' ? await captureWindow(last, { tree: false, summary }) : await captureDesktop(summary)
+      return view === 'window' ? await shotFor(last, { tree: false, summary }) : await captureDesktop(summary)
     },
   })
 
@@ -1038,7 +1303,7 @@ export function apply(ctx, config) {
       const s = Number(a.seconds)
       if (!isFinite(s) || s < 0.1 || s > 15) throw new Error('seconds must be 0.1-15')
       await sleep(Math.round(s * 1000), exec.signal)
-      return last ? await captureWindow(last, { tree: false, summary: 'Waited ' + s + 's.' }) : await captureDesktop('Waited ' + s + 's.')
+      return last ? await shotFor(last, { tree: false, summary: 'Waited ' + s + 's.' }) : await captureDesktop('Waited ' + s + 's.')
     },
   })
 
@@ -1053,7 +1318,7 @@ export function apply(ctx, config) {
     return { kind: 'ask', reason: '允许 computer-use 操作应用？一次批准覆盖同一会话的后续动作（askPolicy: always 可改为每次一询）；默认后台注入——不移动你的鼠标、不抢焦点，仅个别拒收后台输入的应用会短暂前置。首个动作: ' + exec.name + '。' }
   })
 
-  ctx.logger.info('computer-use v2.2: cua-driver backend (session "' + SESSION_LABEL + '"); ' + MUTATING.size + ' mutating tools gated; askPolicy=' + askPolicy + '; telemetry=' + telemetry)
+  ctx.logger.info('computer-use v2.3: cua-driver backend (session "' + SESSION_LABEL + '"); ' + MUTATING.size + ' mutating tools gated; askPolicy=' + askPolicy + '; telemetry=' + telemetry + '; restoreExisting=' + restoreCfg)
 
   // Best-effort: push the model-frame cap into the driver for window captures
   // (the driver resizes window screenshots AND keeps x,y/zoom coordinates

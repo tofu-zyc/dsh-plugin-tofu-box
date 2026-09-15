@@ -10,6 +10,9 @@
 | `session-probe.mjs` | 证明根因②：隐式会话 idle TTL、`session_ended` 后普通调用永不复活、`start_session` 幂等复活、各工具的 `session` 参数支持面 |
 | `verify-v22.mjs` | v2.2 修复的非破坏性回归：DPI 自举、命名会话、全主屏截图、无降级警告（**锁屏态也能跑**） |
 | `lock-check.mjs` | 抓一张全屏 PNG 判断桌面是否锁定（跑带输入的自测前先看一眼） |
+| `launch-reuse.mjs` | 证明驱动 `launch_app` **不复用已有实例**：对同一 app 连调两次，返回两个不同 pid（"打开已登录应用却要求重新登录"的根因） |
+| `launch-selector.mjs` | 三种启动方式对质：按 `name` / 按 `launch_path` / 按 `aumid`，各自返回什么 pid、进程是否存活、窗口是否出现（v2.3 选启动方式的依据） |
+| `enumwindows.mjs` | 用 koffi 直接问 user32：本进程能枚举多少窗口、在哪个 window station / desktop 上（判断"窗口枚举瞎掉"是环境还是进程） |
 
 运行方式：`node tools/probe/<script>.mjs`（工作区根目录）。生成的 `out*/`、
 `upstream/`（下载的官方文档/源码副本）与 `*.png` 不入库。
