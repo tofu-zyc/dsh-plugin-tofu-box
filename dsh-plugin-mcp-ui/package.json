@@ -1,0 +1,39 @@
+{
+  "name": "dsh-plugin-mcp-ui",
+  "version": "1.0.0",
+  "license": "MIT",
+  "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "mcp", "settings", "ui"],
+  "publishConfig": { "registry": "https://registry.npmjs.org" },
+  "repository": { "type": "git", "url": "git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git", "directory": "dsh-plugin-mcp-ui" },
+  "bugs": { "url": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/issues" },
+  "homepage": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/tree/main/dsh-plugin-mcp-ui",
+  "description": "在 Web 设置页管理 MCP 服务器：增删改查 stdio / streamable-http server，写入 profile patch 标记块并热生效。",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.6-alpha.1",
+    "@deepseek-ai/schemastery": "^3.18.2"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "files": [
+    "client.js",
+    "index.js",
+    "cordis.patch.yml",
+    "README.md"
+  ]
+}
