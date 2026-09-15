@@ -37,6 +37,16 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process'
+// spawn(…, { shell: true }) is required on Windows to run dsh.cmd. Silence its
+// DEP0190 warning: node's default printer is itself a 'warning' listener
+// registered at bootstrap, so it must be removed before re-adding a filter
+// (NODE_NO_WARNINGS alone only takes effect at bootstrap; keep it for children).
+process.env.NODE_NO_WARNINGS = '1'
+process.removeAllListeners('warning')
+process.on('warning', (w) => {
+  if (w.name === 'DeprecationWarning' && w.code === 'DEP0190') return
+  console.warn(`${w.name} ${w.message}`)
+})
 import { createInterface } from 'node:readline'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -143,10 +153,14 @@ function guessFromStack(text) {
 /** Boot attempt. Resolves {ok, output}; ok = process stayed up for windowMs. */
 function bootOnce(extraPatch, windowMs) {
   return new Promise((resolve) => {
-    const argv = ['--profile', profile]
+    // dsh 0.1.5+ CLI: `web` is a subcommand alias of `--profile web` and it
+    // REJECTS a parent --profile ("takes none of parent --profile ...").
+    // So: web profile → `dsh web [flags]`, custom profile → `dsh --profile <p> [flags]`
+    // with no `web` token (the profile's composition picks the app).
+    const argv = profile === 'web' ? ['web'] : ['--profile', profile]
     if (extraPatch) argv.push('--patch', extraPatch)
-    argv.push('web', ...(flags.appArgs || []))
-    const child = spawn(dshBin, argv, { shell: true })
+    argv.push(...(flags.appArgs || []))
+    const child = spawn(dshBin, argv, { shell: true, env: { ...process.env, NODE_NO_WARNINGS: '1' } })
     let output = ''
     let settled = false
     const finish = (ok) => {
@@ -172,6 +186,9 @@ function bootOnce(extraPatch, windowMs) {
 }
 
 const addrClash = (output) => /EADDRINUSE|already in use|address already/i.test(output)
+// The dsh CLI rejected our own argv shape (doctor vs. dsh version mismatch) —
+// never report that as a plugin problem.
+const cliShapeError = (output) => /takes none of|unknown (?:option|command)|expected an argument|too many arguments/i.test(output)
 
 function tryUpdate(name) {
   const r = spawnSync(dshBin, ['plugin', '--profile', profile, 'update', name], { encoding: 'utf8', shell: true, stdio: 'inherit' })
@@ -201,6 +218,11 @@ async function bisectCulprits(boot) {
     if (addrClash(r.output)) {
       console.error('端口被占用（可能已有一个 dsh 在跑）。用 -- <dsh web 的参数...> 传个别的端口再试，例如 -- --port 13080')
       process.exit(3)
+    }
+    if (cliShapeError(r.output)) {
+      console.error('dsh 拒绝了 doctor 的探测参数（doctor 与本机 dsh CLI 的参数形式不匹配）。原始报错：\n')
+      console.error(r.output.slice(-2000))
+      process.exit(7)
     }
     return r
   }
@@ -269,6 +291,11 @@ async function main() {
     if (addrClash(boot.output)) {
       console.error('端口被占用（可能已有一个 dsh 在跑）。用 -- <dsh web 的参数...> 传个别的端口再试，例如 -- --port 13080')
       process.exit(3)
+    }
+    if (cliShapeError(boot.output)) {
+      console.error('dsh 拒绝了 doctor 的启动参数（doctor 与本机 dsh CLI 的参数形式不匹配）。原始报错：\n')
+      console.error(boot.output.slice(-2000))
+      process.exit(7)
     }
 
     let names = parseFailures(boot.output)

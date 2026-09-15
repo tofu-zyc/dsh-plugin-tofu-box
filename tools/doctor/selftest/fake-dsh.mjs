@@ -35,6 +35,23 @@ const disabledIds = (() => {
   } catch { return new Set() }
 })()
 
+// Mirror the real dsh 0.1.5+ guard: the `web` subcommand REJECTS a parent
+// --profile. Without this, the selftest cannot catch argv-shape regressions
+// in doctor's own boot invocation (a bare `web` after `--profile <p>` must fail).
+let sawParentProfile = false
+for (let i = 0; i < argv.length; i++) {
+  const t = argv[i]
+  if (t === '--profile' || t === '--patch') {
+    if (t === '--profile') sawParentProfile = true
+    i++ // consume the option's value
+    continue
+  }
+  if (t === 'web' && argv[0] !== 'plugin' && !argv.includes('--dump-config') && sawParentProfile) {
+    console.error('error: web takes none of parent --profile, --from-default-profile, --patch, --dump-config, or --dump-default-config')
+    process.exit(1)
+  }
+}
+
 if (argv.includes('--dump-config')) {
   console.log(`# == bad-bundle
 - id: bad
