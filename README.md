@@ -31,6 +31,27 @@ dsh plugin --profile web add \
 
 装完重启 dsh 就能用。注册配置打进包里了（`dsh.bundle.patch`），不需要动 cordis 文件。卸载把 `add` 换成 `remove`。
 
+### 开发本仓库时：改成从本地安装
+
+改代码要"改完就能调试"，就别让 profile 依赖 GitHub 的 tarball 了——用 `link:` 指向本仓库，profile 里的 `node_modules/dsh-plugin-*` 会变成指到工作区的 junction，**不再有"装了一份拷贝"的问题**：
+
+```sh
+dsh plugin --profile web add \
+  "link:D:\program\dsh-plugins\dsh-plugin-computer-use" \
+  "link:D:\program\dsh-plugins\dsh-plugin-model-search" \
+  "link:D:\program\dsh-plugins\dsh-plugin-model-tuning" \
+  "link:D:\program\dsh-plugins\dsh-plugin-read-image-preview" \
+  "link:D:\program\dsh-plugins\dsh-plugin-mcp-ui"
+```
+
+要点：
+
+- **必须是绝对路径**。`dsh plugin --profile X add <args>` 只是转发给 profile 目录里的 pnpm（cwd = profile），相对路径会被锚定成 profile 内部的路径（`dsh` 会把 `./x` 按你的当前目录改写，但绝对路径最省心）。
+- **改完代码仍需重启 dsh**：插件是在进程启动时 `apply()` 一次的，链接省掉的是"拷贝"，不是"重载"。
+- **改结构（`dsh.bundle`、`package.json`）需要重跑一次上面的 `add`**：bundles 列表是按解析结果对账的。
+- 想回到发布版：把 `link:` 换成 `github:tofu-zyc/dsh-plugin-tofu-box#path:<插件>` 再 `add` 一次。
+- 需要脱离 `computer_*` 工具直接验证驱动行为时，用 `tools/probe/` 里的对质脚本（诊断用），别拿脚本去替模型操作电脑。
+
 上表的版本区间为实测范围，未标注下限的插件不保证能在更早版本上运行。dsh 版本更新频繁，可能影响稳定性。并且插件均由 AI 完成，肯定会有很多潜在 bug。
 
 升级 dsh 后起不来？多数是某个插件在新版本下坏了，而 dsh 默认一个插件崩就整个不启动。仓库自带一个启动急救工具（clone 本仓库后运行）：
