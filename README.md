@@ -29,7 +29,15 @@ dsh plugin --profile web add \
 
 装完重启 dsh 就能用。注册配置打进包里了（`dsh.bundle.patch`），不需要动 cordis 文件。卸载把 `add` 换成 `remove`。
 
-目前基于 dsh 0.1.5-rc 开发，dsh 版本更新概率影响稳定性。并且插件均由 AI 完成，肯定会有很多潜在 bug。
+已在 dsh 0.1.5-rc 和 0.1.6-alpha 两个版本上实测。dsh 版本更新频繁，可能影响稳定性。并且插件均由 AI 完成，肯定会有很多潜在 bug。
+
+升级 dsh 后起不来？多数是某个插件在新版本下坏了，而 dsh 默认一个插件崩就整个不启动。仓库自带一个启动急救工具（clone 本仓库后运行）：
+
+```sh
+node tools/doctor/doctor.mjs --profile web
+```
+
+它会自动定位是哪个插件的问题（报错没点名也能靠二分测试查出来），先尝试 `dsh plugin update` 修复，修不好会问你要不要先禁用该插件让 dsh 跑起来，事后 `enable` 一键恢复。
 
 未来可能新增更多插件。
 
@@ -58,6 +66,14 @@ dsh plugin --profile web add \
 
 Restart dsh after installing. Registration is bundled in each package (`dsh.bundle.patch`), nothing to wire up. To remove: `dsh plugin --profile web remove <name>`.
 
-Built against dsh 0.1.5-rc. dsh updates frequently, which may affect stability.
+Tested on both dsh 0.1.5-rc and 0.1.6-alpha. dsh updates frequently, which may affect stability. All the plugins are completed by AI, so there will certainly be many potential bugs.
 
-More plugins may be added in the future. All the plugins are completed by AI, so there will certainly be many potential bugs.
+dsh won't boot after an upgrade? Usually one plugin broke under the new version, and dsh takes the whole process down with it. This repo ships a boot-recovery tool (clone it first):
+
+```sh
+node tools/doctor/doctor.mjs --profile web
+```
+
+It figures out which plugin is at fault (via bisection, even when the error names nobody), tries `dsh plugin update` first, and if that fails asks whether to disable the plugin so dsh can start. Re-enable anytime with `enable <name>`.
+
+More plugins may be added in the future.
