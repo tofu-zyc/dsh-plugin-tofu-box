@@ -231,6 +231,9 @@ export function apply(ctx, config) {
   // May computer_open / window captures bring an ALREADY-RUNNING app's
   // minimized window back to the foreground? Off = never touch the foreground.
   const restoreCfg = !(config && config.restore === false)
+  // May computer_open walk an ALREADY-RUNNING app through its own launcher when
+  // that app exposes no window (tray state)? Off by default — see computer_open.
+  const activateRunningCfg = !!(config && config.activateRunning === true)
   if (!telemetry) process.env.CUA_DRIVER_RS_TELEMETRY_ENABLED = '0'
 
   // ── DPI bootstrap (Windows) ────────────────────────────────────────────────
@@ -500,14 +503,17 @@ export function apply(ctx, config) {
     if (scored.length === 0) return null
     scored.sort((a, b) => (b.score - a.score) || (b.z - a.z))
     const win = scored[0].x
-    return { pid: win.pid, windowId: win.window_id ?? win.windowId, title: win.title ?? '', app: want }
+    return { pid: win.pid, windowId: win.window_id ?? win.windowId, title: win.title ?? '', app: want, minimized: win.minimized === true }
   }
 
   /** windowsOf(pid), falling back to a name match (see findAppWindow). */
   const windowFor = async (want, pid) => {
     if (pid !== undefined && pid !== null && Number(pid) > 0) {
       const mine = await windowsOf(Math.round(Number(pid)))
-      if (mine.length > 0) return { pid: Math.round(Number(pid)), windowId: mine[0].window_id ?? mine[0].windowId, title: mine[0].title ?? '', app: want }
+      if (mine.length > 0) {
+        const w = mine[0]
+        return { pid: Math.round(Number(pid)), windowId: w.window_id ?? w.windowId, title: w.title ?? '', app: want, minimized: w.minimized === true }
+      }
     }
     return await findAppWindow(want, pid)
   }
@@ -525,7 +531,7 @@ export function apply(ctx, config) {
     const pid = sc.pid
     const first = (sc.windows ?? [])[0]
     if (first !== undefined) {
-      return { pid, target: { pid: first.pid ?? pid, windowId: first.window_id ?? first.windowId, title: first.title ?? '', app: want } }
+      return { pid, target: { pid: first.pid ?? pid, windowId: first.window_id ?? first.windowId, title: first.title ?? '', app: want, minimized: first.minimized === true } }
     }
     // A packaged-app launch (launch_path/aumid) reports pid 0 and no windows —
     // measured behaviour — so a name lookup must come first instead of burning
@@ -635,9 +641,30 @@ export function apply(ctx, config) {
       await sleep(settleMs, opts && opts.signal)
       r = await grab()
     }
-    const sc = structured(r)
-    const png = Buffer.from((r.images[0] && r.images[0].dataBase64) ?? '', 'base64')
-    if (png.length === 0) throw new Error('window capture returned no image')
+    let sc = structured(r)
+    let png = Buffer.from((r.images[0] && r.images[0].dataBase64) ?? '', 'base64')
+    let didRestore = restored !== ''
+    // A minimized window can fail in two different ways: the driver either
+    // throws ("cannot capture minimized window") or hands back an EMPTY image
+    // (measured on a window launched minimized). Handle the empty case here —
+    // without it, "open a not-yet-running app" dies on a bare
+    // "window capture returned no image".
+    if (png.length === 0 && opts && opts.restoreMinimized === true && !didRestore) {
+      const known = opts.windowHint
+      const looksMinimized = known === undefined ? true : known.minimized === true
+      if (looksMinimized) {
+        const res = await restoreWindow(t.pid, t.windowId)
+        if (res.ok) {
+          didRestore = true
+          restored = ' [was minimized — restored via bring_to_front (' + res.detail + '); the no-foreground contract is broken for this call]'
+          await sleep(settleMs, opts && opts.signal)
+          const r2 = await grab()
+          const png2 = Buffer.from((r2.images[0] && r2.images[0].dataBase64) ?? '', 'base64')
+          if (png2.length > 0) { r = r2; png = png2; sc = structured(r2) }
+        }
+      }
+    }
+    if (png.length === 0) throw new Error('window capture returned no image' + (didRestore ? ' (even after restoring the minimized window)' : ''))
     const els = sc.elements ?? []
     if (els.length > 0) last = { ...t, tokensByIndex: Object.fromEntries(els.map((e) => [e.element_index, e.element_token])) }
     return {
@@ -1033,10 +1060,11 @@ export function apply(ctx, config) {
 
   register({
     name: 'computer_open',
-    description: 'Open an app by name WITHOUT ever starting a second instance of something that is already running (running app → reuse its window; minimized → restore it; only a truly absent app is launched). Returns that window captured, with the element tree. PREFERRED over Start-menu clicking. On Windows, genuinely new launches activate Store-packaged apps (Notepad/Calculator/Settings) correctly via AUMID. Launching is always background; restoring a minimized window is the one path that takes the foreground.',
+    description: 'Open an app by name WITHOUT ever starting a second instance of something that is already running: an existing window is reused (a minimized one is restored), and an app that is ALREADY RUNNING but exposes no window (tray state) is reported instead of relaunched —  ask the user to open it, or pass activate_running=true to let its own launcher try. Only a truly absent app is launched. Returns that window captured, with the element tree. PREFERRED over Start-menu clicking. Launching is always background; restoring a minimized window is the one path that takes the foreground.',
     parameters: {
       name: { type: 'string', required: true, description: 'App name as the OS knows it, e.g. "notepad", "微信", "Chrome". Max 100 chars.' },
       settle_seconds: { type: 'number', description: 'Extra wait for a newly launched window to materialize, 0-15. Default 2.' },
+      activate_running: { type: 'boolean', description: 'true = when the app is already running but has no window (tray-only), let its own launcher try to activate it. Default false: report it and let the user open it from the tray, because re-entering a chat app\'s startup path can drop its stored session.' },
     },
     output: SHOT_RENDER,
     timeoutMs: 45000,
@@ -1044,6 +1072,7 @@ export function apply(ctx, config) {
       const appName = typeof a.name === 'string' ? a.name.trim() : ''
       if (appName === '' || appName.length > 100) throw new Error('name must be 1-100 chars')
       const settle = a.settle_seconds === undefined ? 2000 : Math.min(15000, Math.max(0, Number(a.settle_seconds) * 1000))
+      const mayActivate = a.activate_running === true || activateRunningCfg
       granting(exec)
 
       // 1) Is it already open? Ask the WINDOW list — the official guidance is to
@@ -1062,30 +1091,31 @@ export function apply(ctx, config) {
         return { ...shot, summary: shot.summary + ' Nothing was relaunched.' }
       }
 
-      // 2) No window found. Before launching anything, ask the app inventory
-      //    whether the app is ALREADY running: if it is, route through its own
-      //    launcher so the existing instance is activated instead of a second
-      //    one being started. This is the safety net for when window
-      //    enumeration is unavailable in this process (measured: the driver's
-      //    list_windows can report zero windows for hours in a long-lived host,
-      //    which is exactly how reopening a chat app turned into a re-login).
+      // 2) No window at all. If the app is nonetheless RUNNING, do not walk it
+      //    through its launcher by default: "process alive, zero windows" is the
+      //    tray state for chat apps (WeChat / WeCom / QQ / DingTalk), and
+      //    re-entering their startup path can drop a stored session and demand a
+      //    fresh QR scan. Hand the decision to the user instead — the tray icon
+      //    restores the real window without starting anything.
       const entry = await findInstalledApp(appName)
       if (entry !== null && entry.running === true) {
-        const activate = entry.kind === 'uwp'
-          ? await launchSelectorFor(appName)
-          : (typeof entry.launch_path === 'string' && entry.launch_path !== '' ? { launch_path: entry.launch_path } : (typeof entry.bundle_id === 'string' && entry.bundle_id !== '' ? { path: entry.bundle_id } : null))
-        if (activate !== null) {
-          await call('launch_app', { ...activate, start_minimized: true }).catch(() => null)
-          for (let waited = 0; waited < 6000; waited += 600) {
-            await sleep(600, exec.signal)
-            const t = await windowFor(appName)
-            if (t !== null) {
-              last = t
-              return await shotFor(last, { restoreMinimized: true, signal: exec.signal, summary: 'Activated the already-running "' + appName + '" through its own launcher (pid ' + t.pid + ') — no second instance.' })
+        if (mayActivate) {
+          const activate = entry.kind === 'uwp'
+            ? await launchSelectorFor(appName)
+            : (typeof entry.launch_path === 'string' && entry.launch_path !== '' ? { launch_path: entry.launch_path } : (typeof entry.bundle_id === 'string' && entry.bundle_id !== '' ? { path: entry.bundle_id } : null))
+          if (activate !== null) {
+            await call('launch_app', { ...activate, start_minimized: true }).catch(() => null)
+            for (let waited = 0; waited < 6000; waited += 600) {
+              await sleep(600, exec.signal)
+              const t = await windowFor(appName)
+              if (t !== null) {
+                last = t
+                return await shotFor(last, { restoreMinimized: true, signal: exec.signal, summary: 'Activated the already-running "' + appName + '" through its own launcher (pid ' + t.pid + ') — no second instance.' })
+              }
             }
           }
         }
-        return await captureDesktop('"' + appName + '" is already running (pid ' + entry.pid + ') and was NOT started again — but no window could be located for it in this process, so there is nothing to click. Ask the user to open it, or restart dsh to rebuild the driver\'s window enumeration.')
+        return await captureDesktop('"' + appName + '" is ALREADY RUNNING (pid ' + entry.pid + ') but exposes no window — this is usually its tray state, so nothing was started. Ask the user to open it from the tray (clicking the tray icon restores the real window and keeps the session), then retry. If the app truly has no window and no tray icon, retry with activate_running=true to let its launcher try.')
       }
 
       // 3) Not running: launch it (aumid for Store apps, shortcut commandline
@@ -1093,7 +1123,7 @@ export function apply(ctx, config) {
       const launched = await launchAndSettle(await launchSelectorFor(appName), settle, exec.signal)
       if (launched.target !== null) {
         last = launched.target
-        return await shotFor(last, { restoreMinimized: true, signal: exec.signal, summary: 'Launched "' + appName + '" (pid ' + last.pid + ', background — foreground untouched).' })
+        return await shotFor(last, { restoreMinimized: true, windowHint: last, signal: exec.signal, summary: 'Launched "' + appName + '" (pid ' + last.pid + ', background — foreground untouched).' })
       }
 
       // 4) Launch produced no window. It may still be starting (slow packaged
@@ -1105,7 +1135,7 @@ export function apply(ctx, config) {
       }
       if (late !== null) {
         last = late
-        return await shotFor(last, { restoreMinimized: true, signal: exec.signal, summary: 'Launched "' + appName + '" (slow start; pid ' + late.pid + ').' })
+        return await shotFor(last, { restoreMinimized: true, windowHint: last, signal: exec.signal, summary: 'Launched "' + appName + '" (slow start; pid ' + late.pid + ').' })
       }
       const why = launched.died === true
         ? 'its process exited immediately — the app did NOT start (check the app name, or launch it by path)'

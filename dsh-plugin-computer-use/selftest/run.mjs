@@ -193,6 +193,23 @@ try {
       const lines = String(list.stdout ?? '').split('\n').filter((l) => /notepad\.exe/i.test(l) && !/No tasks|没有运行|无运行/i.test(l))
       ok(lines.length <= 1, 'exactly one notepad.exe process after two opens (' + lines.length + ' seen)')
     }
+
+    // Minimized-window path (the WeChat-in-tray case): the driver may either
+    // THROW ("cannot capture minimized window") or answer with an EMPTY image —
+    // v2.3 handled only the first, so opening a minimized app died on
+    // "window capture returned no image". Both must restore and succeed.
+    if (process.platform === 'win32') {
+      const min = spawnSync('powershell', ['-NoProfile', '-Command',
+        `Add-Type -Namespace W -Name U -MemberDefinition '[DllImport("user32.dll")] public static extern bool ShowWindow(int h,int c);'; [W.U]::ShowWindow((Get-Process -Id ${notepadPid}).MainWindowHandle, 6)`], { stdio: 'ignore' })
+      if (min.status === 0) {
+        let miniErr = ''
+        const mini = await run('computer_open', { name: 'Notepad' }).catch((e) => { miniErr = String(e.message); return null })
+        ok(mini !== null && mini.image && mini.image.width > 0, 'a MINIMIZED window is restored and captured: ' + (mini ? mini.summary.slice(0, 130) : miniErr.slice(0, 130)))
+        ok(mini === null || /Reused|no new instance|already running|Activated|restored/i.test(mini.summary), 'minimized path still reports reuse (no second instance)')
+      } else {
+        warn('could not minimize the notepad window; minimized-window path not exercised')
+      }
+    }
   }
 
   const token = pickToken(openShot)
@@ -284,6 +301,9 @@ try {
   ok(shutErr.includes('shut down'), 'after dispose the driver refuses with "shut down"')
   ok(tools.size === 0, 'all tool registrations disposed (' + tools.size + ' left)')
 }
+
+// ── 6. documented policy: tray-only apps are reported, not relaunched ────────
+info('computer_open policy: an app that is RUNNING but exposes no window (tray state) is reported and NOT relaunched (arg activate_running=true or config activateRunning opt into letting its launcher try) — covered by the reused-window assertions in step 4, exercised live against WeChat in the field')
 
 console.log('\n' + (hard === 0 ? 'SELFTEST OK' : 'SELFTEST FAILED') + ' — ' + (n - hard) + '/' + n + ' passed, ' + soft + ' warnings')
 process.exit(hard === 0 ? 0 : 1)

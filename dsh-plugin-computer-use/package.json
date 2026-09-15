@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-computer-use",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "license": "MIT",
   "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "computer-use", "desktop", "automation", "screenshot", "input"],
   "publishConfig": { "registry": "https://registry.npmjs.org" },

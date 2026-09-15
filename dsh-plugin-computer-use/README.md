@@ -2,17 +2,17 @@
 
 让模型**看见窗口和桌面并操作鼠标键盘**——v2 起整个后端换装 [Cua Driver](https://cua.ai) 的**进程内 SDK**（`@trycua/cua-driver`，Rust 原生运行时随 npm 包按平台分发，直接加载进 dsh 宿主进程）：**无守护进程、无 MCP、无 PowerShell**，装上即用，跨 Windows / macOS / Linux。
 
-## v2.3：打开已登录的应用，不再逼你重新登录
+## v2.3：打开应用不再重复启动，也不会替你把登录态弄丢
 
-`computer_open` 原来无条件调驱动的 `launch_app`，而它在 Windows 上**只会 `ShellExecuteEx` 创建新进程**——上游文档原文：`creates_new_application_instance` "**no-op on Windows (ShellExecuteEx always creates a new process)**"。实测对同一应用连调两次，返回两个不同 pid，没有任何复用。于是"打开微信"= 又拉起一个没有登录态的新实例 = **要你重新登录**，尽管你的微信明明登录着、窗口只是缩在托盘里。
+`computer_open` 原来无条件调驱动的 `launch_app`，而它在 Windows 上**只会 `ShellExecuteEx` 创建新进程**——上游文档原文：`creates_new_application_instance` "**no-op on Windows (ShellExecuteEx always creates a new process)**"。实测对同一应用连调两次，返回两个不同 pid，没有任何复用。于是"打开微信"= 又拉起一个没有登录态的新实例 = **要你重新登录**，尽管你的微信明明开着、窗口只是缩在托盘里。
 
 v2.3 把"打开"改成三步，且**只有第三步才真的启动**：
 
 1. **先在窗口表里找已有窗口**（官方文档明说窗口级判断要用 `list_windows` 而非 `list_apps`）：找到就**复用它**，最小化的先用驱动的 `bring_to_front` 唤醒（上游 `capture.rs` 自己就是这么建议的），**绝不启动第二个实例**；
-2. 窗口表找不到时，用 `list_apps` 的运行标记判定"它其实在跑"——在跑就**走应用自己的启动入口**去激活已有实例（UWP 用 `aumid`，桌面应用用快捷方式里的完整命令行），而不是盲启动；
+2. **进程在跑、但一个窗口都没有**（聊天类应用的典型托盘态）→ **只报告，不代它启动**，让你从托盘图标点开：替它重走一遍启动流程，可能在它自己恢复不干净时把本地登录态弄丢，代价就是重新扫码（实测踩过：微信点了"进入微信"直接跳扫码）。想让插件的启动入口去试，传 `activate_running=true`，或用行配置 `activateRunning: true`；
 3. 确认确实没在跑，才按应用的 `launch_path`/`aumid` 启动；并按日志区分"**启动即退出的假成功**"（驱动按名字启动时实测会发生）与"还没起来"，不再把死掉的启动报成成功。
 
-顺带两个稳定性修复：窗口捕获遇到 UIA 无响应会自动降级为纯截图（原来直接把驱动的报错丢给模型）；`computer_sequence` 的 `open:` 步骤遵循同一套复用规则。
+顺带两个稳定性修复：窗口捕获遇到 UIA 无响应会自动降级为纯截图；**最小化窗口有两种失败形态**（驱动报错 / 回空图像），两种都会先 `bring_to_front` 唤醒再截（原来只处理了报错那种，实测"打开一个启动即最小化的应用"会直接失败）；`computer_sequence` 的 `open:` 步骤遵循同一套复用规则。
 
 ## v2.2：修好"截屏截不明白"的两个根因
 
@@ -70,6 +70,7 @@ v2.3 把"打开"改成三步，且**只有第三步才真的启动**：
     telemetry: false           # Cua Driver 运行时的无内容产品遥测，默认关
     dpiAware: true             # Windows：驱动启动前把宿主进程切到 Per-Monitor-V2 DPI 感知
     restore: true              # 允许把已运行应用的最小化窗口唤醒到前台（false = 永不抢焦点）
+    activateRunning: false     # 应用在跑但没窗口（托盘态）时，是否让它的启动入口去激活（默认否，只报告）
 ```
 
 包内 `cordis.patch.yml` 经 `dsh.bundle.patch` 自 wiring，安装即注册这一行，不用手改 profile 配置。
