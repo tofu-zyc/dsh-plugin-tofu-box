@@ -1,15 +1,18 @@
 {
   "name": "dsh-plugin-computer-use",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "license": "MIT",
   "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "computer-use", "desktop", "automation", "screenshot", "input"],
   "publishConfig": { "registry": "https://registry.npmjs.org" },
   "repository": { "type": "git", "url": "git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git", "directory": "dsh-plugin-computer-use" },
   "bugs": { "url": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/issues" },
   "homepage": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/tree/main/dsh-plugin-computer-use",
-  "description": "computer-use：让模型看桌面并操作鼠标键盘。12 个工具（截图/缩放/光标/移动/点击/拖拽/滚动/输入/按键/启动应用/连续动作/等待），原子手势一次调用完成，默认把指针放回用户原位；写操作走原生 tools/pre-execute 审批。结果图由 dsh-plugin-read-image-preview 的通用图像卡渲染。",
+  "description": "computer-use v2：基于 Cua Driver 进程内 SDK 的跨平台桌面操作。13 个工具（截图/窗口列表/缩放/光标/移动/点击/拖拽/滚动/输入/按键/启动应用/连续动作/等待），默认后台注入不抢焦点，元素树+element_token 精确操作，失败自动升级前台投递。无需守护进程/MCP/PowerShell。写操作走原生 tools/pre-execute 审批。",
   "type": "module",
   "main": "index.js",
+  "dependencies": {
+    "@trycua/cua-driver": "^0.28.1"
+  },
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": ">=0.1.5-rc.1",
     "@deepseek-ai/schemastery": "^3.18.2"
@@ -29,7 +32,6 @@
   },
   "files": [
     "index.js",
-    "scripts/",
     "cordis.patch.yml",
     "README.md"
   ]
