@@ -1,0 +1,9 @@
+# dsh-plugin-read-image-preview 自 wiring（dsh.bundle.patch 机制）：安装即注册，
+# 无需在 profile 的 cordis.patch.yml 手动 insert。
+#
+# 两半同属一行：node half（index.js）在回环上注册取图路由，browser half
+# （client.js，dsh.client 声明）把 read_image 的展示位接管为常驻预览卡。
+- insert:
+    - id: read-image-preview
+      name: dsh-plugin-read-image-preview
+      inject: [webServer, fs]

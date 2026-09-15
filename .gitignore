@@ -1,0 +1,19 @@
+# 依赖与构建产物
+node_modules/
+dist/
+/.pnpm-store/
+*.tgz
+*.zip
+
+# 本地研发杂物（内部工具/笔记/实验素材，不进仓库）
+/prototype/
+/preview-test*.png
+/computer-use-research.md
+/UPGRADE-CHECK.md
+/check-compat.mjs
+/publish.ps1
+
+# 系统与编辑器
+.DS_Store
+*.log
+Thumbs.db

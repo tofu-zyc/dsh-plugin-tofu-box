@@ -1,0 +1,37 @@
+{
+  "name": "dsh-plugin-model-search",
+  "version": "1.1.1",
+  "license": "MIT",
+  "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "model", "search", "menu", "ui"],
+  "publishConfig": { "registry": "https://registry.npmjs.org" },
+  "repository": { "type": "git", "url": "git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git", "directory": "dsh-plugin-model-search" },
+  "bugs": { "url": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/issues" },
+  "homepage": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/tree/main/dsh-plugin-model-search",
+  "description": "给模型选择菜单（输入栏模型座位）加一个搜索框，按模型名 / 模型 ID / 描述 / provider 名称过滤。",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-model-selection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-api-remotes"
+      ]
+    }
+  },
+  "files": [
+    "client.js",
+    "index.js",
+    "cordis.patch.yml",
+    "README.md"
+  ]
+}

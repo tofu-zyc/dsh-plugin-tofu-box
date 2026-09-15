@@ -1,0 +1,17 @@
+# dsh-plugin-computer-use 自 wiring（dsh.bundle.patch 机制）：安装即注册，
+# 无需手改 profile 的 cordis.patch.yml。
+#
+# 只有一行 host 半区：注入 tools/shell/fs/attachments 四个已组合的服务，
+# 注册 12 个 computer_* 工具并在 tools/pre-execute 上挂审批 gate。
+# UI 归 dsh-plugin-read-image-preview 的通用图像卡（computer_* 键已在其
+# TOOL_LABELS 中注册）；本包不带 client 半区。
+#
+# 行 config 全部可省略：
+#   askPolicy: once-per-agent（默认，一次批准覆盖同 agent 后续动作）| always
+#   outDir:   截图暂存目录（默认 <tmp>/dsh-computer-use）
+#   keep:     暂存目录保留的 PNG 数（默认 30）
+#   maxDim / settleMs: 模型帧长边上限 / 动作后等待毫秒
+- insert:
+    - id: computer-use
+      name: dsh-plugin-computer-use
+      inject: [tools, shell, fs, attachments]

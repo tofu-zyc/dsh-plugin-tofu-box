@@ -1,0 +1,36 @@
+{
+  "name": "dsh-plugin-read-image-preview",
+  "version": "1.4.0",
+  "license": "MIT",
+  "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "image", "preview", "screenshot", "tool-card", "ui"],
+  "publishConfig": { "registry": "https://registry.npmjs.org" },
+  "repository": { "type": "git", "url": "git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git", "directory": "dsh-plugin-read-image-preview" },
+  "bugs": { "url": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/issues" },
+  "homepage": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/tree/main/dsh-plugin-read-image-preview",
+  "description": "通用工具图像卡片：read_image 走宿主文件预览；任何结果携带 image 附件的工具（如 computer-use 截图）自动渲染同款缩略图。常驻缩略图、像素尺寸与格式、Ctrl+滚轮缩放与拖动平移、复制路径。接入新图像工具只需加一行 key。",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-tool",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  },
+  "files": [
+    "client.js",
+    "index.js",
+    "cordis.patch.yml",
+    "README.md"
+  ]
+}

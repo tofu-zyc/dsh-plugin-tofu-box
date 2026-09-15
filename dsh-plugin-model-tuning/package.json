@@ -1,0 +1,37 @@
+{
+  "name": "dsh-plugin-model-tuning",
+  "version": "1.1.1",
+  "license": "MIT",
+  "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "model", "settings", "reasoning", "context"],
+  "publishConfig": { "registry": "https://registry.npmjs.org" },
+  "repository": { "type": "git", "url": "git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git", "directory": "dsh-plugin-model-tuning" },
+  "bugs": { "url": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/issues" },
+  "homepage": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/tree/main/dsh-plugin-model-tuning",
+  "description": "集中配置各模型的可选推理档位、上下文窗口与最大输出，支持搜索定位。",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-api-session-controller"
+      ]
+    }
+  },
+  "files": [
+    "client.js",
+    "index.js",
+    "cordis.patch.yml",
+    "README.md"
+  ]
+}
