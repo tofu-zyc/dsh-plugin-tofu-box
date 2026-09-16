@@ -17,6 +17,12 @@
  *
  * Adding a new image-bearing tool is one key in `TOOL_LABELS` — nothing else.
  *
+ * v1.4.1: both modes carry the picture's pixel size before the bytes arrive
+ * (resolve reply / attachment ref), so the img element gets width+height and
+ * the metadata bar its width up front. A late-loading picture then lands with
+ * zero layout delta — the fix for the chat's stick-to-bottom logic reading an
+ * image-driven reflow as a reader scroll and dropping auto-follow.
+ *
  * @module dsh-plugin-read-image-preview/client
  */
 
@@ -736,9 +742,13 @@ window.__ModuleLoader__.load({
       const mediaType = ok && typeof info.mediaType === 'string' ? info.mediaType : ''
       const format = mediaType === '' ? null : mediaType.replace('image/', '').toUpperCase()
       const aspect = pw !== null && ph !== null && ph > 0 ? pw / ph : null
-      const barWidth = geometry === null
+      // v1.4.1：图片未加载就按已知尺寸定死一切布局。晚到的图片在已滚走的区域
+      // 加载时不再撑高内容——那会让聊天流的吸底逻辑把浏览器自发的布局位移
+      // 误判成用户上滚，从而停止自动跟随最新记录。
+      const known = geometry !== null ? geometry : pw !== null && ph !== null && ph > 0 ? { w: pw, h: ph } : null
+      const barWidth = known === null
         ? null
-        : Math.max(320, Math.min(720, Math.round(160 * (geometry.w / geometry.h))))
+        : Math.max(320, Math.min(720, Math.round(160 * (known.w / known.h))))
 
       /** Size the metadata line to the picture and detect a transparent container. */
       const onImageLoad = (event) => {
@@ -797,6 +807,8 @@ window.__ModuleLoader__.load({
             className: 'dsh-imgvw-img',
             src,
             alt: shown,
+            width: pw === null ? undefined : pw,
+            height: ph === null ? undefined : ph,
             'data-checker': checker ? 'true' : 'false',
             onLoad: onImageLoad,
           }),
@@ -914,9 +926,11 @@ window.__ModuleLoader__.load({
         ? att.mediaType.slice('image/'.length).toUpperCase()
         : null
       const aspect = hasDims ? att.width / att.height : null
-      const barWidth = geometry === null
+      // v1.4.1：附件的像素尺寸在图片加载前就在引用上，布局提前定死，加载零位移。
+      const known = geometry !== null ? geometry : hasDims ? { w: att.width, h: att.height } : null
+      const barWidth = known === null
         ? null
-        : Math.max(320, Math.min(720, Math.round(160 * (geometry.w / geometry.h))))
+        : Math.max(320, Math.min(720, Math.round(160 * (known.w / known.h))))
       const noteParts = []
       if (props.spec.text !== '') noteParts.push(props.spec.text)
       if (extra > 0) noteParts.push('另有 ' + extra + ' 张未展开')
@@ -963,6 +977,8 @@ window.__ModuleLoader__.load({
             className: 'dsh-imgvw-img',
             src,
             alt: shown,
+            width: hasDims ? att.width : undefined,
+            height: hasDims ? att.height : undefined,
             'data-checker': checker ? 'true' : 'false',
             onLoad: onImageLoad,
           }),

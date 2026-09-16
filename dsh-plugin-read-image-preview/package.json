@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-read-image-preview",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "license": "MIT",
   "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "image", "preview", "screenshot", "tool-card", "ui"],
   "publishConfig": { "registry": "https://registry.npmjs.org" },
