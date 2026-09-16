@@ -27,6 +27,32 @@
  *   boot, passes explicitly on every call that accepts it, and revives with
  *   `start_session` + one retry whenever the driver reports `session_ended`.
  *
+ * v2.4 fixes what the session log of a real "greet a WeChat contact" run
+ * exposed — 50 idle minutes after host boot every window/app query silently
+ * answered "no windows matched" and the model fell back to pwsh + blind
+ * desktop coordinates:
+ *
+ * - **Queries carry the session label too.** `list_windows` / `list_apps` /
+ *   `launch_app` used to go untagged, hanging off the transport's implicit
+ *   session, which dies after 5 idle minutes — while the tagged action tools
+ *   kept self-healing. Now EVERY driver call except session lifecycle itself
+ *   is tagged, a stuck session escalates through end→start→retry, and one
+ *   that still won't come back triggers a full runtime rebuild (the racy
+ *   watchdog of 0.28.1 could wedge a transport for its whole lifetime; fixed
+ *   upstream in 0.28.2).
+ * - **Query errors surface.** An isError `list_windows` used to parse into an
+ *   empty table ("no windows matched"); it now throws the driver's own text.
+ * - **CJK/emoji typing goes through the clipboard.** Foreground SendInput
+ *   typing through an active IME corrupts non-ASCII text (measured: 这→！！,
+ *   👋→🙏); `computer_type` desktop= now pastes such text via the driver
+ *   clipboard and restores the user's clipboard afterwards.
+ * - **Elastic desktop coordinates.** x/y given in PHYSICAL desktop px (the
+ *   native size of a HiDPI capture) are mapped into the model frame instead
+ *   of bouncing with "outside the 1568x980 screenshot".
+ * - **`computer_screenshot save=path.png`** writes the capture to disk
+ *   (desktop captures at native resolution) and stages it on the clipboard,
+ *   so "send a screenshot into a chat" needs no pwsh detour.
+ *
  * The driver's native paradigm is window-centric and background-first, so the
  * tool surface speaks it now:
  *
@@ -214,6 +240,36 @@ export function cropRgba(img, x, y, w, h) {
   return { width: cw, height: chh, data: out }
 }
 
+/**
+ * Map desktop coordinates to driver desktop-space px. Pure — exported for the
+ * self-test. `frame` is { sw, sh, fw, fh }: physical screen size and the
+ * model-frame size it was downscaled to.
+ *
+ * Coordinates are expected in FRAME px (the screenshot the model sees), but
+ * ones given in PHYSICAL desktop px (the capture's native size — the model
+ * reads native-resolution features off HiDPI captures regularly) are mapped
+ * into the frame per-axis instead of bouncing the call: the roundtrip is
+ * exact, and "outside the 1568x980 screenshot" retries cost a full model
+ * round-trip for nothing. Genuinely out-of-bounds input still throws.
+ */
+export function deskMapXY(frame, x, y, label = 'coordinate') {
+  if (frame === null || typeof frame !== 'object') throw new Error('no desktop screenshot yet: call computer_screenshot first')
+  if (typeof x !== 'number' || !isFinite(x) || typeof y !== 'number' || !isFinite(y)) throw new Error(label + ' must be numbers')
+  if (x < 0 || y < 0) throw new Error(label + ' outside the ' + frame.fw + 'x' + frame.fh + ' screenshot')
+  let scaled = false
+  if (x > frame.fw) {
+    if (x > frame.sw) throw new Error(label + ' outside the ' + frame.fw + 'x' + frame.fh + ' screenshot (physical desktop is ' + frame.sw + 'x' + frame.sh + ')')
+    x = (x * frame.fw) / frame.sw
+    scaled = true
+  }
+  if (y > frame.fh) {
+    if (y > frame.sh) throw new Error(label + ' outside the ' + frame.fw + 'x' + frame.fh + ' screenshot (physical desktop is ' + frame.sw + 'x' + frame.sh + ')')
+    y = (y * frame.fh) / frame.sh
+    scaled = true
+  }
+  return { x: Math.round((x * frame.sw) / frame.fw), y: Math.round((y * frame.sh) / frame.fh), scaled }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Plugin body
 // ─────────────────────────────────────────────────────────────────────────────
@@ -294,17 +350,24 @@ export function apply(ctx, config) {
   // The implicit session the runtime creates for a transport is private and,
   // once it ends (5-minute idle TTL / explicit end), ordinary calls against it
   // fail forever: “this session has ended; call start_session explicitly”.
-  // A public label survives that: start_session revives it and is idempotent,
-  // so the plugin tags every session-capable call with it and self-heals on
-  // `session_ended`. (`session` is not sticky server-side — repeat it.)
+  // A public label survives that: start_session revives it and is idempotent.
+  // (`session` is not sticky server-side — repeat it.)
   const SESSION_LABEL = 'dsh-computer-use'
-  const SESSION_TOOLS = new Set(['get_desktop_state', 'get_window_state', 'click', 'double_click', 'right_click', 'drag', 'type_text', 'press_key', 'hotkey', 'scroll', 'set_value', 'move_cursor', 'get_cursor_position'])
+  // Every driver call is tagged with the label EXCEPT session lifecycle /
+  // transport introspection itself. The old whitelist left the queries
+  // (list_windows / list_apps / launch_app …) untagged: they hung off the
+  // transport's implicit session and were the exact calls that died after the
+  // idle TTL while the tagged action tools kept self-healing. Every plugin
+  // tool call has been verified to accept `session` on 0.28.1.
+  const NO_SESSION_TOOLS = new Set(['start_session', 'end_session', 'escalate_session', 'shutdown', 'list_tools_json', 'list_sessions', 'list_host_sessions_json', 'get_session', 'get_session_state', 'metadata', 'is_available', 'execution_mode'])
   const isSessionEnded = (r) => r.errorCode === 'session_ended' || /session has ended|call start_session/i.test(String((r && r.text) ?? ''))
 
   /** Lazily-created in-process Cua Driver runtime (one per profile process). */
   let driver = null
   let driverPromise = null
   let driverDead = false
+  /** In-flight runtime rebuild (stuck-session escape hatch); see rebuildDriver. */
+  let rebuilding = null
   const getDriver = () => {
     if (driver) return Promise.resolve(driver)
     if (driverDead) throw new Error('Cua Driver runtime was shut down; restart dsh to reactivate computer-use')
@@ -330,19 +393,47 @@ export function apply(ctx, config) {
     return driverPromise
   }
 
+  /** Destroy and recreate the runtime (a transport can wedge permanently —
+   *  measured on 0.28.1: after the idle TTL killed the session, no amount of
+   *  start_session revived the calls; the watchdog data race fixed upstream
+   *  in 0.28.2 is the likely culprit). Shared so concurrent callers rebuild once. */
+  const rebuildDriver = () => {
+    if (!rebuilding) {
+      rebuilding = (async () => {
+        const old = driver
+        driver = null
+        driverPromise = null
+        if (old) {
+          await Promise.resolve(old.callTool('end_session', JSON.stringify({ session: SESSION_LABEL }))).catch(() => {})
+          await Promise.resolve(old.shutdown()).catch(() => {})
+        }
+        const fresh = await getDriver()
+        ctx.logger.warn('computer-use: rebuilt the Cua Driver runtime after a stuck session')
+        return fresh
+      })().finally(() => { rebuilding = null })
+    }
+    return rebuilding
+  }
+
   /** Call one driver tool by name; returns the parsed ToolResult. */
   const raw = async (tool, args) => {
-    const d = await getDriver()
     let a = args ?? {}
-    if (SESSION_TOOLS.has(tool) && a.session === undefined) a = { ...a, session: SESSION_LABEL }
+    if (!NO_SESSION_TOOLS.has(tool) && a.session === undefined) a = { ...a, session: SESSION_LABEL }
     const json = JSON.stringify(a)
+    const d = await getDriver()
     let r = await d.callTool(tool, json)
-    if (r && r.isError && isSessionEnded(r)) {
-      // Idle TTL tripped: revive the label once, retry the exact call once.
-      await Promise.resolve(d.callTool('start_session', JSON.stringify({ session: SESSION_LABEL }))).catch(() => {})
-      r = await d.callTool(tool, json)
-    }
-    return r
+    if (!(r && r.isError && isSessionEnded(r))) return r
+    // Idle TTL tripped (or the transport wedged around it). A bare revive is
+    // not always enough — measured on 0.28.1, start_session can report success
+    // while the session stays dead — so end the corpse first, revive, retry…
+    await Promise.resolve(d.callTool('end_session', JSON.stringify({ session: SESSION_LABEL }))).catch(() => {})
+    const revived = await Promise.resolve(d.callTool('start_session', JSON.stringify({ session: SESSION_LABEL }))).catch(() => null)
+    if (revived === null || revived.isError) ctx.logger.warn('computer-use: session revive failed: ' + String(revived === null ? 'call threw' : revived.text).slice(0, 140))
+    r = await d.callTool(tool, json)
+    if (!(r && r.isError && isSessionEnded(r))) return r
+    // …and if it is STILL dead the runtime itself is wedged: rebuild it once.
+    const d2 = await rebuildDriver()
+    return await d2.callTool(tool, json)
   }
   /** Same, but throws on isError with the driver's own message. */
   const call = async (tool, args) => {
@@ -353,6 +444,18 @@ export function apply(ctx, config) {
   const structured = (r) => {
     try { return JSON.parse(r.structuredJson) } catch {}
     try { return JSON.parse(r.rawJson ?? '{}').structuredContent ?? {} } catch { return {} }
+  }
+
+  /**
+   * list_windows with the driver's errors surfaced. An isError result used to
+   * parse into an empty table — "no windows matched" — sending the model
+   * name-hunting (微信? WeChat? Weixin?) while the session was actually dead;
+   * the field log of exactly that wasted five steps before the pwsh detour.
+   */
+  const listWindows = async (args) => {
+    const r = await raw('list_windows', args)
+    if (r.isError) throw new Error('list_windows: ' + String(r.text ?? 'failed').slice(0, 300))
+    return structured(r)
   }
 
   const sleep = (ms, signal) => new Promise((resolve, reject) => {
@@ -378,7 +481,7 @@ export function apply(ctx, config) {
     if (a.app !== undefined || a.pid !== undefined) {
       let pid
       if (a.pid !== undefined) pid = Math.round(Number(a.pid))
-      const w = structured(await raw('list_windows', { on_screen_only: false }))
+      const w = await listWindows({ on_screen_only: false })
       const wins = w.windows ?? []
       if (pid === undefined) {
         const needle = String(a.app).toLowerCase()
@@ -434,8 +537,12 @@ export function apply(ctx, config) {
     let apps = []
     try {
       const r = await raw('list_apps', {})
+      if (r.isError) throw new Error(String(r.text ?? 'list_apps failed').slice(0, 200))
       apps = structured(r).apps ?? []
-    } catch {
+    } catch (e) {
+      // Tolerated (the name-launch fallback still works) — but say so: a silent
+      // null here is what sent computer_open into launch_app on a dead session.
+      ctx.logger.warn('computer-use: list_apps failed (' + String(e && e.message ? e.message : e).slice(0, 160) + ') — falling back to a name-only launch')
       return null
     }
     let best = null
@@ -468,7 +575,7 @@ export function apply(ctx, config) {
   }
 
   const windowsOf = async (pid) => {
-    const w = structured(await raw('list_windows', { pid }))
+    const w = await listWindows({ pid })
     const mine = (w.windows ?? []).filter((x) => x.pid === pid)
     const onScreen = mine.filter((x) => x.is_on_screen !== false)
     const pick = (onScreen.length > 0 ? onScreen : mine).slice()
@@ -551,8 +658,14 @@ export function apply(ctx, config) {
     let died = false
     if (Number(pid) > 0) {
       try {
-        const seen = structured(await raw('list_apps', {})).apps ?? []
-        died = !seen.some((x) => Math.round(Number(x.pid)) === Math.round(Number(pid)))
+        const r = await raw('list_apps', {})
+        // An errored inventory must not read as "the process died": unknown
+        // stays unknown (died=false) rather than telling the model the app
+        // exited when the real problem is the driver call.
+        if (!r.isError) {
+          const seen = structured(r).apps ?? []
+          died = !seen.some((x) => Math.round(Number(x.pid)) === Math.round(Number(pid)))
+        }
       } catch {}
     }
     return { pid, target: null, died }
@@ -614,6 +727,29 @@ export function apply(ctx, config) {
     }
   }
 
+  /**
+   * Write a capture to disk and stage it on the clipboard. `computer_screenshot
+   * save=` exists so "attach a proof screenshot in a chat" stops being a pwsh
+   * detour (which first had to rediscover DPI awareness, measured) — the file
+   * lands on disk AND on the clipboard, ready for a computer_key ctrl+v.
+   */
+  const saveCapture = async (path, png) => {
+    if (typeof path !== 'string' || !/\.png$/i.test(String(path).trim())) throw new Error('save must be a file path ending in .png')
+    const fs = await import('node:fs')
+    const { dirname } = await import('node:path')
+    const target = String(path).trim()
+    await fs.promises.mkdir(dirname(target), { recursive: true })
+    await fs.promises.writeFile(target, png)
+    let clip = ''
+    try {
+      await call('clipboard_write', { image_path: target })
+      clip = ' and copied onto the clipboard (computer_key desktop ctrl+v pastes it)'
+    } catch (e) {
+      clip = ' (clipboard copy failed: ' + String(e && e.message ? e.message : e).slice(0, 120) + ')'
+    }
+    return 'Saved to ' + target + clip
+  }
+
   /** Window capture → screenshot (+ optional element tree) SHOT value. */
   const captureWindow = async (t, opts) => {
     const includeTree = !(opts && opts.tree === false)
@@ -667,8 +803,13 @@ export function apply(ctx, config) {
     if (png.length === 0) throw new Error('window capture returned no image' + (didRestore ? ' (even after restoring the minimized window)' : ''))
     const els = sc.elements ?? []
     if (els.length > 0) last = { ...t, tokensByIndex: Object.fromEntries(els.map((e) => [e.element_index, e.element_token])) }
+    // Window captures arrive pre-resized by the driver (set_config max_image_
+    // dimension), so a saved file is capped at the model frame — only the
+    // desktop path can write true native resolution.
+    let saved = ''
+    if (typeof (opts && opts.save) === 'string' && opts.save !== '') saved = ' ' + (await saveCapture(opts.save, png))
     return {
-      summary: ((opts && opts.summary) || ('Window "' + (sc.window_title ?? t.title ?? '') + '" captured (pid ' + t.pid + ', window ' + t.windowId + ').')) + restored,
+      summary: ((opts && opts.summary) || ('Window "' + (sc.window_title ?? t.title ?? '') + '" captured (pid ' + t.pid + ', window ' + t.windowId + ').')) + restored + saved,
       frameText: 'Coordinates for this window = pixels of THIS image (window-local, top-left origin). Screen bounds: ' + JSON.stringify(sc.window_bounds ?? {}) + '.',
       elements: renderElements(els, sc.total_element_count ?? els.length),
       image: await attach(png, 'win.png'),
@@ -703,8 +844,9 @@ export function apply(ctx, config) {
     }
   }
 
-  /** Primary-desktop capture → SHOT value. */
-  const captureDesktop = async (summary) => {
+  /** Primary-desktop capture → SHOT value. `save` writes the ORIGINAL
+   *  full-resolution PNG (before the model-frame downscale) to disk. */
+  const captureDesktop = async (summary, save) => {
     const r = await call('get_desktop_state', {})
     const sc = structured(r)
     const png = Buffer.from((r.images[0] && r.images[0].dataBase64) ?? '', 'base64')
@@ -715,20 +857,17 @@ export function apply(ctx, config) {
     deskFrame = { sw: sc.screen_width ?? img.width, sh: sc.screen_height ?? img.height, fw: img.width, fh: img.height }
     const scale = typeof sc.scale_factor === 'number' && sc.scale_factor > 0 ? ' @' + sc.scale_factor + 'x' : ''
     const dpiWarn = dpiState.aware ? '' : ' ⚠ host DPI awareness inactive (' + dpiState.text + ') — on scaled displays this frame may cover only part of the primary display and desktop coordinates drift; prefer window-scoped actions via app=.'
+    let saved = ''
+    if (typeof save === 'string' && save !== '') saved = ' ' + (await saveCapture(save, png))
     return {
-      summary: (summary ?? 'Primary display captured') + ' (' + sc.screen_width + 'x' + sc.screen_height + scale + ' px' + dpiWarn + ')',
+      summary: (summary ?? 'Primary display captured') + ' (' + sc.screen_width + 'x' + sc.screen_height + scale + ' px' + dpiWarn + ')' + saved,
       frameText: 'Desktop coordinate frame = pixels of THIS image (top-left origin of the PRIMARY display). Windows on OTHER monitors are NOT in this image — capture and act on them via app=/computer_windows.',
       image: await attach(pngEncode(img), 'desktop.png'),
     }
   }
 
-  /** Frame px → driver desktop-space px. */
-  const deskXY = (x, y, label) => {
-    if (deskFrame === null) throw new Error('no desktop screenshot yet: call computer_screenshot first')
-    if (typeof x !== 'number' || !isFinite(x) || typeof y !== 'number' || !isFinite(y)) throw new Error(label + ' must be numbers')
-    if (x < 0 || y < 0 || x > deskFrame.fw || y > deskFrame.fh) throw new Error(label + ' outside the ' + deskFrame.fw + 'x' + deskFrame.fh + ' screenshot')
-    return { x: Math.round((x * deskFrame.sw) / deskFrame.fw), y: Math.round((y * deskFrame.sh) / deskFrame.fh) }
-  }
+  /** Frame px → driver desktop-space px (physical-px input auto-mapped; see deskMapXY). */
+  const deskXY = (x, y, label) => deskMapXY(deskFrame, x, y, label)
 
   // ── action plumbing ────────────────────────────────────────────────────────
   const agentsGranted = new Set()
@@ -826,7 +965,7 @@ export function apply(ctx, config) {
     return { mods, key }
   }
 
-  const COORD_DESC = 'Coordinate frames: with a window target, x/y are pixels of the LAST computer_screenshot OF THAT WINDOW; desktop scope uses pixels of the last desktop screenshot.'
+  const COORD_DESC = 'Coordinate frames: with a window target, x/y are pixels of the LAST computer_screenshot OF THAT WINDOW; desktop scope uses pixels of the last desktop screenshot (physical-desktop px are auto-mapped into the frame).'
   const KEYB_FIRST = ' KEYBOARD-FIRST: prefer computer_open / computer_key / computer_sequence over pixel clicks whenever a keyboard path exists. ELEMENT-FIRST: if the last window screenshot listed an element for the target, click by its element= token — it works on backgrounded/minimized windows and never touches the user\'s cursor.'
   const register = (definition) => ctx.effect(() => ctx.tools.register(defineTool(definition)), 'computer-use: tool ' + definition.name)
 
@@ -834,7 +973,7 @@ export function apply(ctx, config) {
   const actAndShot = async (exec, grant, summary, run) => {
     grant()
     const r = await run()
-    const note = actionNote(r) + (r.verification && r.verification.verified === false ? ' [driver could not verify the effect]' : '')
+    const note = actionNote(r) + (r.fallbackNote ?? '') + (r.verification && r.verification.verified === false ? ' [driver could not verify the effect]' : '')
     await sleep(settleMs, exec.signal)
     let value
     if (r.scopeView === 'desktop') value = await captureDesktop(summary + note)
@@ -843,10 +982,43 @@ export function apply(ctx, config) {
   }
   const granting = (exec) => { agentsGranted.add(agentKey(exec.agent)) }
 
+  // Foreground SendInput typing goes through the ACTIVE IME, which corrupts
+  // non-ASCII text — measured on a real run: 这→！！, computer-use→computer--se,
+  // 👋(U+1F44B)→🙏(U+1F64F). Route such text through the driver clipboard and a
+  // real ctrl+v instead, restoring the user's clipboard afterwards (best-effort:
+  // a non-text clipboard cannot be saved and is left as the pasted text).
+  const NON_ASCII = /[^\x00-\x7F]/
+  const pasteDesktop = (exec, text) => actAndShot(exec, () => granting(exec),
+    'Pasted ' + text.length + ' chars into the foreground app (non-ASCII text is clipboard-pasted; typing it directly corrupts it through the IME).',
+    async () => {
+      let saved = null
+      try {
+        const r = await raw('clipboard_read', { include_text: true })
+        if (!r.isError && typeof structured(r).text === 'string') saved = structured(r).text
+      } catch {}
+      let clipErr = null
+      try {
+        await call('clipboard_write', { text })
+      } catch (e) { clipErr = e }
+      if (clipErr !== null) {
+        // Clipboard unavailable: degrade to direct typing rather than failing.
+        const r = await action('type_text', { target: { kind: 'desktop', display_id: 'primary' }, text })
+        r.fallbackNote = ' [clipboard unavailable (' + String(clipErr && clipErr.message ? clipErr.message : clipErr).slice(0, 120) + ') — typed directly; the IME may have corrupted non-ASCII chars, verify on the screenshot]'
+        return r
+      }
+      const r = await pressChord({ target: { kind: 'desktop', display_id: 'primary' } }, ['ctrl'], 'v')
+      // Let the target consume the paste before putting the user's text back.
+      if (saved !== null && saved !== text) {
+        const prev = saved
+        setTimeout(() => { raw('clipboard_write', { text: prev }).catch(() => {}) }, 800)
+      }
+      return r
+    })
+
   // ── tools ──────────────────────────────────────────────────────────────────
   register({
     name: 'computer_screenshot',
-    description: 'Capture a WINDOW (default target: the last window acted on) or the PRIMARY desktop. A window capture returns the screenshot PLUS the accessibility tree elements (indexed, with element= tokens valid for the NEXT action against that window). Pass app="name" to target any app — including windows on other monitors, hidden, or minimized. No args = desktop overview. ' + COORD_DESC,
+    description: 'Capture a WINDOW (default target: the last window acted on) or the PRIMARY desktop. A window capture returns the screenshot PLUS the accessibility tree elements (indexed, with element= tokens valid for the NEXT action against that window). Pass app="name" to target any app — including windows on other monitors, hidden, or minimized. No args = desktop overview. save="path.png" additionally writes the capture to disk (desktop captures at native resolution, window captures at the frame cap) and puts it on the clipboard — use it whenever a file or a pasteable screenshot is the goal instead of a pwsh detour. ' + COORD_DESC,
     parameters: {
       app: { type: 'string', description: 'App/window name to capture (substring match), e.g. "notepad", "Chrome".' },
       pid: { type: 'number', description: 'Target pid (alternative to app).' },
@@ -854,19 +1026,21 @@ export function apply(ctx, config) {
       query: { type: 'string', description: 'Project the element list to this case-insensitive substring (window captures).' },
       desktop: { type: 'boolean', description: 'true = force the primary-desktop capture.' },
       elements: { type: 'boolean', description: 'false = skip the accessibility tree (screenshot only).' },
+      save: { type: 'string', description: 'Optional absolute .png path: also write the capture to disk and stage it on the system clipboard (paste with computer_key desktop ctrl+v).' },
     },
     output: SHOT_RENDER,
     isConcurrencySafe: () => true,
     timeoutMs: 30000,
     async execute(a) {
+      const save = typeof a.save === 'string' && a.save !== '' ? a.save : undefined
       if (a.desktop === true || (a.app === undefined && a.pid === undefined && a.window_id === undefined && last === null)) {
-        return await captureDesktop()
+        return await captureDesktop(undefined, save)
       }
       if (a.desktop === undefined && a.app === undefined && a.pid === undefined && a.window_id === undefined) {
-        return await shotFor(last, { tree: a.elements !== false })
+        return await shotFor(last, { tree: a.elements !== false, save })
       }
       const t = await resolveWindow(a)
-      return await shotFor(t, { tree: a.elements !== false, query: typeof a.query === 'string' ? a.query : undefined })
+      return await shotFor(t, { tree: a.elements !== false, query: typeof a.query === 'string' ? a.query : undefined, save })
     },
   })
 
@@ -884,7 +1058,7 @@ export function apply(ctx, config) {
     isConcurrencySafe: () => true,
     timeoutMs: 15000,
     async execute(a) {
-      const sc = structured(await raw('list_windows', { on_screen_only: a.on_screen_only === true }))
+      const sc = await listWindows({ on_screen_only: a.on_screen_only === true })
       let wins = sc.windows ?? []
       if (a.app !== undefined) {
         const needle = String(a.app).toLowerCase()
@@ -921,9 +1095,11 @@ export function apply(ctx, config) {
       if (!(count >= 1 && count <= 3)) throw new Error('clicks must be 1-3')
       const modifier = a.keys === undefined ? undefined : parseKeys(a.keys).mods
       let where
+      let deskNote = ''
       if (a.desktop === true || (a.app === undefined && a.pid === undefined && a.element === undefined && last === null)) {
         if (a.x === undefined || a.y === undefined) throw new Error('desktop click needs x,y (pixels of the last desktop screenshot)')
         const p = deskXY(Number(a.x), Number(a.y), 'click target')
+        if (p.scaled) deskNote = ' [x,y were physical desktop px — mapped into the screenshot frame]'
         where = { target: { kind: 'desktop', display_id: 'primary' }, x: p.x, y: p.y }
       } else {
         const t = (a.app !== undefined || a.pid !== undefined) ? await resolveWindow(a) : (last ?? await resolveWindow(a))
@@ -935,7 +1111,7 @@ export function apply(ctx, config) {
           where = { target: windowTarget(t), x: Number(a.x), y: Number(a.y) }
         }
       }
-      const desc = 'Clicked ' + button + (count > 1 ? ' x' + count : '') + (a.keys ? ' holding ' + a.keys : '') + (a.element ? ' on element ' + a.element : a.x !== undefined ? ' at (' + a.x + ',' + a.y + ')' : '') + '.'
+      const desc = 'Clicked ' + button + (count > 1 ? ' x' + count : '') + (a.keys ? ' holding ' + a.keys : '') + (a.element ? ' on element ' + a.element : a.x !== undefined ? ' at (' + a.x + ',' + a.y + ')' : '') + '.' + deskNote
       return await actAndShot(exec, () => granting(exec), desc, async () => {
         const r = await action('click', { ...where, button, count, ...(modifier ? { modifier } : {}), ...(a.from_zoom === true ? { from_zoom: true } : {}) })
         r.scopeView = where.target && where.target.kind === 'desktop' ? 'desktop' : 'window'
@@ -962,9 +1138,11 @@ export function apply(ctx, config) {
     async execute(a, exec) {
       let args
       let view
+      let deskNote = ''
       if (a.desktop === true || (a.app === undefined && a.pid === undefined && last === null)) {
         const p1 = deskXY(Number(a.fromX), Number(a.fromY), 'drag start')
         const p2 = deskXY(Number(a.toX), Number(a.toY), 'drag end')
+        if (p1.scaled || p2.scaled) deskNote = ' [coordinates were physical desktop px — mapped into the screenshot frame]'
         args = { target: { kind: 'desktop', display_id: 'primary' }, from_x: p1.x, from_y: p1.y, to_x: p2.x, to_y: p2.y }
         view = 'desktop'
       } else {
@@ -972,7 +1150,7 @@ export function apply(ctx, config) {
         args = { target: windowTarget(t), from_x: Number(a.fromX), from_y: Number(a.fromY), to_x: Number(a.toX), to_y: Number(a.toY) }
         view = 'window'
       }
-      return await actAndShot(exec, () => granting(exec), 'Dragged (' + a.fromX + ',' + a.fromY + ') → (' + a.toX + ',' + a.toY + ').', async () => {
+      return await actAndShot(exec, () => granting(exec), 'Dragged (' + a.fromX + ',' + a.fromY + ') → (' + a.toX + ',' + a.toY + ').' + deskNote, async () => {
         const r = await action('drag', args)
         r.scopeView = view
         return r
@@ -1007,7 +1185,7 @@ export function apply(ctx, config) {
 
   register({
     name: 'computer_type',
-    description: 'Type text into a target window IN THE BACKGROUND (UIA SetValue for fields listed in the last capture — pass element= for reliability; XAML/Store apps require element=; classic Win32 accepts plain WM_CHAR). Pass desktop=true to type into whatever the user currently has focused instead. Newlines are NOT typed; send computer_key enter between lines.',
+    description: 'Type text into a target window IN THE BACKGROUND (UIA SetValue for fields listed in the last capture — pass element= for reliability; XAML/Store apps require element=; classic Win32 accepts plain WM_CHAR). Pass desktop=true to type into whatever the user currently has focused instead — non-ASCII text (CJK, emoji) is then delivered via clipboard + ctrl+v, because direct typing goes through the active IME and comes out corrupted; the user\'s clipboard is restored afterwards. Newlines are not typed in the window path; send computer_key enter between lines (a desktop paste carries them as-is).',
     parameters: {
       app: { type: 'string' },
       pid: { type: 'number' },
@@ -1022,6 +1200,9 @@ export function apply(ctx, config) {
       if (typeof a.text !== 'string' || a.text.length === 0) throw new Error('text must be a non-empty string')
       if (a.text.length > 5000) throw new Error('text too long (max 5000 chars)')
       if (a.desktop === true) {
+        // Non-ASCII must not go through the IME-ridden SendInput path (see
+        // pasteDesktop); window-scope typing is Unicode-native (UIA/WM_CHAR).
+        if (NON_ASCII.test(a.text)) return await pasteDesktop(exec, a.text)
         return await actAndShot(exec, () => granting(exec), 'Typed ' + a.text.length + ' chars into the foreground app.', async () => {
           const r = await action('type_text', { target: { kind: 'desktop', display_id: 'primary' }, text: a.text })
           r.scopeView = 'desktop'
@@ -1250,7 +1431,7 @@ export function apply(ctx, config) {
               last = t
               view = 'window'
               // Only un-minimize; the single final capture at the end covers it.
-              const w = structured(await raw('list_windows', { pid: t.pid }))
+              const w = await listWindows({ pid: t.pid })
               const me = (w.windows ?? []).find((x) => (x.window_id ?? x.windowId) === t.windowId)
               if (me !== undefined && me.minimized === true && restoreCfg) await restoreWindow(t.pid, t.windowId)
               continue
@@ -1342,7 +1523,7 @@ export function apply(ctx, config) {
     timeoutMs: 25000,
     async execute(a, exec) {
       const p = deskXY(Number(a.x), Number(a.y), 'move target')
-      return await actAndShot(exec, () => granting(exec), 'Real pointer moved to desktop px (' + a.x + ',' + a.y + ').', async () => {
+      return await actAndShot(exec, () => granting(exec), 'Real pointer moved to desktop px (' + a.x + ',' + a.y + ').' + (p.scaled ? ' [x,y were physical desktop px — mapped into the screenshot frame]' : ''), async () => {
         const r = await call('move_cursor', { target: { kind: 'desktop', display_id: 'primary' }, x: p.x, y: p.y })
         r.scopeView = 'desktop'
         return r
@@ -1377,12 +1558,12 @@ export function apply(ctx, config) {
     return { kind: 'ask', reason: '允许 computer-use 操作应用？一次批准覆盖同一会话的后续动作（askPolicy: always 可改为每次一询）；默认后台注入——不移动你的鼠标、不抢焦点，仅个别拒收后台输入的应用会短暂前置。首个动作: ' + exec.name + '。' }
   })
 
-  ctx.logger.info('computer-use v2.3: cua-driver backend (session "' + SESSION_LABEL + '"); ' + MUTATING.size + ' mutating tools gated; askPolicy=' + askPolicy + '; telemetry=' + telemetry + '; restoreExisting=' + restoreCfg)
+  ctx.logger.info('computer-use v2.4: cua-driver backend (session "' + SESSION_LABEL + '", all calls labelled); ' + MUTATING.size + ' mutating tools gated; askPolicy=' + askPolicy + '; telemetry=' + telemetry + '; restoreExisting=' + restoreCfg)
 
   // Best-effort: push the model-frame cap into the driver for window captures
   // (the driver resizes window screenshots AND keeps x,y/zoom coordinates
   // consistent with the resized image; desktop captures are resized plugin-side).
-  getDriver().then((d) => d.callTool('set_config', JSON.stringify({ key: 'max_image_dimension', value: maxDim }))).then(
+  getDriver().then(() => raw('set_config', { key: 'max_image_dimension', value: maxDim })).then(
     () => ctx.logger.info('computer-use: max_image_dimension=' + maxDim),
     () => {},
   )

@@ -15,7 +15,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { pngDecode, pngEncode, resizeRgba, cropRgba, name as pluginName, inject, apply } from '../index.js'
+import { pngDecode, pngEncode, resizeRgba, cropRgba, deskMapXY, name as pluginName, inject, apply } from '../index.js'
 
 // ── tiny assert harness ──────────────────────────────────────────────────────
 let hard = 0; let soft = 0; let n = 0
@@ -100,6 +100,24 @@ const { ctx, tools, events, disposers, logs } = makeCtx()
   ok(c.width === 10 && c.height === 5, 'crop clamps to image bounds')
 }
 
+// ── 1b. deskMapXY units (the elastic coordinate frame) ───────────────────────
+{
+  // 3200x2000 physical downscaled to a 1568x980 model frame (the field case:
+  // the model read native-resolution features and got bounced with "outside
+  // the 1568x980 screenshot").
+  const f = { sw: 3200, sh: 2000, fw: 1568, fh: 980 }
+  const a = deskMapXY(f, 2061, 1632, 'click target')
+  ok(a.x === 2061 && a.y === 1632 && a.scaled === true, 'physical desktop px map to the SAME physical target (exact roundtrip) and flag scaled')
+  const b = deskMapXY(f, 800, 600, 'click target')
+  ok(b.x === 1633 && b.y === 1224 && b.scaled === false, 'frame px still upscale to physical (' + b.x + ',' + b.y + ')')
+  let threw = ''
+  try { deskMapXY(f, 3300, 100, 'click target') } catch (e) { threw = String(e.message) }
+  ok(threw.includes('outside'), 'px beyond the physical desktop still throws: ' + threw.slice(0, 70))
+  let threw2 = ''
+  try { deskMapXY(null, 1, 1) } catch (e) { threw2 = String(e.message) }
+  ok(threw2.includes('no desktop screenshot'), 'missing frame errors clearly')
+}
+
 // ── 2. apply() + registration ────────────────────────────────────────────────
 ok(pluginName === 'computer-use', 'module exports name=computer-use')
 ok(Array.isArray(inject) && inject.join(',') === 'tools,attachments', 'inject = tools,attachments')
@@ -151,6 +169,31 @@ try {
 
   const cur = await run('computer_cursor', {})
   ok(/^-?\d+,-?\d+$/.test(cur.physical), 'cursor position reads ' + cur.physical)
+
+  // save= writes the capture to disk at NATIVE resolution and stages it on the
+  // clipboard — the "proof screenshot into a chat" flow that used to need a
+  // pwsh detour (which first had to rediscover DPI awareness). NOTE: this
+  // replaces the current system clipboard with the image, like the feature
+  // itself does.
+  {
+    const os = await import('node:os')
+    const fs = await import('node:fs')
+    const p = await import('node:path')
+    const target = p.join(os.tmpdir(), 'computer-use-selftest-save.png')
+    let shot = null
+    let saveErr = ''
+    try { shot = await run('computer_screenshot', { desktop: true, save: target }) } catch (e) { saveErr = String(e.message) }
+    const exists = saveErr === '' && fs.existsSync(target)
+    ok(exists, 'save= wrote the desktop capture to disk (' + (saveErr !== '' ? saveErr.slice(0, 90) : target) + ')')
+    if (exists && shot) {
+      const buf = fs.readFileSync(target)
+      ok(buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47, 'saved file is a valid PNG')
+      const nat = pngDecode(buf)
+      ok(nat.width >= shot.image.width && nat.height >= shot.image.height, 'saved PNG keeps native resolution ' + nat.width + 'x' + nat.height + ' (model frame: ' + shot.image.width + 'x' + shot.image.height + ')')
+      ok(/Saved to/.test(shot.summary) && /clipboard/.test(shot.summary), 'summary reports the file + clipboard outcome: ' + shot.summary.slice(-140))
+      fs.rmSync(target, { force: true })
+    }
+  }
 
   // launch notepad in background
   const openShot = await run('computer_open', { name: 'Notepad', settle_seconds: 3 })
@@ -212,7 +255,11 @@ try {
     }
   }
 
-  const token = pickToken(openShot)
+  // element tokens are only valid for the MOST RECENT capture of that window
+  // (the minimized-restore test above re-captured it twice) — take a fresh
+  // snapshot before acting by token, exactly as the tool contract says.
+  const freshShot = await run('computer_screenshot', { app: 'notepad' })
+  const token = pickToken(freshShot)
   ok(token !== null, 'window tree exposed elements, picked token ' + token)
 
   if (token && notepadPid) {
@@ -331,6 +378,8 @@ try {
 
 // ── 6. documented policy: tray-only apps are reported, not relaunched ────────
 info('computer_open policy: an app that is RUNNING but exposes no window (tray state) is reported and NOT relaunched (arg activate_running=true or config activateRunning opt into letting its launcher try) — covered by the reused-window assertions in step 4, exercised live against WeChat in the field')
+info('v2.4 session policy: EVERY driver call now carries the named session label (queries included) and heals through end→start→retry→runtime-rebuild — the live calls above exercised the labelled path throughout')
+info('v2.4 typing policy: computer_type desktop= routes non-ASCII text through clipboard + ctrl+v (direct SendInput typing corrupts CJK/emoji through the IME; the field log measured 这→！！, 👋→🙏). Desktop-scope paste is not exercised here — it would hijack the real foreground — but the window-scope element typing above covers the direct path')
 
 console.log('\n' + (hard === 0 ? 'SELFTEST OK' : 'SELFTEST FAILED') + ' — ' + (n - hard) + '/' + n + ' passed, ' + soft + ' warnings')
 process.exit(hard === 0 ? 0 : 1)
