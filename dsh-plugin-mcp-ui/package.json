@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-mcp-ui",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "license": "MIT",
   "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "mcp", "settings", "ui"],
   "publishConfig": { "registry": "https://registry.npmjs.org" },

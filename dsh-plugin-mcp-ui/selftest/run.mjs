@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 
 const require = createRequire('C:/Users/Lenovo/AppData/Roaming/npm/node_modules/@deepseek-ai/dsh/package.json')
@@ -234,9 +235,40 @@ await test('删除后文件仍然合法 YAML 且标记块保留', async () => {
   h.cleanup()
 })
 
-await test('link 开发安装拒绝推导（无 patchPath 时报错）', async () => {
+await test('link 开发安装拒绝推导（无 ctx.baseUrl 且无 patchPath 时报错）', async () => {
   const ctx = { logger: { info() {}, warn() {} }, effect: () => {}, reflect: { provide() {} }, get: () => undefined }
   assert.throws(() => apply(ctx, {}), /patchPath/)
+})
+
+await test('ctx.baseUrl = profile 目录时自动定位 cordis.patch.yml', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'mcp-ui-profile-'))
+  writeFileSync(path.join(dir, 'cordis.yml'), '[]\n', 'utf8')
+  writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'dsh-profile-web', dsh: { profile: { bundles: [] } } }), 'utf8')
+  const logs = []
+  const ctx = {
+    baseUrl: pathToFileURL(`${dir}/`).href,
+    logger: { info: (...a) => logs.push(a.join(' ')), warn() {} },
+    effect: () => {},
+    reflect: { provide() {} },
+    get: () => undefined,
+  }
+  apply(ctx, {})
+  assert.ok(logs.some((line) => line.includes(path.join(dir, 'cordis.patch.yml'))), `未定位到 profile patch：${logs.join(' | ')}`)
+  rmSync(dir, { recursive: true, force: true })
+})
+
+await test('ctx.baseUrl 不是 profile 目录时不认（宁可报错也不写错文件）', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'mcp-ui-notprofile-'))
+  writeFileSync(path.join(dir, 'cordis.yml'), '[]\n', 'utf8') // 无 package.json / 无 dsh.profile
+  const ctx = {
+    baseUrl: pathToFileURL(`${dir}/`).href,
+    logger: { info() {}, warn() {} },
+    effect: () => {},
+    reflect: { provide() {} },
+    get: () => undefined,
+  }
+  assert.throws(() => apply(ctx, {}), /patchPath/)
+  rmSync(dir, { recursive: true, force: true })
 })
 
 console.log(results.join('\n'))

@@ -41,10 +41,19 @@ settings 命名空间：
 - 因此这个文件本身可以进 git，UI 写的内容和你手改的内容完全同构、可审计；
 - 卸载本插件后标记块变成普通注释行包裹的合法配置，MCP 服务器照常加载，不会失联。
 
-文件定位：安装后自动从 `node_modules/dsh-plugin-mcp-ui/` 的安装位置推导
-`<profileDir>/cordis.patch.yml`。`link:` 开发安装（如本仓库）请显式配置——用
-**覆盖行**（无 `insert:`，靠 id 命中自注册行、`name` 做安全校验），不要再 insert
-造成同 id 双行：
+文件定位（`resolvePatchPath`，按顺序）：
+
+1. patch 行显式配置的 `config.patchPath`；
+2. **运行时锚点 `ctx.baseUrl`**：dsh 把 bundle 层、profile 的
+   `cordis.patch.yml`、home 层、`--patch` 覆盖层全部当作同一个 include
+   （`<profileDir>/cordis.yml`）的 patch 传入，所以条目的 `ctx.baseUrl` 就是
+   profile 目录 —— `link:` 开发安装走的就是这条路，**无需任何额外配置**；
+3. 安装位置推导 `<profileDir>/node_modules/dsh-plugin-mcp-ui/`（registry 安装）。
+
+第 2 步只在目录确实是 profile（存在 `cordis.yml` 且 `package.json` 带
+`dsh.profile`）时才采信；三步全落空时插件会带提示拒绝启动，不会写到错误的
+文件里。真要手工指定时用**覆盖行**（无 `insert:`，靠 id 命中自注册行、
+`name` 做安全校验），不要再 insert 造成同 id 双行：
 
 ```yaml
 - id: mcp-ui
@@ -52,8 +61,6 @@ settings 命名空间：
   config:
     patchPath: 'C:/Users/you/.dsh/profiles/web/cordis.patch.yml'
 ```
-
-推导失败时插件会带着这条提示拒绝启动，不会写到错误的文件里。
 
 ## 安装
 

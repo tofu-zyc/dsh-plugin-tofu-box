@@ -7,14 +7,19 @@ import { TypertRemoteService, RemoteError } from '@deepseek-ai/dsh-typert-protoc
 export const name = 'dsh-plugin-mcp-ui'
 
 export const Config = z.object({
-  // 被管理的 profile patch 文件。缺省时按安装位置推导：
-  // <profileDir>/node_modules/dsh-plugin-mcp-ui/index.js -> <profileDir>/cordis.patch.yml
-  // link: 开发安装指向别处时，请在 patch 行上显式配置（覆盖行，勿重复 insert）。
+  // 被管理的 profile patch 文件。缺省时自动定位（见 resolvePatchPath）：
+  // 1) 运行时锚点 ctx.baseUrl = profile 目录（dsh 每个顶层条目都挂在这棵
+  //    include 树上，link: 开发安装也准）；
+  // 2) 回退到安装位置 <profileDir>/node_modules/dsh-plugin-mcp-ui/（registry 安装）。
+  // 两者都拿不到时才需要显式配置（覆盖行，勿重复 insert）。
   patchPath: z.string(),
 })
 
 const BEGIN = '# >>> dsh-plugin-mcp-ui managed (edits inside this block are owned by the settings UI) >>>'
 const END = '# <<< dsh-plugin-mcp-ui managed <<<'
+// profile 根配置文件名（dsh 的 include 锚点文件）与 patch 文件名。
+const PROFILE_ROOT_FILENAME = 'cordis.yml'
+const PROFILE_PATCH_FILENAME = 'cordis.patch.yml'
 const MCP_ROW_NAME = '@deepseek-ai/dsh-mcp-client'
 const SERVER_NAME_RE = /^[A-Za-z0-9_-]{1,32}$/
 const ROW_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
@@ -308,28 +313,62 @@ function invalidError(error) {
 
 // ---- patch 文件读写 --------------------------------------------------------
 
-function resolvePatchPath(config) {
+function resolvePatchPath(ctx, config) {
   if (typeof config?.patchPath === 'string' && config.patchPath !== '') {
     return path.isAbsolute(config.patchPath) ? config.patchPath : path.resolve(process.cwd(), config.patchPath)
   }
+  const anchored = profileDirFromContext(ctx)
+  if (anchored !== '') return path.join(anchored, PROFILE_PATCH_FILENAME)
   const here = fileURLToPath(import.meta.url)
-  // 仅当本包物理位于 <profileDir>/node_modules/<pkg>/ 下时才自动推导；
-  // link:/junction 开发安装的 realpath 在仓库里，推导会写错文件，必须显式配置。
+  // 回退：仅当本包物理位于 <profileDir>/node_modules/<pkg>/ 下时才按安装位置
+  // 推导；link:/junction 开发安装的 realpath 在仓库里，这里一定推不出来，
+  // 所以上面的运行时锚点才是主路径。
   const pkgDir = path.dirname(here)
   const nodeModulesDir = path.dirname(pkgDir)
   const profileDir = path.dirname(nodeModulesDir)
   if (
-    path.basename(pkgDir) !== 'dsh-plugin-mcp-ui' ||
-    path.basename(nodeModulesDir) !== 'node_modules' ||
-    !existsSync(path.join(profileDir, 'node_modules')) // pnpm .pnpm 内层 node_modules 也在此被排除
+    path.basename(pkgDir) === 'dsh-plugin-mcp-ui' &&
+    path.basename(nodeModulesDir) === 'node_modules' &&
+    existsSync(path.join(profileDir, 'node_modules')) // pnpm .pnpm 内层 node_modules 也在此被排除
   ) {
-    throw new Error(
-      'tofu-mcp-ui: 无法从安装位置推导 profile 的 cordis.patch.yml（开发安装/link 场景）。' +
-      '请在 patch 行上用覆盖行配置 config.patchPath，例如 ' +
-      "{ id: 'mcp-ui', name: 'dsh-plugin-mcp-ui', config: { patchPath: 'C:/Users/you/.dsh/profiles/web/cordis.patch.yml' } }",
-    )
+    return path.join(profileDir, PROFILE_PATCH_FILENAME)
   }
-  return path.join(profileDir, 'cordis.patch.yml')
+  throw new Error(
+    'tofu-mcp-ui: 无法定位 profile 的 cordis.patch.yml：既没有从 ctx.baseUrl 拿到 ' +
+    'profile 目录（宿主未给出 include 锚点），也不是 node_modules 常规安装（开发安装/link 场景）。' +
+    '请在 patch 行上用覆盖行配置 config.patchPath，例如 ' +
+    "{ id: 'mcp-ui', name: 'dsh-plugin-mcp-ui', config: { patchPath: 'C:/Users/you/.dsh/profiles/web/cordis.patch.yml' } }",
+  )
+}
+
+// 只有真正的 profile 目录才认：cordis.yml 存在 + manifest 带 dsh.profile。
+// 既校验锚点合法，也防止锚点意外退化成别处时把 MCP 行写进错误的文件。
+function isProfileDir(dir) {
+  if (typeof dir !== 'string' || dir === '') return false
+  if (!existsSync(path.join(dir, PROFILE_ROOT_FILENAME))) return false
+  try {
+    const manifest = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'))
+    return Boolean(manifest && typeof manifest === 'object' && manifest.dsh?.profile)
+  } catch {
+    return false
+  }
+}
+
+// dsh 把「bundle 层 + profile 的 cordis.patch.yml + home 层 + --patch 覆盖层」
+// 全部当作同一个 include（<profileDir>/cordis.yml）的 patch 传入，于是每个顶层
+// 条目的 ctx.baseUrl 就是 profile 目录的 file URL；插件 ctx 继承同一个 baseUrl。
+// 这是 link: 开发安装下唯一可靠的锚点（安装位置推导会指向仓库）。
+function profileDirFromContext(ctx) {
+  const baseUrl = ctx?.baseUrl
+  if (typeof baseUrl !== 'string' || baseUrl === '') return ''
+  try {
+    const url = new URL(baseUrl)
+    if (url.protocol !== 'file:') return ''
+    const dir = fileURLToPath(url)
+    return isProfileDir(dir) ? dir : ''
+  } catch {
+    return ''
+  }
 }
 
 function readState(patchPath) {
@@ -432,7 +471,7 @@ Object.defineProperty(McpUiService.prototype, REMOTE_METHODS_KEY, {
 })
 
 function apply(ctx, config) {
-  const patchPath = resolvePatchPath(config)
+  const patchPath = resolvePatchPath(ctx, config)
   new McpUiService(ctx, patchPath)
   ctx.logger.info(`tofu-mcp-ui: managing MCP servers in ${patchPath}`)
 }
