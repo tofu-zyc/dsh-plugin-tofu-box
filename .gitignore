@@ -13,6 +13,9 @@ dist/
 /UPGRADE-CHECK.md
 /check-compat.mjs
 /publish.ps1
+# UPGRADE-CHECK.md 升级流程的组合快照：before 留作基线，after 拿来 diff，都不入库
+/compat-before.yml
+/compat-after.yml
 /.doctor-selftest/
 /deepseek-harness/
 /.workbuddy/
