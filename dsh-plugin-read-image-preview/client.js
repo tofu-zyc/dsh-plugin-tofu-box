@@ -349,6 +349,7 @@ window.__ModuleLoader__.load({
      * path speaks for itself). Adding an image-bearing tool = adding one line.
      */
     const TOOL_LABELS = {
+      generate_image: '绘图',
       computer_screenshot: '屏幕截图',
       computer_zoom: '区域放大',
       computer_wait: '等待',
@@ -691,6 +692,22 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Running vs settled comes from the block's shape, not from a flag.
+     *
+     * `ToolCallBlock` is a union of `RunningToolCall` (callId/name/argsRaw, no
+     * content) and `ToolResultNode` (content, isError). There is no `isRunning`
+     * field, so reading one always yielded false and an in-flight call fell
+     * through to the settled path — which returns null when the block carries
+     * no content, leaving the row blank for the whole call.
+     */
+    function isRunningBlock(block) {
+      return isRecord(block) && block.isRunning !== false && typeof block.argsRaw === 'string'
+    }
+    function isFailedBlock(block) {
+      return isRecord(block) && block.isError === true
+    }
+
+    /**
      * The preview card in `file` mode: frame, metadata line, one transient note.
      *
      * The host resolves the path once per call and answers with everything the
@@ -700,7 +717,7 @@ window.__ModuleLoader__.load({
     function FilePreview(props) {
       const block = props.block
       const path = imagePathOf(block)
-      const live = isRecord(block) && block.isRunning === true
+      const live = isRunningBlock(block)
       const [info, setInfo] = React.useState(null)
       const [open, setOpen] = React.useState(false)
       const [geometry, setGeometry] = React.useState(null)
@@ -1065,8 +1082,8 @@ window.__ModuleLoader__.load({
           toolName: props.toolName,
         })
       }
-      const live = isRecord(block) && block.isRunning === true
-      const failed = !!(isRecord(block) && block.isError === true)
+      const live = isRunningBlock(block)
+      const failed = isFailedBlock(block)
       if (live) {
         const liveLabel = TOOL_LABELS[props.toolName] === undefined ? props.toolName : TOOL_LABELS[props.toolName]
         return React.createElement('div', { className: 'dsh-imgvw-root' }, [

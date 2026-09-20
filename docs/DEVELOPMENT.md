@@ -11,6 +11,7 @@ dsh plugin --profile web add \
   "link:D:\program\dsh-plugins\dsh-plugin-computer-use" \
   "link:D:\program\dsh-plugins\dsh-plugin-model-search" \
   "link:D:\program\dsh-plugins\dsh-plugin-model-tuning" \
+  "link:D:\program\dsh-plugins\dsh-plugin-image-generation" \
   "link:D:\program\dsh-plugins\dsh-plugin-read-image-preview" \
   "link:D:\program\dsh-plugins\dsh-plugin-mcp-ui"
 ```

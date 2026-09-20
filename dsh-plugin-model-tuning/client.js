@@ -46,7 +46,20 @@ window.__ModuleLoader__.load({
 .mcfg-custom{width:100%}
 .mcfg-input:disabled,.mcfg-select:disabled{opacity:.5;cursor:not-allowed}
 .mcfg-select:focus,.mcfg-input:focus{outline:none;border-color:rgba(80,140,255,.7)}
+.mcfg-img-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.mcfg-warn{font-size:11.5px;line-height:1.5;color:#c9722c}
 `;
+
+    /**
+     * The image-generation plugin's own settings namespace. Linking writes
+     * there instead of duplicating its models here, so 绘图 stays the single
+     * source of truth for what generate_image actually calls.
+     */
+    const IMAGE_NS = "image-generation";
+    const IMAGE_API = "openai-images";
+    /** Provenance marker on an entry this page created; its absence means the
+     *  entry was authored by hand on the 绘图 page, which stays authoritative. */
+    const IMAGE_SOURCE_KEY = "source";
 
     const REASONING_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"];
     const CTX_OPTIONS = [
@@ -117,6 +130,160 @@ window.__ModuleLoader__.load({
         current = current[part];
       }
       return current;
+    }
+
+    /** The provider's own settings section, where its endpoint and key live. */
+    function profileOf(nsView, settingsPath) {
+      const profile = at(nsView ? nsView.value : undefined, settingsPath || []);
+      return profile && typeof profile === "object" ? profile : undefined;
+    }
+
+    function findNamespace(settingsView, ns) {
+      const namespaces = settingsView && Array.isArray(settingsView.namespaces) ? settingsView.namespaces : [];
+      return namespaces.find((item) => item && item.ns === ns);
+    }
+
+    /**
+     * The 绘图 namespace view. A describe response normally already carries it,
+     * since the image plugin registers that namespace on the host; this only
+     * re-reads when it is missing, so an uninstalled plugin degrades to
+     * "hidden" instead of throwing.
+     * @param describeRaw - re-reads the settings document.
+     * @param settingsView - an already-fetched describe response, if any.
+     * @returns the image-generation namespace view, or undefined.
+     */
+    async function ensureImageNs(describeRaw, settingsView) {
+      const present = findNamespace(settingsView, IMAGE_NS);
+      if (present) return present;
+      try {
+        const response = await describeRaw();
+        return response.result.ok ? findNamespace(response.result.value, IMAGE_NS) : undefined;
+      } catch {
+        return undefined;
+      }
+    }
+
+    /**
+     * Derive one image namespace entry from the chat provider that already
+     * holds the endpoint and credential reference, so linking never asks the
+     * user to retype either one.
+     * @param profile - the provider's settings section.
+     * @param modelId - the chat model id, reused verbatim as the upstream id.
+     * @returns the fields derived from the provider, or an empty endpoint when
+     *   the provider declares no base URL.
+     */
+    function deriveImageEntry(profile, modelId) {
+      const base = typeof profile?.baseURL === "string" ? profile.baseURL.trim() : "";
+      return {
+        model: modelId,
+        // The Images API lives beside the chat API on the same base; the
+        // validation in planImageLink rejects anything unusable.
+        endpoint: base ? base.replace(/\/+$/, "") + "/images/generations" : "",
+        apiKeyEnv: typeof profile?.apiKeyEnv === "string" ? profile.apiKeyEnv.trim() : "",
+      };
+    }
+
+    /** Whether an entry is ours, in entries stored before the provider was recorded. */
+    function isManagedEntry(entry, modelId) {
+      const source = entry && entry[IMAGE_SOURCE_KEY];
+      if (!source || typeof source !== "object" || source.model !== modelId) return false;
+      return source.provider === undefined || source.provider === "" || typeof source.provider === "string";
+    }
+
+    /** The per-model view of the link, shared by the checkbox and its note. */    function computeImageModelState(imageNsView, profile, modelId) {
+      if (!imageNsView) return { available: false, managed: false, hasEntry: false, entry: null };
+      const models = Array.isArray(imageNsView.value?.models) ? imageNsView.value.models : [];
+      const entry = models.find((item) => item && typeof item === "object" && item.model === modelId) ?? null;
+      const derived = deriveImageEntry(profile, modelId);
+      return {
+        available: true,
+        managed: !!entry && isManagedEntry(entry, modelId),
+        hasEntry: !!entry,
+        endpoint: entry ? entry.endpoint : derived.endpoint,
+        apiKeyEnv: entry ? entry.apiKeyEnv : derived.apiKeyEnv,
+      };
+    }
+
+    function imageModelsOf(imageNsView) {      const models = imageNsView ? imageNsView.value?.models : undefined;
+      return Array.isArray(models) ? models : [];
+    }
+
+    function normalizeImageEndpoint(value) {
+      return typeof value === "string" ? value.trim().replace(/\/+$/, "").replace(/\/images\/generations$/, "") + "/images/generations" : "";
+    }
+
+    /** `/v1/images/generations` is the OpenAI address, not the configured one. */
+    function acceptableImageEndpoint(value) {
+      try {
+        const url = new URL(value);
+        if (!["http:", "https:"].includes(url.protocol)) return false;
+      } catch {
+        return false;
+      }
+      return !/api\.openai\.com/i.test(value);
+    }
+
+    /** The 绘图 namespace validates `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`. */
+    function sanitizeImageId(value) {
+      return String(value).replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^[-_]+|[-_]+$/g, "").slice(0, 64);
+    }
+
+    function uniqueImageId(modelId, models) {
+      const taken = new Set(models.filter((item) => item && typeof item.id === "string").map((item) => item.id));
+      const base = sanitizeImageId(modelId) || "image-model";
+      let id = base;
+      for (let i = 2; taken.has(id); i++) id = sanitizeImageId(base.slice(0, 60) + "-" + i);
+      return id;
+    }
+
+    /**
+     * Everything the image namespace needs for an incremental write: only the
+     * models entry this page owns plus the default-model change it implies.
+     * An entry may already exist without our marker because the 绘图 page
+     * created it, or because it was stored before the marker existed; the
+     * merge adopts it in place and never touches the user's other fields.
+     * @param imageNsView - the resolved image-generation namespace view.
+     * @param profile - the chat provider's settings section.
+     * @param modelId - the chat model id being linked.
+     * @param providerId - the providing route id, recorded for provenance.
+     * @returns models and defaultModel, or a reason the link cannot be written.
+     */
+    function planImageLink(imageNsView, profile, modelId, providerId) {
+      const derived = deriveImageEntry(profile, modelId);
+      const endpoint = normalizeImageEndpoint(derived.endpoint);
+      if (!acceptableImageEndpoint(endpoint)) {
+        return { models: null, reason: "该 provider 没有可用的供应商地址（api.baseURL），请先在「模型」页填写后再勾选。" };
+      }
+      const models = imageModelsOf(imageNsView).slice();
+      const index = models.findIndex((item) => item && typeof item === "object" && item.model === modelId);
+      const owned = index >= 0
+        // Adopt an existing entry; only the fields the link owns are refreshed.
+        ? { ...models[index], model: modelId, endpoint, api: IMAGE_API, [IMAGE_SOURCE_KEY]: { provider: providerId, model: modelId } }
+        // Write out every field the image schema defaults, so the stored
+        // document stays readable and a later schema change cannot surprise it.
+        : { id: uniqueImageId(modelId, models), name: modelId, model: modelId, endpoint, api: IMAGE_API, timeoutSeconds: 300 };
+      if (index >= 0 && !owned.apiKeyEnv && derived.apiKeyEnv) owned.apiKeyEnv = derived.apiKeyEnv;
+      if (index < 0) {
+        if (derived.apiKeyEnv) owned.apiKeyEnv = derived.apiKeyEnv;
+        owned[IMAGE_SOURCE_KEY] = { provider: providerId, model: modelId };
+      }
+      const next = index >= 0 ? models.map((item, i) => (i === index ? owned : item)) : [...models, owned];
+      const currentDefault = imageNsView.value?.defaultModel;
+      // Without a default the entry would never be called by generate_image.
+      const defaultModel = typeof currentDefault === "string" && currentDefault ? currentDefault : owned.id;
+      return { models: next, defaultModel };
+    }
+
+    /** Unlink removes only the entry this page created. */
+    function planImageUnlink(imageNsView, modelId) {
+      const models = imageModelsOf(imageNsView);
+      const entry = models.find((item) => item && typeof item === "object" && item.model === modelId);
+      if (!entry) return { models: null, reason: "该模型未链接到绘图配置。" };
+      if (!isManagedEntry(entry, modelId)) return { models: null, reason: "该绘图配置由「绘图」页手工维护，不能在这里取消。" };
+      const next = models.filter((item) => item !== entry);
+      const currentDefault = imageNsView.value?.defaultModel;
+      const defaultModel = currentDefault === entry.id ? (next[0]?.id ?? "") : currentDefault;
+      return { models: next, defaultModel };
     }
 
     function readModelField(nsView, settingsPath, modelId, field) {
@@ -371,6 +538,7 @@ window.__ModuleLoader__.load({
       const api = props.api;
       const timer = props.timer;
       const [data, setData] = React.useState(null);
+      const [imageNs, setImageNs] = React.useState(null);
       const [loading, setLoading] = React.useState(true);
       const [error, setError] = React.useState(null);
       const [toast, setToast] = React.useState(null);
@@ -394,17 +562,18 @@ window.__ModuleLoader__.load({
 
           const metaByProvider = new Map(providers.map((p) => [p.provider, p]));
           const nsByNs = new Map(namespaces.map((n) => [n.ns, n]));
+          const imageNsView = await ensureImageNs(() => api.settings.describe(), settingsRes.result.value);
 
           const built = { writable, providers: [] };
           for (const group of groups) {
             const entry = metaByProvider.get(group.id);
             const nsView = entry ? nsByNs.get(entry.settingsNs) : undefined;
+            const providerProfile = profileOf(nsView, entry ? entry.settingsPath : []);
             const reasoningEditable = !!(entry && entry.settingsNs === "llm-pi-ai");
             // A hand-declared route has no installed catalog under it, so its
             // route-level `defaultInput` is the whole answer for `auto`.
-            const routeProfile = entry ? at(nsView, entry.settingsPath || []) : undefined;
-            const routeDefaultInput = routeProfile && Array.isArray(routeProfile.defaultInput)
-              ? routeProfile.defaultInput
+            const routeDefaultInput = providerProfile && Array.isArray(providerProfile.defaultInput)
+              ? providerProfile.defaultInput
               : null;
             const models = group.models.map((m) => {
               const ctx = readModelField(nsView, entry ? entry.settingsPath : [], m.id, "contextWindow");
@@ -416,6 +585,7 @@ window.__ModuleLoader__.load({
               const rawInput = modalityField
                 ? readModelField(nsView, entry.settingsPath, m.id, modalityField)
                 : undefined;
+              const image = computeImageModelState(imageNsView, providerProfile, m.id);
               return {
                 id: m.id,
                 name: m.name,
@@ -425,6 +595,11 @@ window.__ModuleLoader__.load({
                 supportsDeveloperRole: devRole,
                 modalityField: modalityField || null,
                 modality: modalityField ? modalityChoice(rawInput) : null,
+                imageAvailable: image.available,
+                imageLinked: image.hasEntry,
+                imageManaged: image.managed,
+                imageEndpoint: image.endpoint || null,
+                imageApiKeyEnv: image.apiKeyEnv || null,
                 declared: !!(entry && entry.declared),
                 routeDefaultInput: routeDefaultInput,
                 efforts: (m.reasoning && Array.isArray(m.reasoning.efforts)) ? m.reasoning.efforts.map((e) => ({ id: e.id, name: e.name })) : [],
@@ -436,10 +611,19 @@ window.__ModuleLoader__.load({
               name: group.name,
               configurable: !!entry,
               reasoningEditable,
+              imageNsAvailable: !!imageNsView,
               models,
             });
           }
+          const imageModels = imageModelsOf(imageNsView);
+          const linkedIds = new Set(imageModels.filter((item) => item && item.model).map((item) => item.model));
+          for (const row of built.providers) {
+            row.imageLinkedCount = row.models.filter((m) => linkedIds.has(m.id)).length;
+          }
+          built.imageModels = imageModels.map((item) => item?.model).filter(Boolean);
+          built.imageDefault = typeof imageNsView?.value?.defaultModel === "string" ? imageNsView.value.defaultModel : "";
           setData(built);
+          setImageNs(imageNsView ?? null);
           setError(null);
         } catch (err) {
           setError(err && err.message ? err.message : String(err));
@@ -469,6 +653,32 @@ window.__ModuleLoader__.load({
           const entry = providersRes.result.value.providers.find((p) => p.provider === provider);
           if (!entry) throw new Error("该 provider 不可配置");
           const nsView = settingsRes.result.value.namespaces.find((n) => n.ns === entry.settingsNs);
+
+          if (kind === "imageLink") {
+            // Re-read immediately before writing, so the plan and the revision
+            // it is applied against come from the same document.
+            const freshRes = await api.settings.describe({});
+            if (!freshRes.result.ok) throw new Error(freshRes.result.error.message);
+            const freshNs = await ensureImageNs(() => api.settings.describe(), freshRes.result.value);
+            if (!freshNs) throw new Error("绘图插件未安装或不提供设置，请先安装 dsh-plugin-image-generation。");
+            const providerProfile = profileOf(nsView, entry.settingsPath);
+            const plan = value === true
+              ? planImageLink(freshNs, providerProfile, model, provider)
+              : planImageUnlink(freshNs, model);
+            if (!plan || !plan.models) throw new Error((plan && plan.reason) || "无法写入绘图配置");
+            const written = await api.settings.mutate({
+              ns: IMAGE_NS,
+              ops: [
+                { op: "set", path: ["models"], value: plan.models },
+                { op: "set", path: ["defaultModel"], value: plan.defaultModel || "" },
+              ],
+              expectedRevision: freshNs.revision,
+            });
+            if (!written.result.ok) throw new Error(written.result.error.message);
+            showToast("ok", value === true ? "已在绘图页生成模型配置" : "已取消生图标记");
+            await reload();
+            return;
+          }
 
           let field;
           let payload;
@@ -553,6 +763,7 @@ window.__ModuleLoader__.load({
           React.createElement("div", { className: "mcfg-title" }, "模型调参"),
           React.createElement("div", { className: "mcfg-sub" },
             "集中配置每个模型的可选推理档位、上下文窗口、最大输出和输入模态，修改即时保存；API 密钥与端点请在「模型」页配置。" +
+            "勾选「生图模型」会把该模型写入绘图插件的模型列表，供 generate_image 与绘图页使用。" +
             (data.writable ? "" : "（当前部署为只读，无法保存。）")
           )
         ),
@@ -566,6 +777,11 @@ window.__ModuleLoader__.load({
           }),
           query.trim().length > 0 ? React.createElement("span", { className: "mcfg-count" }, totalMatched + " 个模型") : null
         ),
+        data.imageModels.length > 0
+          ? React.createElement("div", { className: "mcfg-note" },
+              "绘图页当前 " + data.imageModels.length + " 个配置：" + data.imageModels.join("、")
+                + (data.imageDefault ? "（默认 " + data.imageDefault + "）" : "（未设默认，generate_image 需显式指定）"))
+          : React.createElement("div", { className: "mcfg-note" }, "绘图页尚未配置任何模型。"),
         toast ? React.createElement("div", { className: "mcfg-toast " + (toast.kind === "ok" ? "mcfg-toast-ok" : "mcfg-toast-err") }, toast.text) : null,
         filtered.length === 0
           ? React.createElement("div", { className: "mcfg-state" }, "没有匹配的模型。")
@@ -586,6 +802,9 @@ window.__ModuleLoader__.load({
                         React.createElement("span", { className: "mcfg-model-id" }, model.id),
                         model.modality === "text-image"
                           ? React.createElement("span", { className: "mcfg-chip mcfg-chip-on" }, "图像输入")
+                          : null,
+                        model.imageLinked
+                          ? React.createElement("span", { className: "mcfg-chip mcfg-chip-on" }, "生图模型")
                           : null
                       )
                     ),
@@ -664,6 +883,27 @@ window.__ModuleLoader__.load({
                       ),
                       React.createElement("div", { className: "mcfg-note" },
                         modalityNote(model.modality, model)
+                      )
+                    ) : null,
+                    model.imageAvailable ? React.createElement("div", { className: "mcfg-reasoning" },
+                      React.createElement("span", { className: "mcfg-label" }, "生图模型"),
+                      React.createElement("div", { className: "mcfg-img-actions" },
+                        React.createElement("label", { className: "mcfg-level" },
+                          React.createElement("input", {
+                            type: "checkbox",
+                            checked: model.imageLinked,
+                            disabled: !editable,
+                            onChange: () => applyChange(provider.provider, model.id, "imageLink", !model.imageLinked),
+                          }),
+                          React.createElement("span", null, "在「绘图」页自动配置该模型")
+                        ),
+                        model.imageLinked ? React.createElement("span", { className: "mcfg-chip mcfg-chip-on" }, "已在绘图页配置") : null
+                      ),
+                      React.createElement("div", { className: "mcfg-note" },
+                        model.imageLinked
+                          ? "端点 " + (model.imageEndpoint || "（未填写）") + (model.imageApiKeyEnv ? "，凭据 " + model.imageApiKeyEnv : "")
+                            + "。由本页维护的条目不能在绘图页删除；尺寸、质量等参数仍可在绘图页修改。"
+                          : "勾选后写入绘图插件的模型列表（模型 ID 复用 " + model.id + "，端点由本 provider 的供应商地址加 /images/generations 推导）。"
                       )
                     ) : null,
                     React.createElement("div", { className: "mcfg-fields" },
