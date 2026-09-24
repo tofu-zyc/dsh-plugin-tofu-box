@@ -1,0 +1,8 @@
+# One insert over the existing profile composition. This bundle deliberately does
+# NOT override, disable, or replace any shipped row: the shell executor row
+# (`pwsh-sandbox`) keeps providing `ctx.shell`, and this plugin only reads its
+# live facts and writes the already-supported `shell.pwshPath` setting.
+- insert:
+    - id: shell-selector
+      name: dsh-plugin-shell-selector
+      inject: [settings]

@@ -57,7 +57,7 @@ URL 图片会在宿主立即下载并持久化。结果地址可以是网关返�
 
 ## 配置结构
 
-设置页写入 `image-generation` settings namespace，也可以在插件的 Cordis `config` 中提供基础配置：
+设置页写入 profile 条目 id `image-generation` 的 volatile Config 字段（`models` 和 `defaultModel`）；宿主直接读取稳定引用，改动对下一次生成生效。也可以在插件的 Cordis `config` 中提供基础配置：
 
 ```yaml
 models:
@@ -76,7 +76,7 @@ defaultModel: my-art
 
 ## 验证与兼容性
 
-要求 dsh ≥ 0.1.6-alpha.1，使用该版本的 tools、settings、attachments 和 typert Remote 接口。开发验证包含：
+本分支要求 dsh ≥ 0.1.7-alpha.2，使用该版本的 tools、profile-backed SettingsForms、attachments 和 typert Remote 接口。开发验证包含：
 
 ```sh
 node --test dsh-plugin-image-generation/tests/plugin.test.mjs
@@ -88,6 +88,6 @@ node dsh-plugin-image-generation/tests/browser.mjs
 - `attachments.mjs` 使用已安装的 dsh 附件后端，所有产物写入新建临时目录；可通过 `DSH_ATTACHMENT_MODULE` 指定后端模块入口。
 - `browser.mjs` 使用 React 和模拟 Remote 服务检查设置、Key 分离保存、生成、下载、窄屏布局与任务恢复。依赖安装到测试目录，用 `IMAGE_QA_MODULES` 指定包含 playwright、react、react-dom、esbuild 的目录；默认使用系统临时目录下的 `dsh-image-generation-qa`，浏览器使用 Edge 无头模式。
 - `live.mjs` 只用于一次性隔离 profile：设置 `DSH_IMAGE_TEST_URL` 为该实例的认证 URL，并设置 `DSH_IMAGE_TEST_ISOLATED=1`。测试会在该 profile 保存模拟模型与模拟凭据，通过真实 settings、credentials、Remote 网关、附件存储完成本地 HTTP 绘图与下载。不要指向日常使用的 profile。
-- Windows 本地 HTTP 与浏览器夹具测试、已安装 0.1.6-alpha.2 附件后端和隔离 dsh profile 完整流程验证通过。尚未调用真实付费绘图服务；其他平台与不同网关需要实际验证。
+- Windows 本地 HTTP 与浏览器夹具测试、隔离 dsh 0.1.7-alpha.2 profile 的完整绘图流程验证通过；生产数据副本中的旧绘图模型设置也经官方自动导入并在浏览器确认两项均存在。尚未调用真实付费绘图服务；其他平台与不同网关需要实际验证。
 
 卸载：`dsh plugin --profile web remove dsh-plugin-image-generation`，然后重启 dsh。已有附件与共享凭据不会被删除。

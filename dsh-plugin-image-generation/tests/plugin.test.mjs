@@ -9,7 +9,10 @@ import { discoverImageModels, discoveryUrl, generateImages, resolveRequest, vali
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAHklEQVQ4jWPo23H3PyWYYdSA/6NhcHc0DHYMizAAALd0Ii6qzJXIAAAAAElFTkSuQmCC', 'base64')
 const hash = data => createHash('sha256').update(data).digest('hex')
-const config = overrides => Config({ models: [{ id: 'art', model: 'custom-image-model', ...overrides }], defaultModel: 'art' })
+const config = overrides => {
+  const parsed = Config({ models: [{ id: 'art', model: 'custom-image-model', ...overrides }], defaultModel: 'art' })
+  return { models: parsed.models.get().map(item => ({ ...item })), defaultModel: parsed.defaultModel.get() }
+}
 function store() {
   const files = new Map()
   return {
@@ -148,6 +151,10 @@ test('cancellation aborts a live HTTP request without retry', async t => {
 
 function pluginHarness(cfg) {
   let current = cfg
+  const liveConfig = {
+    models: { get: () => current.models },
+    defaultModel: { get: () => current.defaultModel },
+  }
   const tools = new Map(), cleanups = [], services = new Map()
   const attachments = store()
   let modalities = ['text']
@@ -162,11 +169,10 @@ function pluginHarness(cfg) {
       return undefined
     },
     tools: { register(tool) { tools.set(tool.name, tool); return () => tools.delete(tool.name) } },
-    settings: { register(_ns, schema, options) { current = schema(options.base); options.validate(current); return { get: () => current } } },
   }
-  apply(ctx, cfg)
+  apply(ctx, liveConfig)
   return { tools, attachments, service: services.get('imageGeneration'),
-    update(value) { current = Config(value); validateConfig(current) },
+    update(value) { current = value; validateConfig(current) },
     vision() { modalities = ['text', 'image'] },
     dispose() { for (const cleanup of cleanups.reverse()) cleanup() } }
 }

@@ -23,6 +23,7 @@ const PURE_NAMES = [
   'deriveImageEntry', 'isManagedEntry', 'computeImageModelState', 'imageModelsOf',
   'normalizeImageEndpoint', 'acceptableImageEndpoint', 'sanitizeImageId', 'uniqueImageId',
   'planImageLink', 'planImageUnlink',
+  'titleViewOf', 'planTitleWrite',
 ]
 
 const EXPORT_MARK = 'return module.exports;'

@@ -6,12 +6,12 @@ window.__ModuleLoader__.load({
     Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
     const React = require("react");
     const {
-      IconCheckOutline16,
-      IconChevronDownOutline14,
-      IconChevronRightOutline14,
-      IconCloseFill14,
-      IconSearchOutline16,
-      IconWarningOutline16,
+      IconCheckOutlineRegular,
+      IconChevronDownOutlineRegular,
+      IconChevronRightOutlineRegular,
+      IconCloseFillRegular,
+      IconSearchOutlineRegular,
+      IconWarningOutlineRegular,
       Toast,
     } = require("@deepseek-ai/dsh-client-ui-primitives");
 
@@ -422,7 +422,7 @@ window.__ModuleLoader__.load({
           React.createElement(
             "span",
             { className: "msrch_check" },
-            selected ? React.createElement(IconCheckOutline16, {}) : null
+            selected ? React.createElement(IconCheckOutlineRegular, {}) : null
           )
         );
       };
@@ -434,7 +434,7 @@ window.__ModuleLoader__.load({
           React.createElement(
             "div",
             { className: "msrch_searchWrap", role: "none" },
-            React.createElement(IconSearchOutline16, {
+            React.createElement(IconSearchOutlineRegular, {
               size: 14,
               className: "msrch_searchIcon",
             }),
@@ -464,7 +464,7 @@ window.__ModuleLoader__.load({
                       searchRef.current?.focus();
                     },
                   },
-                  React.createElement(IconCloseFill14, { size: 12 })
+                  React.createElement(IconCloseFillRegular, { size: 12 })
                 )
               : null
           ),
@@ -636,7 +636,7 @@ window.__ModuleLoader__.load({
                     "span",
                     { className: "msrch_check" },
                     effectiveEffort === level.effort
-                      ? React.createElement(IconCheckOutline16, {})
+                      ? React.createElement(IconCheckOutlineRegular, {})
                       : null
                   )
                 )
@@ -680,7 +680,7 @@ window.__ModuleLoader__.load({
                 effortLabel
               )
             : null,
-          React.createElement(IconChevronDownOutline14, {
+          React.createElement(IconChevronDownOutlineRegular, {
             className: cx("msrch_chevron", open && "msrch_chevronOpen"),
           })
         ),
@@ -727,7 +727,7 @@ window.__ModuleLoader__.load({
                         { className: "msrch_cellValue" },
                         modelLabel
                       ),
-                      React.createElement(IconChevronRightOutline14, {
+                      React.createElement(IconChevronRightOutlineRegular, {
                         className: "msrch_cellChevron",
                       })
                     ),
@@ -754,7 +754,7 @@ window.__ModuleLoader__.load({
                             { className: "msrch_cellValue" },
                             effortLabel
                           ),
-                          React.createElement(IconChevronRightOutline14, {
+                          React.createElement(IconChevronRightOutlineRegular, {
                             className: "msrch_cellChevron",
                           })
                         )
@@ -768,7 +768,7 @@ window.__ModuleLoader__.load({
         toast !== null
           ? React.createElement(Toast, {
               text: toast.text,
-              icon: React.createElement(IconWarningOutline16, {}),
+              icon: React.createElement(IconWarningOutlineRegular, {}),
               anchor: rootRef.current?.closest("[data-composer-card]") ?? null,
               onDone: () => {
                 setToast(null);

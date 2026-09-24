@@ -1,0 +1,3 @@
+- insert:
+    - id: team-task-route
+      name: dsh-plugin-team-task-route

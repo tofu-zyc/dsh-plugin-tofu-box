@@ -1,0 +1,38 @@
+{
+  "name": "dsh-plugin-title-model",
+  "version": "1.0.0",
+  "license": "MIT",
+  "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "session-title", "title", "model", "settings"],
+  "publishConfig": { "registry": "https://registry.npmjs.org" },
+  "repository": { "type": "git", "url": "git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git", "directory": "dsh-plugin-title-model" },
+  "bugs": { "url": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/issues" },
+  "homepage": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/tree/main/dsh-plugin-title-model",
+  "description": "为会话标题生成提供独立模型设置：默认继承当前会话，可按 profile 指定 provider/model，界面在 dsh-plugin-model-tuning 的「用途」页。",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "node tests/route.test.mjs && node tests/provider.test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-session-title-llm": "^0.1.6-alpha.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-session-title-llm": {
+      "optional": true
+    }
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "README.md"
+  ]
+}

@@ -45,6 +45,21 @@ window.__ModuleLoader__.load({
 .mcfg-select,.mcfg-input{font-size:12.5px;padding:6px 8px;border-radius:7px;border:1px solid rgba(128,128,128,.4);background:transparent;color:inherit;width:100%;box-sizing:border-box}
 .mcfg-custom{width:100%}
 .mcfg-input:disabled,.mcfg-select:disabled{opacity:.5;cursor:not-allowed}
+/* 模型参数 / 用途 两个页签：标题生成等"按用途"的配置归入用途页，绘图专有参数
+   仍留在「绘图」页，这里只做导航，不搬运绘图数据。 */
+.mcfg-tabs{display:flex;gap:6px;flex-wrap:wrap}
+.mcfg-tab{font-size:12.5px;padding:6px 14px;border-radius:8px;border:1px solid rgba(128,128,128,.35);background:transparent;color:inherit;cursor:pointer}
+.mcfg-tab:hover{border-color:rgba(128,128,128,.6)}
+.mcfg-tab-on{border-color:rgba(80,140,255,.8);background:rgba(80,140,255,.14);font-weight:600}
+.mcfg-purpose{display:flex;flex-direction:column;gap:12px;padding:14px;border:1px solid rgba(128,128,128,.28);border-radius:10px}
+.mcfg-purpose-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.mcfg-purpose-name{font-size:13.5px;font-weight:600}
+.mcfg-radio{display:flex;flex-direction:column;gap:8px}
+.mcfg-radio-row{display:flex;align-items:flex-start;gap:8px;font-size:12.5px;cursor:pointer}
+.mcfg-radio-row input{margin-top:2px;accent-color:rgb(80,140,255)}
+.mcfg-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.mcfg-save{font-size:12.5px;padding:6px 14px;border-radius:8px;border:1px solid rgba(80,140,255,.6);background:transparent;color:inherit;cursor:pointer}
+.mcfg-save:disabled{opacity:.5;cursor:not-allowed}
 .mcfg-select:focus,.mcfg-input:focus{outline:none;border-color:rgba(80,140,255,.7)}
 .mcfg-img-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .mcfg-warn{font-size:11.5px;line-height:1.5;color:#c9722c}
@@ -476,6 +491,61 @@ window.__ModuleLoader__.load({
       return write;
     }
 
+    // ── 用途：标题生成 ───────────────────────────────────────────────────────
+    /**
+     * The independent title plugin's settings namespace. Title routing lives in
+     * its own host package (`dsh-plugin-title-model`) because the title provider
+     * can only be registered from the host; this page only reads and writes the
+     * user section through `remote.settings`.
+     */
+    const TITLE_NS = "title-model";
+    /** Same vocabulary as the host schema (`inherit` is the default). */
+    const TITLE_MODES = ["inherit", "custom"];
+
+    /**
+     * Read the title purpose view out of a settings describe response.
+     * @param {object|undefined} settingsView - `remote.settings.describe()` value.
+     * @returns {{available:boolean, mode:string, provider:string|null, model:string|null, revision:(number|null)}} the view.
+     */
+    function titleViewOf(settingsView) {
+      const view = findNamespace(settingsView, TITLE_NS);
+      if (!view) return { available: false, mode: "inherit", provider: null, model: null, revision: null };
+      const value = view.value && typeof view.value === "object" ? view.value : {};
+      const mode = TITLE_MODES.indexOf(value.mode) >= 0 ? value.mode : "inherit";
+      return {
+        available: true,
+        mode,
+        provider: typeof value.provider === "string" && value.provider !== "" ? value.provider : null,
+        model: typeof value.model === "string" && value.model !== "" ? value.model : null,
+        revision: typeof view.revision === "number" ? view.revision : null,
+      };
+    }
+
+    /**
+     * Plan the write for one title purpose edit.
+     *
+     * Always returns the COMPLETE field set: switching back to `inherit` must
+     * clear a previously chosen route instead of leaving it behind in the user
+     * section, where it would silently stay authoritative for a later switch.
+     * @param {object} next - `{ mode, provider, model }` as chosen in the UI.
+     * @returns {{ns:string, ops:Array<object>}} the mutate request body.
+     */
+    function planTitleWrite(next) {
+      const mode = next && next.mode === "custom" ? "custom" : "inherit";
+      if (mode === "inherit") {
+        return { ns: TITLE_NS, ops: [
+          { op: "unset", path: ["mode"] },
+          { op: "unset", path: ["provider"] },
+          { op: "unset", path: ["model"] },
+        ] };
+      }
+      return { ns: TITLE_NS, ops: [
+        { op: "set", path: ["mode"], value: "custom" },
+        { op: "set", path: ["provider"], value: String(next.provider || "") },
+        { op: "set", path: ["model"], value: String(next.model || "") },
+      ] };
+    }
+
     function CapacityField(props) {
       const value = props.value;
       const options = props.options;
@@ -543,6 +613,10 @@ window.__ModuleLoader__.load({
       const [error, setError] = React.useState(null);
       const [toast, setToast] = React.useState(null);
       const [query, setQuery] = React.useState("");
+      const [tab, setTab] = React.useState("models");
+      const [title, setTitle] = React.useState(null);
+      const [titleDraft, setTitleDraft] = React.useState(null);
+      const [titleBusy, setTitleBusy] = React.useState(false);
 
       async function reload() {
         try {
@@ -563,6 +637,11 @@ window.__ModuleLoader__.load({
           const metaByProvider = new Map(providers.map((p) => [p.provider, p]));
           const nsByNs = new Map(namespaces.map((n) => [n.ns, n]));
           const imageNsView = await ensureImageNs(() => api.settings.describe(), settingsRes.result.value);
+          // 标题用途与模型参数同一次 describe 读取；未安装 dsh-plugin-title-model 时
+          // titleViewOf 返回 available:false，用途页显示安装提示而不是报错。
+          setTitle(titleViewOf(settingsRes.result.value));
+          setTitleDraft(null);
+          setError(null);
 
           const built = { writable, providers: [] };
           for (const group of groups) {
@@ -625,8 +704,10 @@ window.__ModuleLoader__.load({
           setData(built);
           setImageNs(imageNsView ?? null);
           setError(null);
+          return true;
         } catch (err) {
           setError(err && err.message ? err.message : String(err));
+          return false;
         } finally {
           setLoading(false);
         }
@@ -742,12 +823,49 @@ window.__ModuleLoader__.load({
       if (error) {
         return React.createElement("div", { className: "mcfg-state mcfg-error" }, "加载失败：" + error);
       }
-      if (!data || !data.providers || data.providers.length === 0) {
-        return React.createElement("div", { className: "mcfg-state" }, "当前没有已注册的模型。");
+
+      /** The effective title selection: an unsaved draft wins over the stored value. */
+      const titleShown = titleDraft || title || { available: false, mode: "inherit", provider: null, model: null, revision: null };
+      const titleProviders = data && data.providers ? data.providers : [];
+      const titleProvider = titleProviders.find((p) => p.provider === titleShown.provider) || null;
+      const titleModels = titleProvider ? titleProvider.models : [];
+      const titleDirty = !!title && (
+        titleShown.mode !== title.mode
+        || (titleShown.provider || null) !== (title.provider || null)
+        || (titleShown.model || null) !== (title.model || null)
+      );
+      const titleSaveDisabled = !data || !data.writable || !titleShown.available || titleBusy
+        || (titleShown.mode === "custom" && (!titleShown.provider || !titleShown.model));
+
+      function editTitleDraft(patch) {
+        setTitleDraft({ ...titleShown, ...patch });
+      }
+
+      async function saveTitle() {
+        const payload = titleShown.mode === "custom"
+          ? { mode: "custom", provider: titleShown.provider, model: titleShown.model }
+          : { mode: "inherit" };
+        setTitleBusy(true);
+        let saved = false;
+        try {
+          const write = planTitleWrite(payload);
+          const res = await api.settings.mutate({ ns: write.ns, ops: write.ops });
+          if (!res.result.ok) throw new Error(res.result.error.message);
+          saved = true;
+        } catch (err) {
+          showToast("err", err && err.message ? err.message : String(err));
+        } finally {
+          setTitleBusy(false);
+        }
+        if (!saved) return;
+        showToast("ok", "标题生成设置已保存，对之后生成的标题生效");
+        // reload() contains its own failures into `error` state; use its outcome so a
+        // failed refresh is reported as a refresh problem, not as a save failure.
+        if (!await reload()) showToast("err", "设置已保存，但页面数据刷新失败，请重新打开本页确认。");
       }
 
       const q = query.trim().toLowerCase();
-      const filtered = q.length === 0 ? data.providers : data.providers.map((provider) => {
+      const filtered = !data || !data.providers || data.providers.length === 0 ? [] : q.length === 0 ? data.providers : data.providers.map((provider) => {
         const providerMatch = provider.name.toLowerCase().indexOf(q) >= 0 || provider.provider.toLowerCase().indexOf(q) >= 0;
         const models = providerMatch ? provider.models : provider.models.filter((m) =>
           m.id.toLowerCase().indexOf(q) >= 0 ||
@@ -758,16 +876,20 @@ window.__ModuleLoader__.load({
       }).filter(Boolean);
       const totalMatched = filtered.reduce((n, p) => n + p.models.length, 0);
 
-      return React.createElement("div", { className: "mcfg" },
-        React.createElement("div", { className: "mcfg-head" },
-          React.createElement("div", { className: "mcfg-title" }, "模型调参"),
-          React.createElement("div", { className: "mcfg-sub" },
-            "集中配置每个模型的可选推理档位、上下文窗口、最大输出和输入模态，修改即时保存；API 密钥与端点请在「模型」页配置。" +
-            "勾选「生图模型」会把该模型写入绘图插件的模型列表，供 generate_image 与绘图页使用。" +
-            (data.writable ? "" : "（当前部署为只读，无法保存。）")
-          )
-        ),
-        React.createElement("div", { className: "mcfg-searchrow" },
+      const tabButton = (id, label) => React.createElement("button", {
+        key: id,
+        type: "button",
+        className: "mcfg-tab" + (tab === id ? " mcfg-tab-on" : ""),
+        "aria-pressed": tab === id,
+        onClick: () => setTab(id),
+      }, label);
+      const tabBar = React.createElement("div", { className: "mcfg-tabs", role: "tablist" },
+        tabButton("models", "模型参数"),
+        tabButton("purpose", "用途")
+      );
+
+      const modelsPanel = [
+        React.createElement("div", { className: "mcfg-searchrow", key: "search" },
           React.createElement("input", {
             className: "mcfg-search",
             type: "text",
@@ -778,14 +900,15 @@ window.__ModuleLoader__.load({
           query.trim().length > 0 ? React.createElement("span", { className: "mcfg-count" }, totalMatched + " 个模型") : null
         ),
         data.imageModels.length > 0
-          ? React.createElement("div", { className: "mcfg-note" },
+          ? React.createElement("div", { className: "mcfg-note", key: "img" },
               "绘图页当前 " + data.imageModels.length + " 个配置：" + data.imageModels.join("、")
                 + (data.imageDefault ? "（默认 " + data.imageDefault + "）" : "（未设默认，generate_image 需显式指定）"))
-          : React.createElement("div", { className: "mcfg-note" }, "绘图页尚未配置任何模型。"),
-        toast ? React.createElement("div", { className: "mcfg-toast " + (toast.kind === "ok" ? "mcfg-toast-ok" : "mcfg-toast-err") }, toast.text) : null,
-        filtered.length === 0
-          ? React.createElement("div", { className: "mcfg-state" }, "没有匹配的模型。")
-          : filtered.map((provider) =>
+          : React.createElement("div", { className: "mcfg-note", key: "img" }, "绘图页尚未配置任何模型。"),
+        !data.providers || data.providers.length === 0
+          ? React.createElement("div", { className: "mcfg-state", key: "none" }, "当前没有已注册的模型。")
+          : filtered.length === 0
+            ? React.createElement("div", { className: "mcfg-state", key: "empty" }, "没有匹配的模型。")
+            : filtered.map((provider) =>
               React.createElement("div", { key: provider.provider, className: "mcfg-provider" },
                 React.createElement("div", { className: "mcfg-provider-name" },
                   provider.name,
@@ -920,6 +1043,146 @@ window.__ModuleLoader__.load({
                 })
               )
             )
+      ];
+
+      // ── 用途页 ────────────────────────────────────────────────────────────
+      // 绘图专有参数留在「绘图」页：这里只显示其链接状态，不重复实现端点、
+      // 凭据或模型发现，也不把标题设置塞进绘图面板。
+      const purposePanel = [
+        React.createElement("div", { className: "mcfg-purpose", key: "title" },
+          React.createElement("div", { className: "mcfg-purpose-head" },
+            React.createElement("span", { className: "mcfg-purpose-name" }, "标题生成"),
+            React.createElement("span", { className: "mcfg-chip" }, "独立请求"),
+            title && title.available
+              ? React.createElement("span", { className: "mcfg-chip mcfg-chip-on" }, "已安装")
+              : React.createElement("span", { className: "mcfg-chip" }, "未安装")
+          ),
+          React.createElement("div", { className: "mcfg-desc" },
+            "会话标题由一次独立的辅助请求生成，不会改动对话模型。默认继承当前会话的 provider / model。"
+          ),
+          !titleShown.available
+            ? React.createElement("div", { className: "mcfg-state mcfg-error" },
+                "未检测到 title-model 设置命名空间：请安装并启用 dsh-plugin-title-model（该插件负责注册标题 provider），安装后此页可配置。"
+              )
+            : [
+                React.createElement("div", { className: "mcfg-radio", key: "mode" },
+                  React.createElement("label", { className: "mcfg-radio-row" },
+                    React.createElement("input", {
+                      type: "radio",
+                      name: "title-mode",
+                      checked: titleShown.mode === "inherit",
+                      disabled: !data.writable || titleBusy,
+                      onChange: () => editTitleDraft({ mode: "inherit", provider: null, model: null }),
+                    }),
+                    React.createElement("span", null,
+                      "继承当前会话（默认）",
+                      React.createElement("div", { className: "mcfg-note" },
+                        "标题请求沿用该会话已记录的 provider / model，行为与内置标题生成一致。")
+                    )
+                  ),
+                  React.createElement("label", { className: "mcfg-radio-row" },
+                    React.createElement("input", {
+                      type: "radio",
+                      name: "title-mode",
+                      checked: titleShown.mode === "custom",
+                      disabled: !data.writable || titleBusy,
+                      onChange: () => {
+                        const fallback = titleProviders[0];
+                        editTitleDraft({
+                          mode: "custom",
+                          provider: titleShown.provider || (fallback ? fallback.provider : null),
+                          model: titleShown.model || (fallback && fallback.models[0] ? fallback.models[0].id : null),
+                        });
+                      },
+                    }),
+                    React.createElement("span", null,
+                      "使用指定模型",
+                      React.createElement("div", { className: "mcfg-note" },
+                        "标题请求改投所选 provider / model；会话的对话模型保持不变。")
+                    )
+                  )
+                ),
+                titleShown.mode === "custom"
+                  ? React.createElement("div", { className: "mcfg-fields", key: "route" },
+                      React.createElement("label", { className: "mcfg-field" },
+                        React.createElement("span", { className: "mcfg-label" }, "Provider"),
+                        React.createElement("select", {
+                          className: "mcfg-select",
+                          disabled: !data.writable || titleBusy,
+                          value: titleShown.provider || "",
+                          onChange: (e) => {
+                            const next = titleProviders.find((p) => p.provider === e.target.value);
+                            editTitleDraft({
+                              provider: e.target.value,
+                              model: next && next.models[0] ? next.models[0].id : null,
+                            });
+                          },
+                        },
+                          React.createElement("option", { value: "" }, "（请选择 provider）"),
+                          titleProviders.map((p) => React.createElement("option", { key: p.provider, value: p.provider },
+                            p.name + " · " + p.provider))
+                        )
+                      ),
+                      React.createElement("label", { className: "mcfg-field" },
+                        React.createElement("span", { className: "mcfg-label" }, "Model"),
+                        React.createElement("select", {
+                          className: "mcfg-select",
+                          disabled: !data.writable || titleBusy || !titleShown.provider,
+                          value: titleShown.model || "",
+                          onChange: (e) => editTitleDraft({ model: e.target.value }),
+                        },
+                          React.createElement("option", { value: "" }, "（请选择 model）"),
+                          titleModels.map((m) => React.createElement("option", { key: m.id, value: m.id },
+                            m.name + " · " + m.id))
+                        )
+                      )
+                    )
+                  : null,
+                React.createElement("div", { className: "mcfg-note", key: "scope" },
+                  "生效范围：保存后对本 profile 之后生成的标题生效（包含新会话与后续标题生成）；不会改动已有标题、手动重命名，也不会改动会话的对话模型。"
+                ),
+                React.createElement("div", { className: "mcfg-note", key: "budget" },
+                  "标题请求沿用宿主既有策略：提示词、输入字节上限、输出 token 上限与超时均由标题生成策略固定，因此这里不提供推理档位控件。"
+                ),
+                React.createElement("div", { className: "mcfg-actions", key: "actions" },
+                  React.createElement("button", {
+                    type: "button",
+                    className: "mcfg-save",
+                    disabled: titleSaveDisabled || !titleDirty,
+                    onClick: saveTitle,
+                  }, titleBusy ? "正在保存…" : (titleDirty ? "保存标题设置" : "已保存")),
+                  titleDirty ? React.createElement("span", { className: "mcfg-note" }, "有未保存的修改") : null
+                )
+              ]
+        ),
+        React.createElement("div", { className: "mcfg-purpose", key: "image" },
+          React.createElement("div", { className: "mcfg-purpose-head" },
+            React.createElement("span", { className: "mcfg-purpose-name" }, "绘图"),
+            React.createElement("span", { className: "mcfg-chip" }, "图像专有参数")
+          ),
+          React.createElement("div", { className: "mcfg-desc" },
+            "绘图模型、端点、尺寸与质量属于图像专有参数，仍在「绘图」页配置；本页的「生图模型」勾选会把所选模型写入绘图插件的模型列表。"
+          ),
+          data.imageModels && data.imageModels.length > 0
+            ? React.createElement("div", { className: "mcfg-note" },
+                "绘图页当前 " + data.imageModels.length + " 个配置：" + data.imageModels.join("、")
+                  + (data.imageDefault ? "（默认 " + data.imageDefault + "）" : "（未设默认，generate_image 需显式指定）"))
+            : React.createElement("div", { className: "mcfg-note" }, "绘图页尚未配置任何模型。")
+        )
+      ];
+
+      return React.createElement("div", { className: "mcfg" },
+        React.createElement("div", { className: "mcfg-head" },
+          React.createElement("div", { className: "mcfg-title" }, "模型调参"),
+          React.createElement("div", { className: "mcfg-sub" },
+            "集中配置每个模型的可选推理档位、上下文窗口、最大输出和输入模态，修改即时保存；API 密钥与端点请在「模型」页配置。" +
+            "勾选「生图模型」会把该模型写入绘图插件的模型列表，供 generate_image 与绘图页使用。" +
+            (data.writable ? "" : "（当前部署为只读，无法保存。）")
+          )
+        ),
+        tabBar,
+        toast ? React.createElement("div", { className: "mcfg-toast " + (toast.kind === "ok" ? "mcfg-toast-ok" : "mcfg-toast-err") }, toast.text) : null,
+        tab === "models" ? modelsPanel : purposePanel
       );
     }
 
@@ -929,7 +1192,10 @@ window.__ModuleLoader__.load({
     // plugin until the mux connection is up, so the settings page never loads
     // against a dead API surface.
     // 点分服务名需逐一声明（同官方 settings-models：remote.llm / remote.settings）。
-    const inject = ["slots", "remote", "remote.llm", "remote.settings", "remote.session"];
+    // locale 同样必须声明：cordis 的 ctx 代理对非 runtime fiber 读未 inject 的服务会
+    // 直接抛『cannot get property "locale" without inject』——写 `if (ctx.locale)`
+    // 兜底是没用的，属性读取本身就把 apply() 炸掉（boot 报 entry did not activate）。
+    const inject = ["slots", "remote", "remote.llm", "remote.settings", "remote.session", "locale"];
 
     function apply(ctx) {
       const style = document.createElement("style");
@@ -937,6 +1203,38 @@ window.__ModuleLoader__.load({
       style.textContent = CSS;
       document.head.appendChild(style);
       ctx.effect(() => () => { style.remove(); });
+
+      if (ctx.locale) {
+        // 生产 dsh-client-locale 的 LOCALE_IDS 是 ["zh", "en"]，活动 locale 只有
+        // 这两个；注册 "zh-CN" 虽然在 BCP 47 校验内，但永远不会被选中（回退链
+        // 末端是 en），会让中文界面拿到英文键。register 对同一 ns+locale 重复注册
+        // 会抛错（HMR 再激活就会踩中），所以用 ctx.effect 挂进 fiber 生命周期，
+        // dispose 时自动注销；multi-locale 形态一次写入 zh / en。
+        ctx.effect(() => ctx.locale.register("dsh-plugin-model-tuning", {
+          en: {
+            "tab.models": "Model parameters",
+            "tab.purpose": "Purposes",
+            "title.name": "Session titles",
+            "title.desc": "A session title comes from a separate auxiliary request and never changes the chat model. By default it inherits the session's provider / model.",
+            "title.inherit": "Inherit from the current session (default)",
+            "title.custom": "Use a specific model",
+            "title.scope": "Scope: applying this affects titles generated afterwards in this profile. Existing titles, manual renames, and the session's chat model are left untouched.",
+            "title.missing": "The title-model settings namespace is missing. Install and enable dsh-plugin-title-model (it registers the title provider), then this page becomes configurable.",
+            "title.save": "Save title settings",
+          },
+          zh: {
+            "tab.models": "模型参数",
+            "tab.purpose": "用途",
+            "title.name": "标题生成",
+            "title.desc": "会话标题由一次独立的辅助请求生成，不会改动对话模型。默认继承当前会话的 provider / model。",
+            "title.inherit": "继承当前会话（默认）",
+            "title.custom": "使用指定模型",
+            "title.scope": "生效范围：保存后对本 profile 之后生成的标题生效；不会改动已有标题、手动重命名，也不会改动会话的对话模型。",
+            "title.missing": "未检测到 title-model 设置命名空间：请安装并启用 dsh-plugin-title-model（该插件负责注册标题 provider），安装后此页可配置。",
+            "title.save": "保存标题设置",
+          },
+        }));
+      }
 
       // 旧客户端 API（ctx.connection.api）在 0.1.2 已移除；此处把新
       // remote.* 面适配回本插件既有的 {result:{ok,error,value}} 消费形状，

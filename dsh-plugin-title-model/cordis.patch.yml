@@ -1,0 +1,22 @@
+# dsh-plugin-title-model — 显式替换宿主自带的标题生成行。
+#
+# 顺序即语义：
+#   1. 先 disable dsh-base 的 `session-title-llm` 行（@deepseek-ai/dsh-session-title-first-prompt-llm）。
+#      `ctx.sessionTitle.register()` 只允许一个 provider，第二次注册直接抛错，
+#      所以必须先摘掉原行再插入本行；反过来 boot 会失败。
+#   2. 再 insert 本包。
+#
+# 本行 config 与 dsh-base 的 `session-title-llm` 完全一致，因此无论设置处于
+# 默认「继承」还是被卸载回退，标题生成的提示词预算、字节上限、超时行为都不变。
+- id: session-title-llm
+  disabled: true
+
+- insert:
+    - id: title-model
+      name: dsh-plugin-title-model
+      config:
+        targetWords: 5
+        targetCjkCharacters: 10
+        maxInputBytes: 4096
+        maxOutputTokens: 64
+        timeoutMs: 60000

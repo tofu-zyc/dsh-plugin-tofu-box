@@ -1,8 +1,10 @@
 # dsh-plugin-model-tuning
 
-「设置 → 模型调参」页面插件。
+「设置 → 模型调参」页面插件。页面分为**「模型参数」**与**「用途」**两个页签。
 
 ## 功能
+
+### 模型参数
 
 - 按 provider 分组展示当前模型目录；
 - 为每个模型配置：
@@ -16,6 +18,25 @@
   - 生图模型勾选（写入绘图插件的设置，见「与绘图插件的联动」）；
 - 顶部搜索框按模型名 / ID / 描述 / provider 过滤；
 - 修改即时保存（`remote.settings.mutate`；模型目录来自 `remote.session.modelCatalog()`）。
+
+### 用途
+
+按「用途」而非「模型」组织的配置。目前含**标题生成**一项，由独立宿主包
+[`dsh-plugin-title-model`](../dsh-plugin-title-model/README.md) 提供：
+
+- 默认**继承当前会话**已记录的 provider / model（与内置标题生成一致）；
+- 也可指定独立的 provider / model，选项全部来自真实模型目录（不提供自由输入框，避免臆造 ID）；
+- 每次生成重新读取设置，保存后下一次标题生成即生效，**不需要重启宿主**；
+- 生效范围是本 profile 之后生成的标题；已有标题、手动重命名、会话的对话模型都不受影响；
+- 不提供推理档位控件：标题策略不向标题请求传递 `reasoningEffort`，加一个不生效的控件会误导；
+- 未安装 `dsh-plugin-title-model` 时，用途页显示安装提示而不是报错。
+
+绘图仍单独列出：绘图模型、端点、尺寸、质量属于**图像专有参数**，继续在「绘图」页维护，
+本页只显示链接状态并保留「生图模型」勾选，不重复实现端点、凭据或模型发现。
+
+新增文案通过 `ctx.locale.register("dsh-plugin-model-tuning", { en, zh })` 注册。
+生产 `dsh-client-locale` 的活动 locale 是 **`zh` / `en`**（不是 `zh-CN`），
+因此 `zh` 字典才是中文界面实际取用的那一份；`tests/title-purpose.test.mjs` 对此有回归测试。
 
 ## 与绘图插件的联动
 
@@ -90,6 +111,17 @@ provider 的 section schema 在写入时拒绝。
   被禁用、推理档位显示「由 provider 固定」。官方
   `dsh-client-ui-settings-models` 用的同样是 `listConfigurableProviders()`。
 
+## 测试
+
+```bash
+node tests/image-link.test.mjs     # 绘图联动的写入规划（既有）
+node tests/title-purpose.test.mjs  # 用途页：标题设置读写规划 + locale 回归
+```
+
+两个文件都以「解析 bundle 但用桩 React、不运行页面」的方式取出纯函数，因此
+**不覆盖渲染**：页面实际长什么样、保存是否真的落到设置里，需要在已安装的页面上
+当场验证。
+
 ## 安装
 
 ```bash
@@ -98,8 +130,13 @@ cd model-tuning
 ```
 
 本地开发环境已通过 `$DSH_HOME/profiles/node_modules` 软链和
-`cordis.patch.yml` 中的 `model-tuning` insert 启用；改 `client.js` 后刷新
-浏览器即可，无需重启 `dsh web`。
+`cordis.patch.yml` 中的 `model-tuning` insert 启用。
+
+改 `client.js` 后能否免重启刷新取决于是否在跑 `pnpm run dev:web`：**该 watcher
+没有运行时，浏览器端 bundle 不会重建**，刷新页面拿到的仍是旧产物；此时需要让
+宿主重启（或在 checkout 里跑 `pnpm run dev:web`）后才会加载新代码。安装/更新
+bundle 时同理：以 `plugin_manager` 返回的 `applied` / `restart-required` 为准，
+不要假定保存即生效。
 
 ## 移动端
 

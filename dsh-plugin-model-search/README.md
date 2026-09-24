@@ -57,6 +57,4 @@ cd model-search
 
 ## 兼容性
 
-按 `@deepseek-ai/dsh-client-ui-model-selection@0.1.0-rc.6` 的
-`ModelDirectory` 快照结构与 slot 协议编写。DSH 升级后如果该包接口变化，
-需要同步检查本插件。
+已在 dsh 0.1.7-alpha.2 的隔离部署与生产数据副本中验证：6 个旧 `<Name><Size>` 图标导出已经换成 `…Regular`，历史会话中的搜索模型菜单可显示并接受输入。该分支专用于 0.1.7-alpha.2；旧 dsh 0.1.6-alpha.2 不提供这些新图标，请勿把此版本源码链接到旧生产部署。

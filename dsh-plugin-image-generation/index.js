@@ -5,7 +5,7 @@ import { TypertRemoteService, RemoteError } from '@deepseek-ai/dsh-typert-protoc
 import { discoverImageModels, generateImages, resolveRequest, validateConfig } from './core.js'
 
 export const name = 'dsh-plugin-image-generation'
-export const inject = ['tools', 'attachments', 'settings']
+export const inject = ['tools', 'attachments']
 export const NS = 'image-generation'
 const modelSchema = z.object({
   id: z.string().required(), name: z.string(), model: z.string().required(),
@@ -20,7 +20,7 @@ const modelSchema = z.object({
   size: z.string(), quality: z.string(), background: z.string(),
   output_format: z.string(), response_format: z.string(), style: z.string(),
 })
-export const Config = z.object({ models: z.array(modelSchema).default([]), defaultModel: z.string() })
+export const Config = z.object({ models: z.array(modelSchema).default([]).volatile(), defaultModel: z.string().volatile() })
 
 const PARAMETERS = {
   model: { type: 'string', description: 'Configuration ID from list_image_models, not the upstream model ID. Omit to use the configured default.' },
@@ -127,8 +127,13 @@ Object.defineProperty(ImageGenerationService.prototype, '@deepseek-ai/dsh-typert
 })
 
 export function apply(ctx, config) {
-  const scope = ctx.settings.register(NS, Config, { base: config, validate: validateConfig })
-  const service = new ImageGenerationService(ctx, () => scope.get())
+  const current = () => {
+    const value = { models: config.models.get(), defaultModel: config.defaultModel.get() }
+    validateConfig(value)
+    return value
+  }
+  current()
+  const service = new ImageGenerationService(ctx, current)
   const register = definition => ctx.effect(() => ctx.tools.register(defineTool(definition)), `image-generation: ${definition.name}`)
   register({
     name: 'list_image_models',
@@ -137,8 +142,8 @@ export function apply(ctx, config) {
     output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
     isConcurrencySafe: () => true,
     async execute() {
-      const config = scope.get()
-      return { defaultModel: config.defaultModel ?? '', models: config.models.map(({ id, name, model, api, size, quality }) =>
+      const value = current()
+      return { defaultModel: value.defaultModel ?? '', models: value.models.map(({ id, name, model, api, size, quality }) =>
         ({ id, name: name || id, model, api, ...(size ? { size } : {}), ...(quality ? { quality } : {}) })) }
     },
   })
