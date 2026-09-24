@@ -17,6 +17,12 @@ dist/
 /compat-before.yml
 /compat-after.yml
 /.doctor-selftest/
+# Isolated dsh 0.1.7-alpha.2 test install and home; production stays untouched.
+/.dsh-017-test/
+# Same isolation for the dsh 0.1.7-rc.1 branch checkout.
+/.dsh-017rc1-test/
+# Persistent production copy installed only during an approved cutover.
+/.dsh-017-prod/
 /deepseek-harness/
 /.workbuddy/
 /.chrome-new-instance/
