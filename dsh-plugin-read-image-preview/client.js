@@ -694,14 +694,22 @@ window.__ModuleLoader__.load({
     /**
      * Running vs settled comes from the block's shape, not from a flag.
      *
-     * `ToolCallBlock` is a union of `RunningToolCall` (callId/name/argsRaw, no
-     * content) and `ToolResultNode` (content, isError). There is no `isRunning`
-     * field, so reading one always yielded false and an in-flight call fell
-     * through to the settled path — which returns null when the block carries
-     * no content, leaving the row blank for the whole call.
+     * `ToolCallBlock` is a union of `RunningToolCall` and `ToolResultNode`
+     * (content, isError). There is no `isRunning` field, so reading one always
+     * yielded false and an in-flight call fell through to the settled path —
+     * which returns null when the block carries no content, leaving the row
+     * blank for the whole call.
+     *
+     * dsh 0.1.7-rc.1 split `RunningToolCall` into `phase: 'preparing'` (the
+     * model is still streaming arguments, so there is no `argsRaw` yet) and
+     * `phase: 'start'`, and the slot now renders during preparation as well. The
+     * preparing head must count as running too, or a claimed row renders nothing
+     * until the call is dispatched.
      */
     function isRunningBlock(block) {
-      return isRecord(block) && block.isRunning !== false && typeof block.argsRaw === 'string'
+      if (isRecord(block) === false) return false
+      if (block.phase === 'preparing' || block.phase === 'start') return true
+      return block.isRunning !== false && typeof block.argsRaw === 'string'
     }
     function isFailedBlock(block) {
       return isRecord(block) && block.isError === true

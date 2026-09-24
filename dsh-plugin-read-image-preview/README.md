@@ -15,6 +15,8 @@
 
 **v1.4.1：图片加载零位移。** 两种模式下图片像素尺寸都在字节到达之前就已知（resolve 响应 / 附件引用），因此 `<img>` 直接带 `width/height` 渲染、信息行宽度也按已知比例预先定死。晚到的图片（上一张截图的 fetch/解码在新内容压上来之后才完成）落地时不再产生布局跳变——正是这个跳变会让 DSH 聊天流的吸底逻辑把浏览器自发的位移误读成「用户上滚」，从而停止自动跟随最新记录。
 
+**dsh 0.1.7-rc.1 起工具调用分三阶段。** 官方把 `RunningToolCall` 拆成 `preparing`（参数还在流式生成，**没有 `argsRaw`**）与 `start`，并且参数开始流动时就把视图渲染出来（`tool.call.toolview` 的 owner 多了 `phase`）。因此判定「执行中」不能再只看 `argsRaw` 是否存在，否则我们认领的行在整个 preparing 阶段会是空壳——`isRunningBlock()` 现在把 `phase: 'preparing' | 'start'` 都算执行中，形状判断继续兼容更早的版本。`tests/phases.test.mjs` 用官方三种形状锁住这条约束（设 `READ_PREVIEW_CLIENT` 指向未修复的 `client.js` 可以验证它确实会失败）。
+
 **接入新工具 = 在 `client.js` 的 `TOOL_LABELS` 加一行**，交互（缩略图、点击放大、Ctrl+滚轮、拖动、双击适应、骨架、透明棋盘格）全部自动继承。
 
 ## 它解决什么
