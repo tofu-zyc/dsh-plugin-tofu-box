@@ -89,7 +89,7 @@ export function resolveRequest(config, args) {
   const id = args.model ?? config.defaultModel ?? ''
   const entries = config.models ?? []
   const entry = entries.find(item => item.id === id) ?? (!id && entries.length === 1 ? entries[0] : undefined)
-  if (!entry) fail('请先在「设置 → 绘图」添加模型并选择默认项，或用 list_image_models 查看可选 ID。')
+  if (!entry) fail('请先在「设置 → 模型调参 → 绘图」添加模型并选择默认项，或用 list_image_models 查看可选 ID。')
   if (typeof args.prompt !== 'string' || !args.prompt.trim() || args.prompt.length > 32000) fail('提示词不能为空，且不能超过 32000 字符。')
   const n = args.n ?? 1
   if (!Number.isInteger(n) || n < 1 || n > MAX_IMAGES) fail(`每次只能生成 1–${MAX_IMAGES} 张图片。`)

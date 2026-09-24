@@ -1,12 +1,13 @@
 /**
- * Behavioural tests for `apply()` with a FAKE Cordis context.
+ * Behavioural tests for the merged `apply()` with a FAKE Cordis context.
  *
  * The provider is driven through the REAL public shared policy
  * (`generateSessionTitleWithLlm` from @deepseek-ai/dsh-session-title-llm) with only
  * `ctx.llm.stream` mocked. So these tests cover what this plugin actually
  * controls: the row it replaces, the settings namespace it registers, the
  * provider identity/cadence, the route handed to the shared policy, the first
- * human message it selects, and the failure/cancellation paths.
+ * human message it selects, and the failure/cancellation paths. The image half
+ * is exercised in image.test.mjs against a local HTTP server.
  *
  * THEY ARE NOT LIVE VERIFICATION. No model request is made here, so they cannot
  * prove what a real install dispatches. Live verification reads
@@ -14,8 +15,9 @@
  */
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
+import { test } from 'node:test'
 import { requireHostHelper } from './_host.mjs'
-import { Config, NS, apply } from '../index.js'
+import { Config, apply } from '../index.js'
 
 requireHostHelper()
 
@@ -34,15 +36,15 @@ function textChunks(text) {
 function fakeContext(options = {}) {
   const state = {
     provider: null,
-    settings: { mode: 'inherit', ...(options.settings ?? {}) },
+    settings: { titleMode: 'inherit', ...(options.settings ?? {}) },
     calls: [],
     appended: [],
   }
   state.config = {
     ...Config({}),
-    mode: { get: () => state.settings.mode },
-    provider: { get: () => state.settings.provider },
-    model: { get: () => state.settings.model },
+    titleMode: { get: () => state.settings.titleMode },
+    titleProvider: { get: () => state.settings.titleProvider },
+    titleModel: { get: () => state.settings.titleModel },
   }
   const session = {
     id: 'session-under-test',
@@ -50,6 +52,8 @@ function fakeContext(options = {}) {
       state.appended.push({ type, data })
     },
   }
+  const tools = new Map()
+  const services = new Map()
   const ctx = {
     sessionTitle: {
       register(provider) {
@@ -65,8 +69,15 @@ function fakeContext(options = {}) {
         return (async function* () { for (const chunk of textChunks(options.text ?? 'Mock Title')) yield chunk })()
       },
     },
+    // Image-half stubs: apply() also registers tools and the Remote service;
+    // they are inert here (no model entry drives them in these tests).
+    attachments: {},
+    reflect: { provide: (name, service) => services.set(name, service) },
+    tools: { register(tool) { tools.set(tool.name, tool); return () => tools.delete(tool.name) } },
+    effect(fn) { const cleanup = fn(); if (typeof cleanup === 'function') cleanups.push(cleanup) },
   }
-  return { ctx, state, session }
+  const cleanups = []
+  return { ctx, state, session, tools, dispose() { for (const c of cleanups.reverse()) c() } }
 }
 
 function requestFor(route, session) {
@@ -78,36 +89,21 @@ function requestFor(route, session) {
   }
 }
 
-let failures = 0
-async function test(label, run) {
-  try {
-    await run()
-    console.log(`  ok  ${label}`)
-  } catch (error) {
-    failures += 1
-    console.error(`FAIL  ${label}\n      ${error && error.message ? error.message : String(error)}`)
-  }
-}
-
-console.log('registration')
-
-await test('registers exactly one provider, with the replaced row identity and cadence', async () => {
+test('registers exactly one provider, with the replaced row identity and cadence', async () => {
   const { ctx, state } = fakeContext()
   await apply(ctx, state.config)
   assert.equal(state.provider.id, 'session-title-llm')
   assert.equal(state.provider.automatic, 'first-prompt')
-  assert.equal(state.config.mode.get(), 'inherit')
+  assert.equal(state.config.titleMode.get(), 'inherit')
 })
 
-await test('a second registration on the same service fails loud (no competing generator)', async () => {
+test('a second registration on the same service fails loud (no competing generator)', async () => {
   const { ctx, state } = fakeContext()
   await apply(ctx, state.config)
   await assert.rejects(() => apply(ctx, state.config), /already registered/)
 })
 
-console.log('generation through the real shared policy')
-
-await test('inherit dispatches the logged session route and records it', async () => {
+test('inherit dispatches the logged session route and records it', async () => {
   const { ctx, state } = fakeContext({ text: 'Tune Title Model' })
   await apply(ctx, state.config)
   const result = await state.provider.generate(requestFor({ provider: 'deepseek-official', model: 'deepseek-flash' }))
@@ -120,8 +116,8 @@ await test('inherit dispatches the logged session route and records it', async (
   assert.deepEqual(result.messageSeqs, [7])
 })
 
-await test('custom dispatches the configured route and records the same route', async () => {
-  const { ctx, state } = fakeContext({ settings: { mode: 'custom', provider: 'local', model: 'tiny-title' } })
+test('custom dispatches the configured route and records the same route', async () => {
+  const { ctx, state } = fakeContext({ settings: { titleMode: 'custom', titleProvider: 'local', titleModel: 'tiny-title' } })
   await apply(ctx, state.config)
   const result = await state.provider.generate(requestFor({ provider: 'deepseek-official', model: 'deepseek-flash' }))
   assert.equal(state.calls[0].provider, 'local')
@@ -129,24 +125,24 @@ await test('custom dispatches the configured route and records the same route', 
   assert.deepEqual(result.model, { provider: 'local', model: 'tiny-title' })
 })
 
-await test('custom needs no logged session route at all', async () => {
-  const { ctx, state } = fakeContext({ settings: { mode: 'custom', provider: 'local', model: 'tiny-title' } })
+test('custom needs no logged session route at all', async () => {
+  const { ctx, state } = fakeContext({ settings: { titleMode: 'custom', titleProvider: 'local', titleModel: 'tiny-title' } })
   await apply(ctx, state.config)
   await state.provider.generate(requestFor(undefined))
   assert.equal(state.calls[0].provider, 'local')
 })
 
-await test('a settings read is taken per generation, so a live edit applies to the next title', async () => {
+test('a settings read is taken per generation, so a live edit applies to the next title', async () => {
   const { ctx, state } = fakeContext()
   await apply(ctx, state.config)
   await state.provider.generate(requestFor({ provider: 'deepseek-official', model: 'deepseek-flash' }))
-  state.settings = { mode: 'custom', provider: 'local', model: 'tiny-title' }
+  state.settings = { titleMode: 'custom', titleProvider: 'local', titleModel: 'tiny-title' }
   await state.provider.generate(requestFor({ provider: 'deepseek-official', model: 'deepseek-flash' }))
   assert.equal(state.calls[0].model, 'deepseek-flash')
   assert.equal(state.calls[1].model, 'tiny-title')
 })
 
-await test('only the first human message is selected (first-prompt cadence)', async () => {
+test('only the first human message is selected (first-prompt cadence)', async () => {
   const { ctx, state } = fakeContext()
   await apply(ctx, state.config)
   const request = requestFor({ provider: 'p', model: 'm' })
@@ -158,8 +154,8 @@ await test('only the first human message is selected (first-prompt cadence)', as
   assert.doesNotMatch(framed, /second/)
 })
 
-await test('the auxiliary request record names the route actually dispatched', async () => {
-  const { ctx, state, session } = fakeContext({ settings: { mode: 'custom', provider: 'local', model: 'tiny-title' } })
+test('the auxiliary request record names the route actually dispatched', async () => {
+  const { ctx, state, session } = fakeContext({ settings: { titleMode: 'custom', titleProvider: 'local', titleModel: 'tiny-title' } })
   await apply(ctx, state.config)
   const request = requestFor({ provider: 'deepseek-official', model: 'deepseek-flash' }, session)
   await state.provider.generate(request)
@@ -169,9 +165,7 @@ await test('the auxiliary request record names the route actually dispatched', a
   assert.deepEqual(record.data.messageSeqs, [7])
 })
 
-console.log('failure and cancellation paths')
-
-await test('no source message fails instead of producing a title', async () => {
+test('no source message fails instead of producing a title', async () => {
   const { ctx, state } = fakeContext()
   await apply(ctx, state.config)
   const request = requestFor({ provider: 'p', model: 'm' })
@@ -179,14 +173,14 @@ await test('no source message fails instead of producing a title', async () => {
   await assert.rejects(() => state.provider.generate(request), /at least one source message/)
 })
 
-await test('inherit without a logged route fails and keeps the caller fallback intact', async () => {
+test('inherit without a logged route fails and keeps the caller fallback intact', async () => {
   const { ctx, state } = fakeContext()
   await apply(ctx, state.config)
   await assert.rejects(() => state.provider.generate(requestFor(undefined)), /no logged request route/)
   assert.equal(state.calls.length, 0, 'nothing may be dispatched without a route')
 })
 
-await test('a provider error propagates (the service keeps the fallback title)', async () => {
+test('a provider error propagates (the service keeps the fallback title)', async () => {
   const { ctx, state } = fakeContext({
     stream: function* () { throw Object.assign(new Error('upstream unavailable'), { code: 'UPSTREAM' }) },
   })
@@ -197,7 +191,7 @@ await test('a provider error propagates (the service keeps the fallback title)',
   )
 })
 
-await test('an aborted caller rejects instead of hanging', async () => {
+test('an aborted caller rejects instead of hanging', async () => {
   const controller = new AbortController()
   const { ctx, state } = fakeContext({
     stream: () => (async function* () {
@@ -211,7 +205,7 @@ await test('an aborted caller rejects instead of hanging', async () => {
   await assert.rejects(() => state.provider.generate(request))
 })
 
-await test('a title that reaches maxOutputTokens is rejected', async () => {
+test('a title that reaches maxOutputTokens is rejected', async () => {
   const { ctx, state } = fakeContext({
     stream: () => (async function* () {
       yield { type: 'block-start', index: 0, blockType: 'text' }
@@ -226,7 +220,7 @@ await test('a title that reaches maxOutputTokens is rejected', async () => {
   )
 })
 
-await test('a tool call is rejected instead of becoming a title', async () => {
+test('a tool call is rejected instead of becoming a title', async () => {
   const { ctx, state } = fakeContext({
     stream: () => (async function* () {
       yield { type: 'block-start', index: 0, blockType: 'tool-call' }
@@ -240,9 +234,3 @@ await test('a tool call is rejected instead of becoming a title', async () => {
     /tool/,
   )
 })
-
-if (failures > 0) {
-  console.error(`\n${failures} test(s) failed.`)
-  process.exit(1)
-}
-console.log('\nall host behaviour tests passed (mocked stream — not live verification)')

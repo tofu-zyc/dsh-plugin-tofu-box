@@ -154,6 +154,10 @@ function pluginHarness(cfg) {
   const liveConfig = {
     models: { get: () => current.models },
     defaultModel: { get: () => current.defaultModel },
+    titleMode: { get: () => 'inherit' },
+    titleProvider: { get: () => undefined },
+    titleModel: { get: () => undefined },
+    targetWords: 5, targetCjkCharacters: 10, maxInputBytes: 4096, maxOutputTokens: 64, timeoutMs: 60000,
   }
   const tools = new Map(), cleanups = [], services = new Map()
   const attachments = store()
@@ -161,6 +165,8 @@ function pluginHarness(cfg) {
   const ctx = {
     attachments,
     logger: { info() {}, warn() {}, error() {} },
+    // cordis Service 的构造函数调用 ctx.reflect.provide(name, self)；
+    // TypertRemoteService 经此把服务实例登记到 ctx 上。
     reflect: { provide: (name, service) => services.set(name, service) },
     effect(fn) { const cleanup = fn(); if (typeof cleanup === 'function') cleanups.push(cleanup) },
     get(name) {
@@ -170,8 +176,7 @@ function pluginHarness(cfg) {
     },
     tools: { register(tool) { tools.set(tool.name, tool); return () => tools.delete(tool.name) } },
   }
-  apply(ctx, liveConfig)
-  return { tools, attachments, service: services.get('imageGeneration'),
+  return { tools, attachments, services, ctx, liveConfig,
     update(value) { current = value; validateConfig(current) },
     vision() { modalities = ['text', 'image'] },
     dispose() { for (const cleanup of cleanups.reverse()) cleanup() } }
@@ -181,7 +186,9 @@ test('host plugin registers real tool schemas and Remote methods; hot config and
   const host = await server(t, (_req, res) => json(res, imageResponse))
   const harness = pluginHarness(config({ endpoint: `${host.origin}/images` }))
   t.after(() => harness.dispose())
-  assert.deepEqual(remoteMethods(harness.service).map(method => method.method), ['start', 'status', 'cancel', 'image', 'discover'])
+  const { registerImageTools } = await import('../index.js')
+  registerImageTools(harness.ctx, harness.liveConfig)
+  assert.deepEqual(remoteMethods(harness.services.get('imageGeneration')).map(method => method.method), ['start', 'status', 'cancel', 'image', 'discover'])
   const tool = harness.tools.get('generate_image')
   const args = { prompt: 'cat' }
   const exec = { signal: new AbortController().signal, agent: { session: { requestHeader: () => ({ config: { provider: 'chat', model: 'text' } }) } } }
@@ -201,26 +208,31 @@ test('host plugin registers real tool schemas and Remote methods; hot config and
   assert.equal(harness.tools.size, 0)
 })
 
+/** Drive ONLY the image half: the title provider needs the real host helper. */
+
 test('direct panel jobs return previews and exact original, and reject unknown image tickets', async t => {
   const host = await server(t, (_req, res) => json(res, imageResponse))
   const harness = pluginHarness(config({ endpoint: `${host.origin}/images` }))
   t.after(() => harness.dispose())
-  const { jobId } = harness.service.start({ prompt: 'cat' })
+  const { registerImageTools } = await import('../index.js')
+  registerImageTools(harness.ctx, harness.liveConfig)
+  const service = harness.services.get('imageGeneration')
+  const { jobId } = service.start({ prompt: 'cat' })
   await new Promise((resolve, reject) => {
     const deadline = Date.now() + 3000
     function check() {
-      const result = harness.service.status(jobId)
+      const result = service.status(jobId)
       if (result.status === 'done') return resolve()
       if (result.status === 'error' || Date.now() > deadline) return reject(new Error(result.error ?? 'job did not finish'))
       setTimeout(check, 10)
     }
     check()
   })
-  assert.deepEqual(Buffer.from((await harness.service.image(jobId, 0, true)).data, 'base64'), PNG)
-  assert.equal((await harness.service.image(jobId, 0, false)).mediaType, 'image/png')
-  await assert.rejects(harness.service.image('unknown', 0, true), /不存在/)
-  await assert.rejects(harness.service.image(jobId, -1, true), /不存在/)
-  assert.throws(() => harness.service.start({ prompt: '' }), /提示词/)
+  assert.deepEqual(Buffer.from((await service.image(jobId, 0, true)).data, 'base64'), PNG)
+  assert.equal((await service.image(jobId, 0, false)).mediaType, 'image/png')
+  await assert.rejects(service.image('unknown', 0, true), /不存在/)
+  await assert.rejects(service.image(jobId, -1, true), /不存在/)
+  assert.throws(() => service.start({ prompt: '' }), /提示词/)
 })
 
 test('model discovery derives sibling URLs, preserves gateway prefixes and blocks cross-origin key forwarding', () => {
@@ -243,9 +255,11 @@ test('discovery reads real supplier GET, deduplicates IDs, preserves unknown ali
   assert.doesNotMatch(JSON.stringify(result), /draft-secret/)
   const harness = pluginHarness(config())
   t.after(() => harness.dispose())
-  await harness.service.discover({ endpoint: `${host.origin}/v1/images/generations`, apiKeyEnv: 'STORED' })
+  const { registerImageTools } = await import('../index.js')
+  registerImageTools(harness.ctx, harness.liveConfig)
+  await harness.services.get('imageGeneration').discover({ endpoint: `${host.origin}/v1/images/generations`, apiKeyEnv: 'STORED' })
   assert.equal(host.requests[1].headers.authorization, 'Bearer test-key')
-  await assert.rejects(harness.service.discover({ endpoint: 'invalid' }), /地址/)
+  await assert.rejects(harness.services.get('imageGeneration').discover({ endpoint: 'invalid' }), /地址/)
 })
 
 test('discovery handles empty catalogs, pagination hints, invalid responses and cancellation', async () => {

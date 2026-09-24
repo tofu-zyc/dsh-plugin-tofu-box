@@ -1,5 +1,24 @@
-# dsh-plugin-model-tuning 自 wiring（dsh.bundle.patch 机制）：安装即注册，
-# 无需在 profile 的 cordis.patch.yml 手动 insert。
+# dsh-plugin-model-tuning v2 — 自 wiring + 显式替换宿主自带的标题生成行。
+#
+# 顺序即语义：
+#   1. 先 disable dsh-base 的 `session-title-llm` 行（@deepseek-ai/dsh-session-title-first-prompt-llm）。
+#      `ctx.sessionTitle.register()` 只允许一个 provider，第二次注册直接抛错，
+#      所以必须先摘掉原行再插入本行；反过来 boot 会失败。
+#   2. 再 insert 本包（v2 起一个包承担：模型参数页 + 标题路由 + 绘图工具/面板）。
+#
+# config 中标题预算字段与 dsh-base 的 `session-title-llm` 完全一致，因此无论
+# 设置处于默认「继承」还是被卸载回退，标题生成的提示词预算、字节上限、
+# 超时行为都不变。绘图 models/defaultModel 与标题 titleMode/titleProvider/
+# titleModel 是 volatile 字段，热更新即时生效。
+- id: session-title-llm
+  disabled: true
+
 - insert:
     - id: model-tuning
       name: dsh-plugin-model-tuning
+      config:
+        targetWords: 5
+        targetCjkCharacters: 10
+        maxInputBytes: 4096
+        maxOutputTokens: 64
+        timeoutMs: 60000

@@ -1,9 +1,10 @@
 /**
- * The 用途 (purpose) tab's title-model view and write planning.
+ * The 用途 (purpose) tab's title view and write planning.
  *
- * Pure-function coverage only: it proves what the page would read and send, not
- * that a browser rendered it. Rendering and live writes are verified on the
- * installed page by the Lead.
+ * v2: the title fields are this plugin's OWN volatile Config (titleMode /
+ * titleProvider / titleModel in the `model-tuning` namespace); the former
+ * cross-package write into `title-model` is gone. Pure-function coverage only:
+ * it proves what the page would read and send, not that a browser rendered it.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -50,15 +51,15 @@ test('locale is declared in inject', () => {
   assert.ok(helpers.inject.includes('locale'), 'ctx.locale requires "locale" in inject')
 })
 
-test('reads the stored route out of the namespace view', () => {
-  const view = { namespaces: [{ ns: 'title-model', value: { mode: 'custom', provider: 'tofu-gpt', model: 'gpt-5' }, revision: 4 }] }
+test('reads the stored route out of the plugin own namespace view', () => {
+  const view = { namespaces: [{ ns: 'model-tuning', value: { titleMode: 'custom', titleProvider: 'tofu-gpt', titleModel: 'gpt-5' }, revision: 4 }] }
   assert.deepEqual(module_.titleViewOf(view), {
     available: true, mode: 'custom', provider: 'tofu-gpt', model: 'gpt-5', revision: 4,
   })
 })
 
 test('an absent namespace reports unavailable instead of throwing', () => {
-  // The page must still render its install hint when dsh-plugin-title-model is absent.
+  // The host row failed to activate; the tab must render its hint, not throw.
   assert.deepEqual(module_.titleViewOf({ namespaces: [] }), {
     available: false, mode: 'inherit', provider: null, model: null, revision: null,
   })
@@ -68,7 +69,7 @@ test('an absent namespace reports unavailable instead of throwing', () => {
 })
 
 test('an empty stored section resolves to the inherit default', () => {
-  const view = module_.titleViewOf({ namespaces: [{ ns: 'title-model', value: {}, revision: 0 }] })
+  const view = module_.titleViewOf({ namespaces: [{ ns: 'model-tuning', value: {}, revision: 0 }] })
   assert.equal(view.available, true)
   assert.equal(view.mode, 'inherit')
   assert.equal(view.provider, null)
@@ -76,34 +77,34 @@ test('an empty stored section resolves to the inherit default', () => {
 })
 
 test('an unknown stored mode falls back to inherit rather than being trusted', () => {
-  const view = module_.titleViewOf({ namespaces: [{ ns: 'title-model', value: { mode: 'sometimes', provider: 'p', model: 'm' } }] })
+  const view = module_.titleViewOf({ namespaces: [{ ns: 'model-tuning', value: { titleMode: 'sometimes', titleProvider: 'p', titleModel: 'm' } }] })
   assert.equal(view.mode, 'inherit')
 })
 
 test('empty provider/model strings read as absent', () => {
-  const view = module_.titleViewOf({ namespaces: [{ ns: 'title-model', value: { mode: 'custom', provider: '', model: '' } }] })
+  const view = module_.titleViewOf({ namespaces: [{ ns: 'model-tuning', value: { titleMode: 'custom', titleProvider: '', titleModel: '' } }] })
   assert.equal(view.provider, null)
   assert.equal(view.model, null)
 })
 
 test('saving inherit clears the whole route instead of leaving it authoritative', () => {
   assert.deepEqual(module_.planTitleWrite({ mode: 'inherit' }), {
-    ns: 'title-model',
+    ns: 'model-tuning',
     ops: [
-      { op: 'unset', path: ['mode'] },
-      { op: 'unset', path: ['provider'] },
-      { op: 'unset', path: ['model'] },
+      { op: 'unset', path: ['titleMode'] },
+      { op: 'unset', path: ['titleProvider'] },
+      { op: 'unset', path: ['titleModel'] },
     ],
   })
 })
 
 test('saving a custom route writes all three fields', () => {
   assert.deepEqual(module_.planTitleWrite({ mode: 'custom', provider: 'local', model: 'tiny' }), {
-    ns: 'title-model',
+    ns: 'model-tuning',
     ops: [
-      { op: 'set', path: ['mode'], value: 'custom' },
-      { op: 'set', path: ['provider'], value: 'local' },
-      { op: 'set', path: ['model'], value: 'tiny' },
+      { op: 'set', path: ['titleMode'], value: 'custom' },
+      { op: 'set', path: ['titleProvider'], value: 'local' },
+      { op: 'set', path: ['titleModel'], value: 'tiny' },
     ],
   })
 })
@@ -114,9 +115,9 @@ test('an unrecognised mode is planned as inherit, never as a half route', () => 
   assert.equal(plan.ops.length, 3)
 })
 
-test('the write never targets a namespace other than title-model', () => {
+test('the write never targets a namespace other than model-tuning', () => {
   for (const payload of [{ mode: 'inherit' }, { mode: 'custom', provider: 'a', model: 'b' }]) {
-    assert.equal(module_.planTitleWrite(payload).ns, 'title-model')
+    assert.equal(module_.planTitleWrite(payload).ns, 'model-tuning')
   }
 })
 

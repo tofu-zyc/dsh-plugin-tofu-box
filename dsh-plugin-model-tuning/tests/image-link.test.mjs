@@ -9,6 +9,10 @@ import path from 'node:path'
  * React. A stub React keeps it parseable without running `apply()`, and the
  * factory's final `return module.exports` is swapped for one that also hands
  * out the settings planners, which are otherwise module-private.
+ *
+ * v2: the image planners now write the page's OWN namespace (`model-tuning`),
+ * which this plugin owns end to end — the cross-package `image-generation`
+ * namespace protocol is gone.
  */
 const StubReact = {
   createElement: () => null,
@@ -23,7 +27,6 @@ const PURE_NAMES = [
   'deriveImageEntry', 'isManagedEntry', 'computeImageModelState', 'imageModelsOf',
   'normalizeImageEndpoint', 'acceptableImageEndpoint', 'sanitizeImageId', 'uniqueImageId',
   'planImageLink', 'planImageUnlink',
-  'titleViewOf', 'planTitleWrite',
 ]
 
 const EXPORT_MARK = 'return module.exports;'
@@ -55,7 +58,7 @@ for (const name of PURE_NAMES) assert.equal(typeof module_[name], 'function', `h
 
 const IMAGE_API = 'openai-images'
 const providerProfile = { baseURL: 'https://ai.tofuzyc.site/openai/v1', apiKeyEnv: 'TOFU_GPT_API_KEY' }
-const viewOf = (value, revision = 3) => ({ ns: 'image-generation', value, revision })
+const viewOf = (value, revision = 3) => ({ ns: 'model-tuning', value, revision })
 
 test('derives the Images endpoint and credential from the chat provider', () => {
   assert.deepEqual(module_.deriveImageEntry(providerProfile, 'ironman/gpt-image-2.5'), {
@@ -70,7 +73,7 @@ test('derives nothing usable from a provider without a base URL', () => {
   assert.deepEqual(module_.deriveImageEntry(undefined, 'm'), { model: 'm', endpoint: '', apiKeyEnv: '' })
 })
 
-test('links a model into an empty image namespace and defaults it', () => {
+test('links a model into an empty image list and defaults it', () => {
   const plan = module_.planImageLink(viewOf({ models: [] }), providerProfile, 'ironman/gpt-image-2.5', 'tofu-gpt')
   assert.equal(plan.reason, undefined)
   assert.equal(plan.models.length, 1)
@@ -131,11 +134,11 @@ test('unlinking removes only an entry this page owns', () => {
   assert.equal(plan.defaultModel, 'b', 'the default falls through to the next entry')
 })
 
-test('unlinking refuses an entry authored on the 绘图 page', () => {
+test('unlinking refuses an entry authored on the 绘图 tab', () => {
   const hand = { id: 'b', model: 'ironman/gpt-image-2.5', api: IMAGE_API }
   const plan = module_.planImageUnlink(viewOf({ models: [hand] }), 'ironman/gpt-image-2.5')
   assert.equal(plan.models, null)
-  assert.match(plan.reason, /手工维护/)
+  assert.match(plan.reason, /手工创建/)
 })
 
 test('unlinking an unlinked model reports instead of writing', () => {
@@ -153,7 +156,7 @@ test('identifier collisions get a numeric suffix within the schema limit', () =>
   assert.equal(module_.uniqueImageId('ironman/gpt-image-2.5', taken), 'ironman-gpt-image-2-5-3')
 })
 
-test('every derived id satisfies the image-generation plugin schema', () => {
+test('every derived id satisfies the host schema', () => {
   const pattern = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/
   for (const model of ['ironman/gpt-image-2.5', 'xcpcai/gpt-image-2.5-flare', '2024-model', '-leading', 'a'.repeat(120)]) {
     assert.match(module_.uniqueImageId(model, []), pattern, `derived id for ${model}`)
