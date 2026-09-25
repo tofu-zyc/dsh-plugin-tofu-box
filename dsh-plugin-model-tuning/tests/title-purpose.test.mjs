@@ -51,21 +51,30 @@ test('locale is declared in inject', () => {
   assert.ok(helpers.inject.includes('locale'), 'ctx.locale requires "locale" in inject')
 })
 
+const BUDGET_DEFAULTS = { targetWords: 5, targetCjkCharacters: 10, maxInputBytes: 4096, maxOutputTokens: 64, timeoutMs: 60000 }
+const budgetOps = (values) => Object.entries(values).map(([path, value]) => ({ op: 'set', path: [path], value }))
+
 test('reads the stored route out of the plugin own namespace view', () => {
   const view = { namespaces: [{ ns: 'model-tuning', value: { titleMode: 'custom', titleProvider: 'tofu-gpt', titleModel: 'gpt-5' }, revision: 4 }] }
   assert.deepEqual(module_.titleViewOf(view), {
-    available: true, mode: 'custom', provider: 'tofu-gpt', model: 'gpt-5', revision: 4,
+    available: true, mode: 'custom', provider: 'tofu-gpt', model: 'gpt-5', revision: 4, ...BUDGET_DEFAULTS,
   })
 })
 
 test('an absent namespace reports unavailable instead of throwing', () => {
   // The host row failed to activate; the tab must render its hint, not throw.
   assert.deepEqual(module_.titleViewOf({ namespaces: [] }), {
-    available: false, mode: 'inherit', provider: null, model: null, revision: null,
+    available: false, mode: 'inherit', provider: null, model: null, revision: null, ...BUDGET_DEFAULTS,
   })
   assert.deepEqual(module_.titleViewOf(undefined), {
-    available: false, mode: 'inherit', provider: null, model: null, revision: null,
+    available: false, mode: 'inherit', provider: null, model: null, revision: null, ...BUDGET_DEFAULTS,
   })
+})
+
+test('the stored budget is surfaced and a cleared field falls back to the shipped default', () => {
+  const view = module_.titleViewOf({ namespaces: [{ ns: 'model-tuning', value: { maxOutputTokens: 1024, targetWords: 0 }, revision: 1 }] })
+  assert.equal(view.maxOutputTokens, 1024, 'a user-set budget is shown')
+  assert.equal(view.targetWords, 5, 'a non-positive stored value falls back to the default')
 })
 
 test('an empty stored section resolves to the inherit default', () => {
@@ -87,10 +96,11 @@ test('empty provider/model strings read as absent', () => {
   assert.equal(view.model, null)
 })
 
-test('saving inherit clears the whole route instead of leaving it authoritative', () => {
+test('saving inherit writes the budget and clears the whole route', () => {
   assert.deepEqual(module_.planTitleWrite({ mode: 'inherit' }), {
     ns: 'model-tuning',
     ops: [
+      ...budgetOps(BUDGET_DEFAULTS),
       { op: 'unset', path: ['titleMode'] },
       { op: 'unset', path: ['titleProvider'] },
       { op: 'unset', path: ['titleModel'] },
@@ -98,10 +108,11 @@ test('saving inherit clears the whole route instead of leaving it authoritative'
   })
 })
 
-test('saving a custom route writes all three fields', () => {
+test('saving a custom route writes the budget and all three route fields', () => {
   assert.deepEqual(module_.planTitleWrite({ mode: 'custom', provider: 'local', model: 'tiny' }), {
     ns: 'model-tuning',
     ops: [
+      ...budgetOps(BUDGET_DEFAULTS),
       { op: 'set', path: ['titleMode'], value: 'custom' },
       { op: 'set', path: ['titleProvider'], value: 'local' },
       { op: 'set', path: ['titleModel'], value: 'tiny' },
@@ -109,10 +120,27 @@ test('saving a custom route writes all three fields', () => {
   })
 })
 
+test('a user-edited budget is written verbatim, so a reasoning model can be given room', () => {
+  const plan = module_.planTitleWrite({ mode: 'custom', provider: 'lab', model: 'qwen3.8-flash-next', ...BUDGET_DEFAULTS, maxOutputTokens: 1024, timeoutMs: 120000 })
+  assert.deepEqual(plan.ops.find((op) => op.path[0] === 'maxOutputTokens'), { op: 'set', path: ['maxOutputTokens'], value: 1024 })
+  assert.deepEqual(plan.ops.find((op) => op.path[0] === 'timeoutMs'), { op: 'set', path: ['timeoutMs'], value: 120000 })
+})
+
+test('a cleared budget field returns to the shipped default instead of a stale value', () => {
+  const plan = module_.planTitleWrite({ mode: 'inherit', maxOutputTokens: '' })
+  assert.deepEqual(plan.ops.find((op) => op.path[0] === 'maxOutputTokens'), { op: 'set', path: ['maxOutputTokens'], value: 64 })
+})
+
+test('a non-positive budget is rejected before it can be written', () => {
+  assert.throws(() => module_.planTitleWrite({ mode: 'inherit', maxOutputTokens: 0 }), /正整数/)
+  assert.throws(() => module_.planTitleWrite({ mode: 'inherit', timeoutMs: -1 }), /正整数/)
+})
+
 test('an unrecognised mode is planned as inherit, never as a half route', () => {
   const plan = module_.planTitleWrite({ mode: 'nonsense', provider: 'p', model: 'm' })
-  assert.equal(plan.ops[0].op, 'unset')
-  assert.equal(plan.ops.length, 3)
+  const routeOps = plan.ops.filter((op) => op.path[0].startsWith('title'))
+  assert.equal(routeOps[0].op, 'unset')
+  assert.equal(routeOps.length, 3)
 })
 
 test('the write never targets a namespace other than model-tuning', () => {

@@ -480,21 +480,42 @@ window.__ModuleLoader__.load({
     const TITLE_MODES = ["inherit", "custom"];
 
     /**
+     * Title-request budget. Defaults mirror the shipped dsh-base row, but every
+     * field is user-editable from this page — a reasoning model that answers
+     * only after a long think needs a larger `maxOutputTokens`, and that choice
+     * belongs to the user, not to a constant in the plugin.
+     */
+    const TITLE_BUDGET_FIELDS = [
+      { key: "targetWords", label: "目标词数", hint: "非中日韩语言的目标词数", fallback: 5 },
+      { key: "targetCjkCharacters", label: "目标汉字数", hint: "中文 / 日文标题的目标字数", fallback: 10 },
+      { key: "maxInputBytes", label: "输入上限（字节）", hint: "首条消息送进标题请求的截断上限", fallback: 4096 },
+      { key: "maxOutputTokens", label: "输出上限（token）", hint: "推理模型会先思考再作答，需留足预算（例如 1024）；直接作答的模型 64 足够", fallback: 64 },
+      { key: "timeoutMs", label: "超时（毫秒）", hint: "整次标题请求的超时", fallback: 60000 },
+    ];
+
+    /**
      * Read the title purpose view out of our own namespace view.
      * @param {object|undefined} settingsView - `remote.settings.describe()` value.
      * @returns the title view; `available` mirrors whether our host row is up.
      */
     function titleViewOf(settingsView) {
+      const budget = {};
+      for (const field of TITLE_BUDGET_FIELDS) budget[field.key] = field.fallback;
       const view = ownNsView(settingsView);
-      if (!view) return { available: false, mode: "inherit", provider: null, model: null, revision: null };
+      if (!view) return { available: false, mode: "inherit", provider: null, model: null, revision: null, ...budget };
       const value = view.value && typeof view.value === "object" ? view.value : {};
       const mode = TITLE_MODES.indexOf(value.titleMode) >= 0 ? value.titleMode : "inherit";
+      for (const field of TITLE_BUDGET_FIELDS) {
+        const raw = value[field.key];
+        if (typeof raw === "number" && Number.isInteger(raw) && raw > 0) budget[field.key] = raw;
+      }
       return {
         available: true,
         mode,
         provider: typeof value.titleProvider === "string" && value.titleProvider !== "" ? value.titleProvider : null,
         model: typeof value.titleModel === "string" && value.titleModel !== "" ? value.titleModel : null,
         revision: typeof view.revision === "number" ? view.revision : null,
+        ...budget,
       };
     }
 
@@ -504,21 +525,34 @@ window.__ModuleLoader__.load({
      * Always returns the COMPLETE field set: switching back to `inherit` must
      * clear a previously chosen route instead of leaving it behind in the user
      * section, where it would silently stay authoritative for a later switch.
+     * The budget is written the same way, so a field the user clears returns to
+     * the shipped default rather than keeping a stale value.
+     * @param next - `{ mode, provider, model, ...budget }` as chosen in the UI.
+     * @returns the mutate request body.
      */
     function planTitleWrite(next) {
+      const ops = [];
+      for (const field of TITLE_BUDGET_FIELDS) {
+        const raw = next ? next[field.key] : undefined;
+        const value = raw === undefined || raw === null || raw === "" ? field.fallback : Number(raw);
+        if (!Number.isInteger(value) || value < 1) throw new Error(`「${field.label}」必须是正整数`);
+        ops.push({ op: "set", path: [field.key], value });
+      }
       const mode = next && next.mode === "custom" ? "custom" : "inherit";
       if (mode === "inherit") {
-        return { ns: NS, ops: [
+        ops.push(
           { op: "unset", path: ["titleMode"] },
           { op: "unset", path: ["titleProvider"] },
           { op: "unset", path: ["titleModel"] },
-        ] };
+        );
+      } else {
+        ops.push(
+          { op: "set", path: ["titleMode"], value: "custom" },
+          { op: "set", path: ["titleProvider"], value: String(next.provider || "") },
+          { op: "set", path: ["titleModel"], value: String(next.model || "") },
+        );
       }
-      return { ns: NS, ops: [
-        { op: "set", path: ["titleMode"], value: "custom" },
-        { op: "set", path: ["titleProvider"], value: String(next.provider || "") },
-        { op: "set", path: ["titleModel"], value: String(next.model || "") },
-      ] };
+      return { ns: NS, ops };
     }
 
     function CapacityField(props) {
@@ -1043,6 +1077,7 @@ window.__ModuleLoader__.load({
         titleShown.mode !== title.mode
         || (titleShown.provider || null) !== (title.provider || null)
         || (titleShown.model || null) !== (title.model || null)
+        || TITLE_BUDGET_FIELDS.some((field) => Number(titleShown[field.key]) !== Number(title[field.key]))
       );
       const titleSaveDisabled = !data || !data.writable || !titleShown.available || titleBusy
         || (titleShown.mode === "custom" && (!titleShown.provider || !titleShown.model));
@@ -1052,9 +1087,13 @@ window.__ModuleLoader__.load({
       }
 
       async function saveTitle() {
-        const payload = titleShown.mode === "custom"
-          ? { mode: "custom", provider: titleShown.provider, model: titleShown.model }
-          : { mode: "inherit" };
+        // Budget travels with the route: both are this page's to write.
+        const payload = {
+          mode: titleShown.mode === "custom" ? "custom" : "inherit",
+          provider: titleShown.provider,
+          model: titleShown.model,
+        };
+        for (const field of TITLE_BUDGET_FIELDS) payload[field.key] = titleShown[field.key];
         setTitleBusy(true);
         let saved = false;
         try {
@@ -1348,8 +1387,28 @@ window.__ModuleLoader__.load({
                 React.createElement("div", { className: "mcfg-note", key: "scope" },
                   "生效范围：保存后对本 profile 之后生成的标题生效（包含新会话与后续标题生成）；不会改动已有标题、手动重命名，也不会改动会话的对话模型。"
                 ),
-                React.createElement("div", { className: "mcfg-note", key: "budget" },
-                  "标题请求沿用宿主既有策略：提示词、输入字节上限、输出 token 上限与超时均由标题生成策略固定，因此这里不提供推理档位控件。"
+                React.createElement("div", { className: "mcfg-reasoning", key: "budget" },
+                  React.createElement("span", { className: "mcfg-label" }, "标题请求预算"),
+                  React.createElement("div", { className: "mcfg-fields" },
+                    TITLE_BUDGET_FIELDS.map((field) => React.createElement("label", { className: "mcfg-field", key: field.key },
+                      React.createElement("span", { className: "mcfg-label" }, field.label),
+                      React.createElement("input", {
+                        className: "mcfg-input",
+                        type: "number",
+                        min: 1,
+                        step: 1,
+                        disabled: !data.writable || titleBusy,
+                        value: titleShown[field.key] === undefined || titleShown[field.key] === null ? "" : String(titleShown[field.key]),
+                        onChange: (event) => editTitleDraft({
+                          [field.key]: event.target.value === "" ? "" : Number(event.target.value),
+                        }),
+                      }),
+                      React.createElement("span", { className: "mcfg-note" }, field.hint)
+                    ))
+                  )
+                ),
+                React.createElement("div", { className: "mcfg-note", key: "budgetNote" },
+                  "上面的数值由本页写入设置，保存后对之后生成的标题生效；清空某项会回到宿主默认值。标题请求不传递推理档位，由所选模型自己决定是否思考——因此推理模型需要更大的「输出上限」。"
                 ),
                 React.createElement("div", { className: "mcfg-actions", key: "actions" },
                   React.createElement("button", {

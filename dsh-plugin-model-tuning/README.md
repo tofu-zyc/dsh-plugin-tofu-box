@@ -30,9 +30,16 @@
 
 - 默认**继承当前会话**已记录的 provider / model（与内置标题生成一致）；
 - 也可指定独立的 provider / model，选项全部来自真实模型目录（不提供自由输入框，避免臆造 ID）；
-- 每次生成重新读取设置，保存后下一次标题生成即生效，**不需要重启宿主**；
+- **标题请求预算也在本页配置**（目标词数 / 汉字数、输入字节上限、输出 token 上限、超时）：
+  这些字段是 volatile 配置，写入后按需覆盖插件行的默认值；清空某一项即回到默认；
+- 每次生成都重新读取路由与预算，保存后下一次标题生成即生效，**不需要重启宿主**；
 - 生效范围是本 profile 之后生成的标题；已有标题、手动重命名、会话的对话模型都不受影响；
-- 不提供推理档位控件：标题策略不向标题请求传递 `reasoningEffort`，加一个不生效的控件会误导；
+- 不提供推理档位控件：标题策略不向标题请求传递 `reasoningEffort`，加一个不生效的控件会误导。
+  但这意味着**是否思考由所选模型自己决定**——推理模型会先思考再作答，需要更大的
+  「输出上限」（例如 1024）才能在预算内产出标题；直接作答的模型用默认的 64 就够。
+  例外：内置 DeepSeek 适配器对 `purpose === "session-title"` 强制关闭思考
+  （`dsh-llm-deepseek` 里 `options.purpose === "session-title" ? "off"`），所以
+  `deepseek-official` 的模型在默认预算下即可直接出标题；
 - 「宿主行未激活」提示只在标题 provider 注册失败（插件半区未启动）时出现。
 
 ### 绘图页签
@@ -70,7 +77,7 @@ profile 条目 id `model-tuning` 的 Config 字段（volatile，热更新即时�
     titleMode: inherit        # inherit | custom
     # titleProvider: tofu-gpt # custom 时必填
     # titleModel: gpt-5       # custom 时必填
-    # ── 标题预算（固定默认值，与 dsh-base 的 session-title-llm 行一致） ──
+    # ── 标题预算（volatile：可在「用途」页改；这里是未改时的默认值） ──
     targetWords: 5
     targetCjkCharacters: 10
     maxInputBytes: 4096
@@ -94,10 +101,12 @@ profile 条目 id `model-tuning` 的 Config 字段（volatile，热更新即时�
 ```
 
 - **顺序即语义**：`disabled` 必须排在 `insert` 之前，否则两行会同时注册。
-- `config` 与 base 的数值逐项相同：即使本包的 `config:` 块被删掉，标题预算行为也不变。
+- `config` 与 base 的数值逐项相同：**未在「用途」页改动预算时**，删掉本包的 `config:` 块也不改变标题行为；
+  页面写入的用户层值会覆盖这些默认值。
 - 注册时沿用原 provider id（`session-title-llm`）与原 cadence（`first-prompt`），会话日志里的标题归因不变。
-- 标题请求的提示词、字节上限、输出 token 上限、超时、取消与结果校验全部沿用宿主共享策略
-  （`@deepseek-ai/dsh-session-title-llm` 的 `generateSessionTitleWithLlm`），本插件只决定路由。
+- 标题请求的提示词组装、取消与结果校验沿用宿主共享策略
+  （`@deepseek-ai/dsh-session-title-llm` 的 `generateSessionTitleWithLlm`）；
+  本插件决定**路由**与**预算**（提示词目标词数 / 汉字数、输入字节上限、输出 token 上限、超时）。
 - 卸载本 bundle 会同时移除 `disabled` 与 `insert` 两条 patch，宿主自带 provider 自动恢复。
 
 ## 模块解析（重要）

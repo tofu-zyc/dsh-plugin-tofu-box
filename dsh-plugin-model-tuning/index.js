@@ -79,12 +79,12 @@ export const Config = z.object({
   titleMode: z.union([z.const('inherit'), z.const('custom')]).default('inherit').volatile(),
   titleProvider: z.string().volatile(),
   titleModel: z.string().volatile(),
-  // ── 标题预算（固定值，与 dsh-base 的 session-title-llm 行一致） ──
-  targetWords: z.number().step(1).min(1).default(5),
-  targetCjkCharacters: z.number().step(1).min(1).default(10),
-  maxInputBytes: z.number().step(1).min(1).default(4096),
-  maxOutputTokens: z.number().step(1).min(1).default(64),
-  timeoutMs: z.number().step(1).min(1).default(60000),
+  // ── 标题请求预算（用户可在「用途」页改；默认值与 dsh-base 的 session-title-llm 行一致） ──
+  targetWords: z.number().step(1).min(1).default(5).volatile(),
+  targetCjkCharacters: z.number().step(1).min(1).default(10).volatile(),
+  maxInputBytes: z.number().step(1).min(1).default(4096).volatile(),
+  maxOutputTokens: z.number().step(1).min(1).default(64).volatile(),
+  timeoutMs: z.number().step(1).min(1).default(60000).volatile(),
 })
 
 /** Reject a custom title mode that cannot name both halves of a route. */
@@ -160,20 +160,38 @@ function loadTitleHelper() {
 }
 
 /**
+ * Read the live title budget.
+ *
+ * Every field is user-editable from the 用途 tab, so each generation re-reads
+ * them instead of freezing the apply-time values. A reasoning model that only
+ * starts answering after a long think needs a larger `maxOutputTokens` here;
+ * that is the user's call, not a constant in this file.
+ * @param config - the plugin's live Config.
+ * @returns the prompt/byte/token/timeout policy for one title request.
+ */
+export function titleBudgetOf(config) {
+  const policy = {
+    targetWords: config.targetWords.get(),
+    targetCjkCharacters: config.targetCjkCharacters.get(),
+    maxInputBytes: config.maxInputBytes.get(),
+    maxOutputTokens: config.maxOutputTokens.get(),
+    timeoutMs: config.timeoutMs.get(),
+  }
+  for (const [key, value] of Object.entries(policy)) {
+    if (!Number.isInteger(value) || value < 1) throw new Error(`model-tuning: ${key} 必须是正整数`)
+  }
+  return policy
+}
+
+/**
  * Register the settings-owned title provider.
  * @param ctx - context exposing session-title and LLM services.
- * @param config - required prompt, byte, token, and timeout policy plus the live title route.
+ * @param config - the live Config (route and budget are re-read per generation).
  */
 export async function registerTitleProvider(ctx, config) {
   const generateSessionTitleWithLlm = await loadTitleHelper()
-  const policy = {
-    targetWords: config.targetWords,
-    targetCjkCharacters: config.targetCjkCharacters,
-    maxInputBytes: config.maxInputBytes,
-    maxOutputTokens: config.maxOutputTokens,
-    timeoutMs: config.timeoutMs,
-  }
   validateTitleModel({ titleMode: config.titleMode.get(), titleProvider: config.titleProvider.get(), titleModel: config.titleModel.get() })
+  titleBudgetOf(config)
   ctx.sessionTitle.register({
     id: TITLE_PROVIDER_ID,
     automatic: 'first-prompt',
@@ -182,7 +200,7 @@ export async function registerTitleProvider(ctx, config) {
         titleMode: config.titleMode.get(), titleProvider: config.titleProvider.get(), titleModel: config.titleModel.get(),
       }, request)
       const selected = request.messages.slice(0, 1)
-      return await generateSessionTitleWithLlm(ctx, policy, { ...request, route }, selected, TITLE_PROVIDER_ID)
+      return await generateSessionTitleWithLlm(ctx, titleBudgetOf(config), { ...request, route }, selected, TITLE_PROVIDER_ID)
     },
   })
 }
