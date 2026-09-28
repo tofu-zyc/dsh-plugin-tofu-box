@@ -1,0 +1,7 @@
+# Reuse the shipped llm-pi-ai OAuth flow and Models provider-card slot.
+# This bundle neither replaces the model adapter nor stores a second credential.
+- insert:
+    - id: codex-login
+      name: dsh-plugin-codex-login
+      config:
+        timeoutSeconds: 600
