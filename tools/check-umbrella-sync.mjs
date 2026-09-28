@@ -23,16 +23,18 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const umbrellaDir = join(root, 'tofu-box')
 const umbrella = JSON.parse(readFileSync(join(umbrellaDir, 'package.json'), 'utf8'))
 
-// 会员集合 = git 已跟踪的插件目录（与 publish.ps1 的发布纪律一致）：
-// 在制品目录（未 add/commit）不算伞包成员，直到它被正式入库。
+// 会员集合 = git 已跟踪且未标 private 的插件目录（与 publish.ps1 的发布纪律一致）：
+// git 跟踪排除尚未入库的在制品，private:true 排除已入库但明确不发布的在制品
+// （npm publish 本身也拒绝 private 包，双保险）。
 const isTracked = (dir) => {
   const r = spawnSync('git', ['-C', root, 'ls-files', '--', `${dir}/`], { encoding: 'utf8' })
   return r.status === 0 && r.stdout.trim().length > 0
 }
+const readManifest = (dir) => JSON.parse(readFileSync(join(root, dir, 'package.json'), 'utf8'))
 const pluginDirs = readdirSync(root, { withFileTypes: true })
   .filter(e => e.isDirectory() && /^dsh-plugin-/.test(e.name))
   .map(e => e.name)
-  .filter(isTracked)
+  .filter(dir => isTracked(dir) && readManifest(dir).private !== true)
   .sort()
 
 const problems = []
