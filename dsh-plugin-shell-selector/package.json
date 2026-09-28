@@ -2,10 +2,14 @@
   "name": "dsh-plugin-shell-selector",
   "version": "0.1.0",
   "description": "在 设置 → Shell 页面选择 AI 命令执行所用的 shell（自动 / PowerShell 7 / Windows PowerShell 5.1 / Git Bash），带真实可用性检测。",
+  "license": "MIT",
+  "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "shell", "powershell"],
+  "publishConfig": { "registry": "https://registry.npmjs.org" },
+  "repository": { "type": "git", "url": "git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git", "directory": "dsh-plugin-shell-selector" },
+  "bugs": { "url": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/issues" },
+  "homepage": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/tree/main/dsh-plugin-shell-selector",
   "type": "module",
   "main": "index.js",
-  "license": "MIT",
-  "keywords": ["dsh-plugin", "deepseek-harness", "shell", "powershell"],
   "exports": { ".": "./index.js", "./client": "./client.js", "./package.json": "./package.json" },
   "peerDependencies": {
     "@deepseek-ai/dsh-typert-protocol": ">=0.1.6-alpha.1"
