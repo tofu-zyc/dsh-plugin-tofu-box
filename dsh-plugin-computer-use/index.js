@@ -877,11 +877,36 @@ export function apply(ctx, config) {
   // prompts, 'never' (approvals disabled / full-access mode) auto-REJECTS every
   // ask. Emitting ask there would only self-block, so when the session cannot
   // prompt we pass actions through — the user's global policy is the gate.
+  //
+  // effectivePolicy is private upstream; the public overrideOf(session) reads
+  // the session's own 'approval/policy' fold and misses only the configured
+  // default (policy: never, i.e. danger-full-access deployments). Probe both
+  // shapes; when neither resolves, assume the session CANNOT be prompted — an
+  // unnecessary ask under 'never' is auto-rejected and locks every tool, while
+  // a skipped ask under 'ask' still surfaces in the next screenshot.
   const approval = ctx.get('approval')
   const sessionRefusesPrompt = (exec) => {
     const session = exec && exec.agent && exec.agent.session
-    if (session === undefined || !approval || typeof approval.effectivePolicy !== 'function') return false
-    try { return approval.effectivePolicy(session) === 'never' } catch { return false }
+    if (approval === undefined || session === undefined) return false
+    try {
+      // Most complete first: session fold + configured default in one answer.
+      if (typeof approval.effectivePolicy === 'function') return approval.effectivePolicy(session) === 'never'
+      // Public API: the session's own 'approval/policy' fold, else undefined.
+      if (typeof approval.overrideOf === 'function') {
+        const override = approval.overrideOf(session)
+        if (override === 'never') return true
+        if (override === 'ask') return false
+      }
+      // Configured deployment default ('never' under danger-full-access).
+      const policy = approval.config && approval.config.policy
+      const value = policy && typeof policy.get === 'function' ? policy.get() : policy
+      if (value === 'never') return true
+      if (value === 'ask') return false
+    } catch { /* undecidable: fall through */ }
+    // No probe resolved: assume prompting is impossible. An ask the approval
+    // service would auto-reject locks every gated tool; passing through only
+    // risks an unasked action, which the next screenshot still reveals.
+    return true
   }
 
   const isEscalationHint = (r) => {
