@@ -1,0 +1,5 @@
+# dsh-plugin-model-search 自 wiring（dsh.bundle.patch 机制）：安装即注册，
+# 无需在 profile 的 cordis.patch.yml 手动 insert。
+- insert:
+    - id: model-search
+      name: dsh-plugin-model-search
