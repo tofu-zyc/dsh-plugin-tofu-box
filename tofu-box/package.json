@@ -15,7 +15,7 @@
     "dsh-plugin-read-image-preview": "^1.4.1",
     "dsh-plugin-shell-selector": "^0.1.0",
     "dsh-plugin-computer-use": "^2.4.1",
-    "dsh-plugin-mcp-ui": "^1.0.2"
+    "dsh-plugin-mcp-ui": "^1.0.3"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": ">=0.1.6-alpha.1",

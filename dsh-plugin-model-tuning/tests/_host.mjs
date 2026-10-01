@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 
-/** The 0.1.7-alpha.2 deployment supplied only to this isolated test process. */
+/** The dsh deployment supplied only to this isolated test process (any version shipping the title helper). */
 export function hostDeploymentRoot() {
   const root = process.env.DSH_TEST_DEPLOY_ROOT
   if (!root) return undefined
@@ -18,5 +18,5 @@ const anchor = hostDeploymentRoot()
 if (anchor) process.argv[1] = anchor
 
 export function requireHostHelper() {
-  if (!anchor) throw new Error('set DSH_TEST_DEPLOY_ROOT to an isolated 0.1.7-alpha.2 deployment containing the title helper')
+  if (!anchor) throw new Error('set DSH_TEST_DEPLOY_ROOT to an isolated dsh deployment containing the title helper')
 }
