@@ -80,6 +80,9 @@ tofu-box 伞包依赖连带 `^1.0.3`，`check-umbrella-sync` 通过。
 
 ## 7. 待办
 
-- [ ] mcp-ui 1.0.3 与 tofu-box 发 npm（publish.ps1）。
+- [x] mcp-ui 1.0.3 与 tofu-box 发 npm：已发布 `dsh-plugin-mcp-ui@1.0.3`、`tofu-box@1.0.2`
+  （1.0.1 因发布管道被截断中止，PUT 未发出，版本号未被烧；重发用 1.0.2。发布期间顺带
+  把 `~\.npmrc` 的失效字面 token 换成 `${NPM_TOKEN}` 占位符，与 profile 的环境变量方案对齐，
+  原文件备份 `.npmrc.bak-20261001`）。
 - [ ] 0.2.0 正式版发布后重跑本文档流程（rc.2 → 0.2.0 预计无破坏，重点盯 peer 门禁）。
 - [ ] 页面行为清单人工过一遍（模型菜单搜索、设置页三页签、read_image 缩略图卡）。
