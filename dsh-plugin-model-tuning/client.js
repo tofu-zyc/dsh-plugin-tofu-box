@@ -142,6 +142,27 @@ window.__ModuleLoader__.load({
     const MODALITY_CHOICES = ["auto", "text", "text-image"];
     const MODALITY_LABELS = { auto: "自动", text: "纯文本", "text-image": "文本 + 图像" };
 
+    /**
+     * The compat switch that selects Anthropic's adaptive thinking request.
+     *
+     * pi-ai sends `thinking: {type:"adaptive"}` plus `output_config.effort` only
+     * for a model whose `compat.forceAdaptiveThinking` is true; without it the
+     * request carries the legacy budget form (`thinking.type="enabled"` with
+     * `budget_tokens`). A model that requires adaptive thinking answers that
+     * legacy request with HTTP 400 — "requires adaptive thinking; omit thinking
+     * or use thinking.type=adaptive and output_config.effort". The installed
+     * catalog states the flag for the model ids it ships; a route this profile
+     * declares by hand has no catalog entry to inherit it from, so the switch
+     * has to be written on the model entry here.
+     */
+    const ADAPTIVE_THINKING_COMPAT_KEY = "forceAdaptiveThinking";
+    /**
+     * The one wire protocol whose compat takes that switch. `llm-pi-ai` refuses
+     * a compat field the model's resolved api does not offer, so the control is
+     * shown only on a route whose own configuration names this protocol.
+     */
+    const ADAPTIVE_THINKING_API = "anthropic-messages";
+
     function formatCapacity(n) {
       if (n == null || typeof n !== "number" || !Number.isFinite(n)) return "";
       if (n % 1000000 === 0) return String(n / 1000000) + "M";
@@ -325,6 +346,25 @@ window.__ModuleLoader__.load({
         return compat && typeof compat === "object" ? compat[compatKey] : undefined;
       }
       return undefined;
+    }
+
+    /**
+     * The compat key this page may write for one route, or null when the route
+     * cannot take it.
+     *
+     * The route's own `api` is the only place the protocol is known before a
+     * model resolves: a hand-declared route spells it out, while a catalog route
+     * omits it and resolves each model's protocol from the installed catalog.
+     * The control therefore appears exactly where the switch is both needed (no
+     * catalog entry to inherit the flag from) and accepted.
+     * @param settingsNs - the provider's settings namespace.
+     * @param profile - the route's own settings section.
+     * @returns the adaptive-thinking compat key, or null.
+     */
+    function adaptiveThinkingCompatKey(settingsNs, profile) {
+      if (settingsNs !== "llm-pi-ai") return null;
+      if (!profile || typeof profile !== "object") return null;
+      return profile.api === ADAPTIVE_THINKING_API ? ADAPTIVE_THINKING_COMPAT_KEY : null;
     }
 
     function computeWriteOps(entry, nsView, modelId, field, value) {
@@ -895,6 +935,7 @@ window.__ModuleLoader__.load({
             const nsView = entry ? nsByNs.get(entry.settingsNs) : undefined;
             const providerProfile = profileOf(nsView, entry ? entry.settingsPath : []);
             const reasoningEditable = !!(entry && entry.settingsNs === "llm-pi-ai");
+            const adaptiveKey = entry ? adaptiveThinkingCompatKey(entry.settingsNs, providerProfile) : null;
             const routeDefaultInput = providerProfile && Array.isArray(providerProfile.defaultInput)
               ? providerProfile.defaultInput
               : null;
@@ -904,11 +945,15 @@ window.__ModuleLoader__.load({
               const devRole = entry && entry.settingsNs === "llm-pi-ai"
                 ? readCompatField(nsView, entry.settingsPath, m.id, "supportsDeveloperRole")
                 : undefined;
+              const adaptiveThinking = adaptiveKey
+                ? readCompatField(nsView, entry.settingsPath, m.id, adaptiveKey)
+                : undefined;
               const modalityField = entry ? modalityFieldFor(entry.settingsNs) : undefined;
               const rawInput = modalityField
                 ? readModelField(nsView, entry.settingsPath, m.id, modalityField)
                 : undefined;
               const image = computeImageModelState(view, providerProfile, m.id);
+              const efforts = (m.reasoning && Array.isArray(m.reasoning.efforts)) ? m.reasoning.efforts.map((e) => ({ id: e.id, name: e.name })) : [];
               return {
                 id: m.id,
                 name: m.name,
@@ -916,6 +961,10 @@ window.__ModuleLoader__.load({
                 contextWindow: ctx != null ? ctx : null,
                 maxTokens: mx != null ? mx : null,
                 supportsDeveloperRole: devRole,
+                adaptiveThinking: adaptiveThinking === true,
+                // The flag only changes a request that carries thinking at all,
+                // so it is offered where a level can be selected.
+                adaptiveThinkingEditable: adaptiveKey !== null && efforts.length > 0,
                 modalityField: modalityField || null,
                 modality: modalityField ? modalityChoice(rawInput) : null,
                 imageAvailable: image.available,
@@ -925,7 +974,7 @@ window.__ModuleLoader__.load({
                 imageApiKeyEnv: image.apiKeyEnv || null,
                 declared: !!(entry && entry.declared),
                 routeDefaultInput: routeDefaultInput,
-                efforts: (m.reasoning && Array.isArray(m.reasoning.efforts)) ? m.reasoning.efforts.map((e) => ({ id: e.id, name: e.name })) : [],
+                efforts,
                 defaultEffort: (m.reasoning && m.reasoning.defaultEffort != null) ? m.reasoning.defaultEffort : null,
               };
             });
@@ -1024,11 +1073,12 @@ window.__ModuleLoader__.load({
               throw new Error("取值必须是正整数");
             }
             payload = value;
-          } else if (kind === "supportsDeveloperRole") {
+          } else if (kind === "supportsDeveloperRole" || kind === "adaptiveThinking") {
             if (value !== null && typeof value !== "boolean") {
               throw new Error("取值必须是布尔值");
             }
-            const write = computeCompatWriteOps(entry, nsView, model, "supportsDeveloperRole", value);
+            const compatKey = kind === "supportsDeveloperRole" ? "supportsDeveloperRole" : ADAPTIVE_THINKING_COMPAT_KEY;
+            const write = computeCompatWriteOps(entry, nsView, model, compatKey, value);
             if (write) {
               const res = await api.settings.mutate({ ns: write.ns, ops: write.ops });
               if (!res.result.ok) throw new Error(res.result.error.message);
@@ -1176,6 +1226,9 @@ window.__ModuleLoader__.load({
                           : null,
                         model.imageLinked
                           ? React.createElement("span", { className: "mcfg-chip mcfg-chip-on" }, "生图模型")
+                          : null,
+                        model.adaptiveThinking
+                          ? React.createElement("span", { className: "mcfg-chip mcfg-chip-on" }, "自适应思考")
                           : null
                       )
                     ),
@@ -1215,6 +1268,7 @@ window.__ModuleLoader__.load({
                             React.createElement("input", {
                               type: "radio",
                               name: "devrole-" + model.id,
+                              disabled: !editable,
                               checked: role === "auto"
                                 ? model.supportsDeveloperRole === undefined
                                 : (role === "developer" ? model.supportsDeveloperRole === true : model.supportsDeveloperRole === false),
@@ -1234,6 +1288,29 @@ window.__ModuleLoader__.load({
                       ),
                       React.createElement("div", { className: "mcfg-note" },
                         "自动：跟随网关检测；如遇 role 'developer' is not allowed，请选 system"
+                      )
+                    ) : null,
+                    model.adaptiveThinkingEditable ? React.createElement("div", { className: "mcfg-reasoning" },
+                      React.createElement("span", { className: "mcfg-label" }, "思考格式（Anthropic 兼容开关）"),
+                      React.createElement("div", { className: "mcfg-levels" },
+                        ["auto", "adaptive"].map((choice) =>
+                          React.createElement("label", { key: choice, className: "mcfg-level" },
+                            React.createElement("input", {
+                              type: "radio",
+                              name: "adaptive-" + model.id,
+                              disabled: !editable,
+                              checked: choice === "auto" ? !model.adaptiveThinking : model.adaptiveThinking,
+                              onChange: () => applyChange(provider.provider, model.id, "adaptiveThinking", choice === "adaptive" ? true : null),
+                            }),
+                            React.createElement("span", null, choice === "auto" ? "自动（预算式 thinking）" : "自适应 thinking")
+                          )
+                        )
+                      ),
+                      React.createElement("div", { className: "mcfg-note" },
+                        "上面选中档位后，请求体由这里决定：自适应写 compat." + ADAPTIVE_THINKING_COMPAT_KEY
+                        + "，发出 thinking.type=adaptive 与 output_config.effort；Claude Opus 4.6 及更新、Sonnet 5、"
+                        + "Fable 5 等只接受这种，报 400 requires adaptive thinking 就切到它。"
+                        + "Claude 4.5 及更早只认预算式，保持「自动」。"
                       )
                     ) : null,
                     model.modalityField ? React.createElement("div", { className: "mcfg-reasoning" },

@@ -20,6 +20,9 @@
   - 系统提示角色兼容开关：`自动` / `system` / `developer`（仅 `llm-pi-ai`，
     写入模型条目的 `compat.supportsDeveloperRole`；遇到 kimi/DeepSeek 等
     报 `role 'developer' is not allowed` 时选 `system`）；
+  - 思考格式兼容开关：`自动` / `自适应 thinking`（仅 `llm-pi-ai` 且路由 `api: anthropic-messages`，
+    写入模型条目的 `compat.forceAdaptiveThinking`；见下节「Anthropic 思考格式」。
+    该模型一个推理档位都没勾选时不显示——那时请求里根本没有 `thinking`）；
   - 生图模型勾选（把该模型写入「绘图」页签的模型列表，见「绘图页签」）；
 - 顶部搜索框按模型名 / ID / 描述 / provider 过滤；
 - 修改即时保存（`remote.settings.mutate`；模型目录来自 `remote.session.modelCatalog()`）。
@@ -136,6 +139,44 @@ harness 的请求模态是**闭合集合 `text | image`**：`dsh-llm` 的 `Model
 > 「系统提示角色」开关依赖 DSH 适配层 `dsh-llm-pi-ai` 透传 `compat.supportsDeveloperRole`
 >（`0.1.0-rc.6` 默认不透传，需按本仓库 `deepseek-harness` 的 catalog.ts 补丁同步，或等上游合入）。
 
+## Anthropic 思考格式（自适应 vs 预算式）
+
+「模型参数」页的**思考格式**开关解决的是这一条报错：
+
+```
+400 {"error":{"message":"claude-opus-5-5 requires adaptive thinking; omit thinking or use
+thinking.type=adaptive and output_config.effort","type":"invalid_request_error"}}
+```
+
+- **原因**：pi-ai 只有在模型的 `compat.forceAdaptiveThinking === true` 时才发
+  `thinking: {type:"adaptive"}` + `output_config: {effort:"…"}`；否则发旧的预算式
+  `thinking: {type:"enabled", budget_tokens:N}`。只接受自适应思考的模型（Claude Opus 4.6 及更新、
+  Sonnet 5、Fable 5、Kimi K3 等）会直接 400 拒掉预算式请求。
+- **为什么手写路由会中招**：pi-ai 内置目录给它自己带的模型 ID 标了这个标记，
+  而 `dsh-llm-pi-ai` 只在「模型 ID 命中该 provider 自己的目录条目」时才继承目录 `compat`
+  （`resolveModelCompat` 要求 `base.api === api`）。手写路由（例如 `providers.ironman-claude`
+  这种目录里不存在的 key）没有任何目录条目可继承，`claude-opus-5-5` 这类目录里其实认识、
+  但挂在 `anthropic` 名下的 ID 也一样继承不到——于是请求退化成预算式。
+- **怎么修**：在该模型的「思考格式」里选**自适应 thinking**，页面把
+  `compat.forceAdaptiveThinking: true` 写进模型条目（与 `系统提示角色` 同一套写法），
+  下一次请求即生效，无需重启。Claude 4.5 及更早只认预算式，保持「自动」。
+- **另一条路（不动插件）**：把这条路由改成目录里已有的 key（例如 `providers.anthropic`
+  只覆盖 `baseURL` / `apiKeyEnv`，用 `models:` 收窄到要用的几个 ID），模型 ID 因此命中目录条目，
+  自适应标记、`supportsTemperature` 等兼容位都会自动继承。代价是 provider ID 变了，
+  老会话里记录的路由名会对不上，所以通常仍是逐个模型打勾更省事。
+
+> **已知边界**：思考强度选 `off` 时，`dsh-llm-pi-ai` 会把声明里 `off: null` 的那一项**移出**
+> `thinkingLevelMap`，pi-ai 因此发 `thinking: {type:"disabled"}`（只有把 `off` 钉成 `null` 才会
+> 整个省略该参数——那是内置目录条目的写法），本开关管不到这一段。若网关连 `disabled` 也拒绝，
+> 把该模型的「可选推理档位」全部取消（写成 `reasoningEfforts: false`，即视为无推理能力），
+> 请求里就完全不会出现 `thinking`。
+
+> **耦合点**：字段名 `forceAdaptiveThinking` 与「只在该协议的白名单内」都由上游决定
+> ——`dsh-llm-pi-ai` 的 `anthropic-messages` compat 门（`0.1.7-alpha.2` 起已含该字段，
+> `884f7b9c41` 于 2026-08-18 引入）会拒收白名单外的字段，pi-ai 的
+> `dist/api/anthropic-messages.js` 是唯一读它的地方。`tests/adaptive-thinking.test.mjs`
+> 在有 `DSH_TEST_DEPLOY_ROOT` 时直接问该部署的 pi-ai 要请求体，上游改名会在这里失败而不是在会话里变成 400。
+
 ## 与 DSH 版本的耦合点（0.1.7-alpha.2）
 
 - **provider 目录必须取 `llm.listConfigurableProviders()`**（返回 `LlmConfigurableProvider`
@@ -155,15 +196,20 @@ node --test tests/title-route.test.mjs            # 标题路由解析与 Config
 node --test tests/title-purpose.test.mjs          # 用途页读写规划 + locale 回归
 node --test tests/image-link.test.mjs             # 生图链接写入规划（纯函数）
 node --test tests/image.test.mjs                  # 绘图传输/工具/Remote（本地 HTTP，不外联）
+node --test tests/adaptive-thinking.test.mjs      # 思考格式开关：白名单 + 写入规划（+ 部署耦合守卫）
 DSH_TEST_DEPLOY_ROOT=<隔离部署> node --test tests/title-provider.test.mjs   # 真 helper + 假 ctx
 ```
 
 - `title-provider.test.mjs` 用**假 ctx + 真共享策略**（只 mock `ctx.llm.stream`）验证唯一注册、
   继承/指定路由、首条消息选择、辅助请求记录、失败与取消路径。`tests/_host.mjs` 要求
   `DSH_TEST_DEPLOY_ROOT` 指向隔离的 0.1.7-alpha.2 部署。
+- `adaptive-thinking.test.mjs` 的前半段是纯函数（开关只出现在 `anthropic-messages` 路由、
+  写入落在模型条目的 `compat` 上，目录路由落到 `modelOverrides`）；后半段只在有
+  `DSH_TEST_DEPLOY_ROOT` 时运行，把该部署的 pi-ai 拦在假 `fetch` 前，直接读出请求体，
+  证明「打勾 → `thinking.type=adaptive` + `output_config.effort`，不打勾 → 预算式」。
 - **这些测试不是实机验证**。实机验收：标题从会话日志读 `session/title-llm-request` 的 `route`
   与最终 `session/title` 的 `source.model`；绘图确认「模型参数」勾选 → 绘图页出现条目 →
-  直接绘图面板出图。
+  直接绘图面板出图；思考格式在模型下拉里选一档后看会话日志里那次请求的请求体。
 
 ## 安装 / 卸载
 
