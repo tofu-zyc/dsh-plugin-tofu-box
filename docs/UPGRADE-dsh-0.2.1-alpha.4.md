@@ -56,7 +56,32 @@
 **没做的**：真实 alpha.4 实例里的启动冒烟与页面行为清单（标题实际生成一次、读 `session/title-llm-request`；
 read_image 卡片；模型参数页勾档位后看 profile）。
 
-## 5. 待办
+## 5. 本机升级（方案 B：全局 CLI → alpha.4，桌面端留在 rc.2）
+
+- `npm i -g @deepseek-ai/dsh@0.2.1-alpha.4`；回滚：`npm i -g @deepseek-ai/dsh@0.2.0-rc.2`。
+- web profile 备份：`~/.dsh/backups/web-before-0.2.1-alpha.4-20261016/`（package.json / lock / cordis.patch.yml）。
+- web profile 调整：移除 model-search；read-image-preview（原 link 到 `.dsh-017-prod` 旧拷贝 1.4.1）与
+  model-tuning（原 `file:` 快照 2.0.1）改为 `link:` 工作区（1.5.0 / 2.1.0）；清掉残留的 model-search /
+  shell-selector junction。computer-use / mcp-ui 仍是 `file:` 快照（computer-use 2.4.1 ≠ 工作区 2.5.0，未动）。
+- **`llm-deepseek` 行换了包**：dsh-base 里该行现在是 `@deepseek-ai/dsh-llm-deepseek-api-key`，profile patch 里写死的
+  `name: "@deepseek-ai/dsh-llm-deepseek"` 会触发 `patch: name mismatch … skipping`，**整段 DeepSeek 模型配置被静默跳过**。
+  已删掉该 `name:` 行（按 id 打补丁，rc.2 / alpha.4 都命中）。配置字段两包相同，无需迁移。
+  桌面 profile 也有同样的行，桌面端升级时要一起改。
+- 会话格式两版都是 `SESSION_FORMAT_VERSION = 4`，桌面 rc.2 与 CLI alpha.4 共用 `~/.dsh` 安全。
+- 启动冒烟：`dsh --profile web --no-open --port 0` 正常出 URL，无 `did not activate`；`--dump-config` 无告警；
+  `/read-image-preview/state` 401（路由在、被信任围栏拦）、`/resolve` 404（已删）。
+
+**`dsh plugin` 挂住的坑**：在非交互 shell 里 stdin 是不关闭的管道时，pnpm（11.7.0）完成工作（`Done in 642ms`）后
+不退出，dsh 一直等它，profile 的 bundles 收尾也不执行。给命令加 `< /dev/null` 即正常退出。
+
+**第三方 TUI（`@deepseek-harness-tui/dsh-tui`，`dsh-tui` profile）**：
+- 本机装的 0.11.1 peer 只到 0.1.7-rc.2，**在 rc.2 上就已被拒载**（未授豁免）。
+- npm 最新 0.15.0（10-13）README 写明主要兼容目标 0.2.0-rc.2，peer 精确锁 `dsh-app-boot` / `dsh-cmdline` /
+  `dsh-plugin-manager` 等为 `0.2.0-rc.2`，在 alpha.4 上同样会被拒载，需 `dsh plugin allow-version` 精确豁免才能跑。
+- 静态检查（0.15.0 对 alpha.4）：15 个宿主模块、30 个命名导出全部存在；patch 指向的 28 个 dsh-base 行全部存在。
+  运行期行为未验证。未改动该 profile、未授豁免。
+
+## 6. 待办
 
 - [ ] 发布：model-tuning 2.1.0、read-image-preview 1.5.0、tofu-box 1.1.0（`./publish.ps1 -Publish`）。
 - [ ] npm 上给 `dsh-plugin-model-search` 打 deprecate 说明（对外操作，待确认）。
