@@ -10,7 +10,8 @@
  *    patch in `cordis.patch.yml`. It is still exactly one provider:
  *    `ctx.sessionTitle.register()` throws on a second registration, so a
  *    competing generator cannot coexist. Everything except the route is
- *    delegated to the public shared policy `generateSessionTitleWithLlm` from
+ *    delegated to the public shared policy (`executeSessionTitleLlm`, or
+ *    `generateSessionTitleWithLlm` before dsh 0.2.1) from
  *    `@deepseek-ai/dsh-session-title-llm`, resolved from the RUNNING
  *    deployment (see hostRequire) — never from this package's directory, which
  *    for a linked workspace package would risk a second copy of the host's
@@ -140,7 +141,79 @@ function hostRequire() {
   return undefined
 }
 
+/** Title-service package that owns `normalizeSessionTitle`; resolved next to the helper. */
+const TITLE_SERVICE_PACKAGE = '@deepseek-ai/dsh-session-title'
+
+/**
+ * Language-aware system instruction, mirroring the shipped first-prompt
+ * provider (dsh ≥ 0.2.1 hands prompt ownership to each provider).
+ * @param budget - the live title budget.
+ * @returns the system prompt.
+ */
+export function titleSystemPrompt(budget) {
+  return [
+    'Create a concise title for an AI coding-assistant session from the supplied human messages.',
+    'Return only the title on one line, **in plain text of natural language**, with no quotes, prefix, explanation, Markdown, XML, or terminal control codes. No code is allowed.',
+    'Use the language of the messages.',
+    `Aim for about ${budget.targetWords} words in non-CJK languages or ${budget.targetCjkCharacters} CJK characters.`,
+    'If the messages give little to name, still return a short best-effort title, such as Greeting, instead of explaining.',
+  ].join('\n')
+}
+
+/** Asterisk emphasis wrapping a whole line, such as `**Title**`. */
+const EMPHASIS_WRAPPER = /^(?<marker>\*{1,3})(?<inner>\S(?:.*\S)?)\k<marker>$/u
+
+/**
+ * Take the title from model output: the first non-empty line, without
+ * asterisk emphasis wrapping that whole line (same rule as the shipped provider).
+ * @param text - the joined text blocks.
+ * @returns the raw title line.
+ */
+export function titleFromOutput(text) {
+  const line = text.split(/\r?\n/u).map(item => item.trim()).find(item => item.length > 0) ?? ''
+  const groups = EMPHASIS_WRAPPER.exec(line)?.groups
+  const marker = groups?.marker
+  const inner = groups?.inner
+  return marker === undefined || inner === undefined || inner.includes(marker) ? line : inner
+}
+
+/**
+ * Adapt the prepared-request API (`executeSessionTitleLlm`, dsh ≥ 0.2.1) to the
+ * one-call shape this plugin drives.
+ * @param execute - the host's `executeSessionTitleLlm`.
+ * @param normalize - the host's `normalizeSessionTitle`.
+ * @returns `(ctx, budget, request, selected, providerId) => { title, messageSeqs, model }`.
+ */
+export function preparedTitleGenerator(execute, normalize) {
+  return async (ctx, budget, request, selected, providerId) => {
+    const config = { maxInputBytes: budget.maxInputBytes, maxOutputTokens: budget.maxOutputTokens, timeoutMs: budget.timeoutMs }
+    const messageSeqs = selected.map(message => message.seq)
+    const response = await execute(ctx, config, request, providerId, {
+      system: titleSystemPrompt(budget),
+      input: `Generate the session title from this JSON array of human messages:\n${JSON.stringify(selected)}`,
+      messageSeqs,
+      // A title needs no deliberation: take the route's least effort.
+      selectReasoningEffort: model => model.reasoning?.efforts?.[0]?.id,
+    })
+    if (response.finish.kind === 'tool-calls' || response.blocks.some(block => block.type === 'tool-call')) {
+      throw new Error('session-title-llm: title output must contain text only')
+    }
+    if (response.finish.kind === 'max-tokens') {
+      throw new Error('session-title-llm: title output reached maxOutputTokens')
+    }
+    const text = response.blocks.filter(block => block.type === 'text').map(block => block.text).join(' ')
+    const title = normalize(titleFromOutput(text), Number.MAX_SAFE_INTEGER)
+    if (title.length === 0) throw new Error('session-title-llm: title model produced no text')
+    return { title, messageSeqs, model: response.model }
+  }
+}
+
 let helperPromise
+/**
+ * Load a title generator from the running deployment: the prepared-request
+ * API when the host has it (≥ 0.2.1), else the one-call
+ * `generateSessionTitleWithLlm` (0.1.7 – 0.2.0).
+ */
 function loadTitleHelper() {
   helperPromise ??= (async () => {
     const require = hostRequire()
@@ -149,12 +222,17 @@ function loadTitleHelper() {
         `model-tuning: 无法从宿主解析 ${HELPER_PACKAGE}；本插件必须与提供该包的部署一起运行。`,
       )
     }
-    const loaded = await import(pathToFileURL(require.resolve(HELPER_PACKAGE)).href)
-    const generate = loaded.generateSessionTitleWithLlm
-    if (typeof generate !== 'function') {
-      throw new Error(`model-tuning: ${HELPER_PACKAGE} 未导出 generateSessionTitleWithLlm`)
+    const helperPath = require.resolve(HELPER_PACKAGE)
+    const loaded = await import(pathToFileURL(helperPath).href)
+    if (typeof loaded.executeSessionTitleLlm === 'function') {
+      const service = await import(pathToFileURL(createRequire(helperPath).resolve(TITLE_SERVICE_PACKAGE)).href)
+      if (typeof service.normalizeSessionTitle !== 'function') {
+        throw new Error(`model-tuning: ${TITLE_SERVICE_PACKAGE} 未导出 normalizeSessionTitle`)
+      }
+      return preparedTitleGenerator(loaded.executeSessionTitleLlm, service.normalizeSessionTitle)
     }
-    return generate
+    if (typeof loaded.generateSessionTitleWithLlm === 'function') return loaded.generateSessionTitleWithLlm
+    throw new Error(`model-tuning: ${HELPER_PACKAGE} 既没有 executeSessionTitleLlm 也没有 generateSessionTitleWithLlm`)
   })()
   return helperPromise
 }
@@ -189,7 +267,7 @@ export function titleBudgetOf(config) {
  * @param config - the live Config (route and budget are re-read per generation).
  */
 export async function registerTitleProvider(ctx, config) {
-  const generateSessionTitleWithLlm = await loadTitleHelper()
+  const generateTitle = await loadTitleHelper()
   validateTitleModel({ titleMode: config.titleMode.get(), titleProvider: config.titleProvider.get(), titleModel: config.titleModel.get() })
   titleBudgetOf(config)
   ctx.sessionTitle.register({
@@ -200,7 +278,7 @@ export async function registerTitleProvider(ctx, config) {
         titleMode: config.titleMode.get(), titleProvider: config.titleProvider.get(), titleModel: config.titleModel.get(),
       }, request)
       const selected = request.messages.slice(0, 1)
-      return await generateSessionTitleWithLlm(ctx, titleBudgetOf(config), { ...request, route }, selected, TITLE_PROVIDER_ID)
+      return await generateTitle(ctx, titleBudgetOf(config), { ...request, route }, selected, TITLE_PROVIDER_ID)
     },
   })
 }
@@ -361,6 +439,13 @@ export function registerImageTools(ctx, config) {
  * @param config - the unified Config described above.
  */
 export async function apply(ctx, config) {
-  await registerTitleProvider(ctx, config)
+  // The title route leans on a host helper whose API has changed between
+  // releases. If it breaks again, lose only title routing — never the image
+  // tools and settings page that ride on the same row.
+  try {
+    await registerTitleProvider(ctx, config)
+  } catch (error) {
+    ctx.logger?.warn?.(`model-tuning: 标题路由未启用（${error instanceof Error ? error.message : String(error)}）；绘图与设置页照常工作`)
+  }
   registerImageTools(ctx, config)
 }

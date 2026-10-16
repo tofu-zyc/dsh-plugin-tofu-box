@@ -405,6 +405,44 @@ window.__ModuleLoader__.load({
       return { ns, ops: [{ op: "set", path: [...basePath, "models"], value: [{ id: modelId, [field]: value }] }] };
     }
 
+    /**
+     * The stored `reasoningEfforts` of one model: its `models[]` row first,
+     * then (pi-ai) its `modelOverrides` entry; undefined when neither declares it.
+     */
+    function storedReasoningEfforts(entry, nsView, modelId) {
+      const profile = at(nsView ? nsView.value : undefined, entry.settingsPath || []);
+      const models = (profile && Array.isArray(profile.models)) ? profile.models : [];
+      const row = models.find((m) => m && typeof m === "object" && m.id === modelId);
+      if (row && row.reasoningEfforts !== undefined) return row.reasoningEfforts;
+      const overrides = profile && profile.modelOverrides && typeof profile.modelOverrides === "object"
+        ? profile.modelOverrides[modelId] : undefined;
+      return overrides && typeof overrides === "object" ? overrides.reasoningEfforts : undefined;
+    }
+
+    /**
+     * The `reasoningEfforts` value for a set of checked levels.
+     *
+     * Since dsh 0.2.1-alpha.4 the official Models page also edits this field and
+     * lets each level send its own API value (a gateway spelling `high` as
+     * `deep`). Toggling a level here keeps every value already stored for the
+     * levels that stay, including a non-null `off`; only a newly added level
+     * defaults to its own name.
+     * @param levels - checked levels, in any order.
+     * @param existing - the stored value, or undefined.
+     * @returns `false` for no reasoning, else the level → wire-value dict.
+     */
+    function reasoningEffortsPayload(levels, existing) {
+      const ordered = REASONING_LEVELS.filter((level) => levels.indexOf(level) >= 0);
+      if (ordered.length === 0) return false;
+      const stored = existing && typeof existing === "object" && !Array.isArray(existing) ? existing : {};
+      const dict = { off: stored.off !== undefined ? stored.off : null };
+      for (const level of ordered) {
+        const wire = stored[level];
+        dict[level] = typeof wire === "string" && wire !== "" ? wire : level;
+      }
+      return dict;
+    }
+
     function computeCompatWriteOps(entry, nsView, modelId, compatKey, value) {
       const ns = entry.settingsNs;
       const settingsPath = entry.settingsPath || [];
@@ -1059,14 +1097,7 @@ window.__ModuleLoader__.load({
           if (kind === "reasoningLevels") {
             field = "reasoningEfforts";
             const raw = value && Array.isArray(value.levels) ? value.levels : [];
-            const levels = REASONING_LEVELS.filter((level) => raw.indexOf(level) >= 0);
-            if (levels.length === 0) {
-              payload = false;
-            } else {
-              const dict = { off: null };
-              for (const level of levels) dict[level] = level;
-              payload = dict;
-            }
+            payload = reasoningEffortsPayload(raw, storedReasoningEfforts(entry, nsView, model));
           } else if (kind === "contextWindow" || kind === "maxTokens") {
             field = kind;
             if (value != null && (typeof value !== "number" || !Number.isInteger(value) || value <= 0)) {

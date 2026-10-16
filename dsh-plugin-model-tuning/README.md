@@ -177,6 +177,21 @@ thinking.type=adaptive and output_config.effort","type":"invalid_request_error"}
 > `dist/api/anthropic-messages.js` 是唯一读它的地方。`tests/adaptive-thinking.test.mjs`
 > 在有 `DSH_TEST_DEPLOY_ROOT` 时直接问该部署的 pi-ai 要请求体，上游改名会在这里失败而不是在会话里变成 400。
 
+## dsh 0.2.1（alpha）适配（v2.1）
+
+- **标题 helper 换了 API。** 0.2.1-alpha 系列删掉了 `generateSessionTitleWithLlm`，改成
+  `executeSessionTitleLlm(ctx, config, request, providerId, prepared)`：提示词、输入包装、推理档位选择
+  与输出解析都交还给提供方。本插件按宿主实际导出择一：有新 API 就走新 API（提示词与解析规则复刻官方
+  `session-title-first-prompt-llm`，推理档位取路由最低档），否则回落旧 helper，0.1.7–0.2.0 不受影响。
+  2.0.x 在 0.2.1 上会因为找不到旧导出而整行激活失败（绘图与设置页一起没了）。
+- **标题注册失败不再拖垮整个插件。** `apply` 里标题路由单独兜底：失败只打一条 warn、不注册标题提供方，
+  绘图工具与设置页照常。
+- **与官方「会话标题刷新」（可选目录里的 `session-titles-bundle`）互斥。** 两者都要独占
+  `ctx.sessionTitle.register()`，后注册的一方失败——本插件这边表现为上面那条 warn。二选一。
+- **推理档位与官方 Models 页写的是同一个字段。** 0.2.1-alpha.4 起官方 Models 页可以给手工声明的 pi-ai
+  模型编辑 `reasoningEfforts`，并允许每一档发送自定义 API 值（如 `high → deep`）。本页勾选档位时保留
+  已存的值，只有新加的档位才默认用档位名；`off` 的已存值也原样保留。
+
 ## 与 DSH 版本的耦合点（0.1.7-alpha.2）
 
 - **provider 目录必须取 `llm.listConfigurableProviders()`**（返回 `LlmConfigurableProvider`

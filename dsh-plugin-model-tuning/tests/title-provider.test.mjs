@@ -38,6 +38,8 @@ function fakeContext(options = {}) {
     provider: null,
     settings: { titleMode: 'inherit', ...(options.settings ?? {}) },
     calls: [],
+    prepared: [],
+    warnings: [],
     appended: [],
   }
   state.config = {
@@ -55,6 +57,7 @@ function fakeContext(options = {}) {
   const tools = new Map()
   const services = new Map()
   const ctx = {
+    logger: { warn: message => state.warnings.push(message), info() {} },
     sessionTitle: {
       register(provider) {
         if (state.provider !== null) throw new Error('a title provider is already registered')
@@ -67,6 +70,14 @@ function fakeContext(options = {}) {
         state.calls.push(streamOptions)
         if (options.stream) return options.stream(streamOptions)
         return (async function* () { for (const chunk of textChunks(options.text ?? 'Mock Title')) yield chunk })()
+      },
+      // dsh ≥ 0.2.1 prepares the call first and lets the provider pick an
+      // effort from the route's metadata; the old helper never calls this.
+      async prepareCall(controls, _signal, configure) {
+        const model = options.modelInfo ?? { reasoning: { efforts: [{ id: 'minimal' }, { id: 'high' }] } }
+        const config = typeof configure === 'function' ? configure(controls, model) : controls
+        state.prepared.push(config)
+        return { config, stream: streamOptions => ctx.llm.stream(streamOptions) }
       },
     },
     // Image-half stubs: apply() also registers tools and the Remote service;
@@ -97,10 +108,30 @@ test('registers exactly one provider, with the replaced row identity and cadence
   assert.equal(state.config.titleMode.get(), 'inherit')
 })
 
-test('a second registration on the same service fails loud (no competing generator)', async () => {
-  const { ctx, state } = fakeContext()
+test('a competing title provider costs only title routing, loudly, never the image half', async () => {
+  const { ctx, state, tools } = fakeContext()
   await apply(ctx, state.config)
-  await assert.rejects(() => apply(ctx, state.config), /already registered/)
+  const first = state.provider
+  tools.clear()
+  await apply(ctx, state.config)
+  assert.equal(state.provider, first, 'the first registration stays the only provider')
+  assert.equal(state.warnings.length, 1)
+  assert.match(state.warnings[0], /标题路由未启用.*already registered/)
+  assert.ok(tools.has('generate_image'), 'image tools still register after the title half fails')
+})
+
+test('a prepared-request host (dsh ≥ 0.2.1) gets the least effort and the shipped prompt shape', async (t) => {
+  const appended = []
+  const { ctx, state } = fakeContext({ text: '**Tune Title**\nbecause the user asked' })
+  await apply(ctx, state.config)
+  const session = { id: 'session-under-test', append: (type, data) => appended.push({ type, data }) }
+  const result = await state.provider.generate(requestFor({ provider: 'p', model: 'm' }, session))
+  if (state.prepared.length === 0) return t.skip('this host still ships the one-call helper')
+  assert.equal(state.prepared[0].reasoningEffort, 'minimal', 'a title takes the route\'s least effort')
+  assert.equal(result.title, 'Tune Title', 'first line, whole-line emphasis stripped')
+  const record = appended.find(entry => entry.type === 'session/title-llm-request')
+  assert.deepEqual(record.data.messageSeqs, [7])
+  assert.match(record.data.system, /about 5 words .* or 10 CJK characters/)
 })
 
 test('inherit dispatches the logged session route and records it', async () => {
@@ -231,6 +262,6 @@ test('a tool call is rejected instead of becoming a title', async () => {
   await apply(ctx, state.config)
   await assert.rejects(
     () => state.provider.generate(requestFor({ provider: 'p', model: 'm' })),
-    /tool/,
+    /tool|text only/,
   )
 })
