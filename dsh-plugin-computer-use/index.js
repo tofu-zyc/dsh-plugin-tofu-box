@@ -4,8 +4,9 @@
  * v2 rewires the whole backend onto the Cua Driver SDK (@trycua/cua-driver):
  * a Rust in-process computer-use runtime loaded directly into the dsh host.
  * No daemon, no MCP server, no PowerShell scripts — `pnpm` pulls one native
- * package per OS/arch and the tools just work (Windows tested; the same code
- * path drives the macOS / Linux natives).
+ * package per OS/arch (Windows tested; macOS / Linux require their desktop
+ * permissions). v2.5 enables native Wayland before runtime initialization and
+ * bundles the GNOME WinRects helper with an explicit user-session installer.
  *
  * v2.2 fixes the two things that made v2 unusable on a real Windows desktop:
  *
@@ -83,6 +84,7 @@
 import zlib from 'node:zlib'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { configureLinuxDesktop, probeGnomeHelper, linuxDesktopHint } from './linux.js'
 
 export const name = 'computer-use'
 export const inject = ['tools', 'attachments']
@@ -100,6 +102,8 @@ export const Config = z.object({
    * driver starts (strongly recommended; set false only if some other component
    * already owns process DPI awareness and you must not touch it). */
   dpiAware: z.boolean(),
+  /** Native Wayland: auto-detect by default; on/off override the driver env flag. */
+  wayland: z.union([z.const('auto'), z.const('on'), z.const('off')]),
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -291,6 +295,11 @@ export function apply(ctx, config) {
   // that app exposes no window (tray state)? Off by default — see computer_open.
   const activateRunningCfg = !!(config && config.activateRunning === true)
   if (!telemetry) process.env.CUA_DRIVER_RS_TELEMETRY_ENABLED = '0'
+  // Must happen BEFORE importing/creating the native runtime. DISPLAY may be
+  // XWayland and is deliberately not used to select the desktop backend.
+  const linuxDesktop = configureLinuxDesktop({ wayland: config?.wayland ?? 'auto' })
+  const desktopHint = linuxDesktopHint(linuxDesktop)
+  const driverError = (tool, r, limit = 400) => new Error(tool + ': ' + String(r.text ?? 'failed').slice(0, limit) + desktopHint)
 
   // ── DPI bootstrap (Windows) ────────────────────────────────────────────────
   // The driver assumes a Per-Monitor-V2-aware host (its daemon exe ships that
@@ -372,8 +381,16 @@ export function apply(ctx, config) {
     if (driver) return Promise.resolve(driver)
     if (driverDead) throw new Error('Cua Driver runtime was shut down; restart dsh to reactivate computer-use')
     if (!driverPromise) {
-      driverPromise = ensureProcessDpiAware().then(() => {
+      driverPromise = ensureProcessDpiAware().then(async () => {
         ctx.logger.info('computer-use: host process DPI awareness = ' + dpiState.text)
+        if (linuxDesktop.native) {
+          if (!process.env.WAYLAND_DISPLAY) throw new Error('Native Wayland needs WAYLAND_DISPLAY from the graphical user session.' + desktopHint)
+          ctx.logger.info('computer-use: native Wayland backend enabled (XWayland DISPLAY does not override it)')
+          if (linuxDesktop.gnome) {
+            const helper = await probeGnomeHelper()
+            if (!helper.active) ctx.logger.warn('computer-use: GNOME WinRects helper missing or outdated.' + desktopHint)
+          }
+        }
         return import('@trycua/cua-driver')
       }).then((m) => {
         const created = m.CuaDriver.create()
@@ -438,7 +455,7 @@ export function apply(ctx, config) {
   /** Same, but throws on isError with the driver's own message. */
   const call = async (tool, args) => {
     const r = await raw(tool, args)
-    if (r.isError) throw new Error(tool + ': ' + String(r.text ?? 'failed').slice(0, 400))
+    if (r.isError) throw driverError(tool, r)
     return r
   }
   const structured = (r) => {
@@ -454,7 +471,7 @@ export function apply(ctx, config) {
    */
   const listWindows = async (args) => {
     const r = await raw('list_windows', args)
-    if (r.isError) throw new Error('list_windows: ' + String(r.text ?? 'failed').slice(0, 300))
+    if (r.isError) throw driverError('list_windows', r, 300)
     return structured(r)
   }
 
@@ -486,7 +503,7 @@ export function apply(ctx, config) {
       if (pid === undefined) {
         const needle = String(a.app).toLowerCase()
         const cands = wins.filter((x) => String(x.app_name ?? '').toLowerCase().includes(needle) || String(x.title ?? '').toLowerCase().includes(needle))
-        if (cands.length === 0) throw new Error('no window matches app "' + a.app + '" — check computer_windows')
+        if (cands.length === 0) throw new Error('no window matches app "' + a.app + '" — check computer_windows' + desktopHint)
         pid = cands[0].pid
       }
       let mine = wins.filter((x) => x.pid === pid)
@@ -925,11 +942,11 @@ export function apply(ctx, config) {
     const r = await raw(tool, base)
     if (r.isError && isEscalationHint(r)) {
       const r2 = await raw(tool, { ...base, delivery_mode: 'foreground' })
-      if (r2.isError) throw new Error(tool + ': ' + String(r2.text ?? 'failed').slice(0, 400))
+      if (r2.isError) throw driverError(tool, r2)
       r2.escalated = true
       return r2
     }
-    if (r.isError) throw new Error(tool + ': ' + String(r.text ?? 'failed').slice(0, 400))
+    if (r.isError) throw driverError(tool, r)
     return r
   }
   const actionNote = (r) => (r.escalated ? ' [background input was refused; re-delivered with a brief foreground swap]' : /"effect":"suspected_noop"/.test(String(r.rawJson ?? '')) ? ' [driver suspects the target ignored the input — verify on the screenshot]' : '')
@@ -954,7 +971,7 @@ export function apply(ctx, config) {
       await sleep(350)
       r2 = await raw('press_key', { ...targetArg, key, modifiers: mods, delivery_mode: 'foreground' })
     }
-    if (r2.isError) throw new Error('hotkey ' + mods.join('+') + '+' + key + ': ' + String(r.text ?? 'failed').slice(0, 260) + ' (foreground fallback too: ' + String(r2.text ?? 'failed').slice(0, 160) + ')')
+    if (r2.isError) throw new Error('hotkey ' + mods.join('+') + '+' + key + ': ' + String(r.text ?? 'failed').slice(0, 260) + ' (foreground fallback too: ' + String(r2.text ?? 'failed').slice(0, 160) + ')' + desktopHint)
     r2.escalated = true
     return r2
   }
@@ -992,7 +1009,8 @@ export function apply(ctx, config) {
 
   const COORD_DESC = 'Coordinate frames: with a window target, x/y are pixels of the LAST computer_screenshot OF THAT WINDOW; desktop scope uses pixels of the last desktop screenshot (physical-desktop px are auto-mapped into the frame).'
   const KEYB_FIRST = ' KEYBOARD-FIRST: prefer computer_open / computer_key / computer_sequence over pixel clicks whenever a keyboard path exists. ELEMENT-FIRST: if the last window screenshot listed an element for the target, click by its element= token — it works on backgrounded/minimized windows and never touches the user\'s cursor.'
-  const register = (definition) => ctx.effect(() => ctx.tools.register(defineTool(definition)), 'computer-use: tool ' + definition.name)
+  const platformNote = linuxDesktop.native ? ' On native Wayland, semantic AT-SPI actions may run in the background; raw input may require a foreground swap and system Remote Desktop consent. GNOME needs the WinRects helper; a missing route returns a setup hint.' : ''
+  const register = (definition) => ctx.effect(() => ctx.tools.register(defineTool({ ...definition, description: definition.description + platformNote })), 'computer-use: tool ' + definition.name)
 
   /** Shared action wrapper: grant, run, settle, re-capture the acted-on view. */
   const actAndShot = async (exec, grant, summary, run) => {
@@ -1089,7 +1107,7 @@ export function apply(ctx, config) {
         const needle = String(a.app).toLowerCase()
         wins = wins.filter((x) => String(x.app_name ?? '').toLowerCase().includes(needle) || String(x.title ?? '').toLowerCase().includes(needle))
       }
-      if (wins.length === 0) return { table: 'no windows matched' }
+      if (wins.length === 0) return { table: 'no windows matched' + ((sc.windows ?? []).length === 0 ? desktopHint : '') }
       const rows = wins.slice(0, 40).map((w) => 'pid=' + w.pid + ' win=' + (w.window_id ?? w.windowId) + (w.is_on_screen === false ? ' [off-screen]' : '') + (w.minimized ? ' [minimized]' : '') + ' z=' + (w.z_index ?? '?') + ' ' + JSON.stringify(w.app_name ?? '') + ' ' + JSON.stringify(String(w.title ?? '').slice(0, 60)) + ' ' + JSON.stringify(w.bounds ?? {}))
       return { table: rows.join('\n') + (wins.length > 40 ? '\n… ' + (wins.length - 40) + ' more (filter with app=)' : '') }
     },
@@ -1583,7 +1601,7 @@ export function apply(ctx, config) {
     return { kind: 'ask', reason: '允许 computer-use 操作应用？一次批准覆盖同一会话的后续动作（askPolicy: always 可改为每次一询）；默认后台注入——不移动你的鼠标、不抢焦点，仅个别拒收后台输入的应用会短暂前置。首个动作: ' + exec.name + '。' }
   })
 
-  ctx.logger.info('computer-use v2.4: cua-driver backend (session "' + SESSION_LABEL + '", all calls labelled); ' + MUTATING.size + ' mutating tools gated; askPolicy=' + askPolicy + '; telemetry=' + telemetry + '; restoreExisting=' + restoreCfg)
+  ctx.logger.info('computer-use v2.5: cua-driver backend (session "' + SESSION_LABEL + '", all calls labelled); ' + MUTATING.size + ' mutating tools gated; askPolicy=' + askPolicy + '; telemetry=' + telemetry + '; restoreExisting=' + restoreCfg + '; nativeWayland=' + linuxDesktop.native)
 
   // Best-effort: push the model-frame cap into the driver for window captures
   // (the driver resizes window screenshots AND keeps x,y/zoom coordinates

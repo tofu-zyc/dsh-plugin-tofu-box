@@ -2,6 +2,63 @@
 
 让模型**看见窗口和桌面并操作鼠标键盘**——v2 起整个后端换装 [Cua Driver](https://cua.ai) 的**进程内 SDK**（`@trycua/cua-driver`，Rust 原生运行时随 npm 包按平台分发，直接加载进 dsh 宿主进程）：**无守护进程、无 MCP、无 PowerShell**，装上即用，跨 Windows / macOS / Linux。
 
+## v2.5：Ubuntu 26.04 / GNOME Wayland
+
+旧版没有开启驱动的原生 Wayland 开关，即使 `DISPLAY=:0` 存在，它也可能只是 XWayland，无法代表整个桌面。v2.5 在加载原生库前检测 `XDG_SESSION_TYPE` / `WAYLAND_DISPLAY`，自动设置 `CUA_DRIVER_RS_ENABLE_WAYLAND=1`；驱动依赖最低升到 npm 已发布的 0.28.3。环境中显式设置的 `0` / `false` 会保留，行配置 `wayland: on` / `off` 可覆盖。
+
+GNOME/Mutter 还需要 **WinRects Shell 扩展**提供窗口几何、截图和精确激活；输入通过 Remote Desktop portal/libei 获取系统授权。npm SDK 没带 CLI 发行包中的扩展，因此本插件随包附带上游 WinRects v8（支持 GNOME 45–50；含来源与 MIT 许可证），并提供安装和检查入口。无需另装 Cua 守护进程。
+
+**从 npm 安装/更新**（在 Ubuntu 的图形桌面终端运行，替换自己的 profile）：
+
+```sh
+dsh plugin --profile web add dsh-plugin-computer-use@2.5.0
+npx --yes --package=dsh-plugin-computer-use@2.5.0 dsh-computer-use-wayland install
+# 注销并重新登录一次后：
+npx --yes --package=dsh-plugin-computer-use@2.5.0 dsh-computer-use-wayland status
+```
+
+如果已经使用 `tofu-box`，通过 `dsh plugin --profile web update tofu-box` 更新依赖，再执行上面的扩展安装/检查命令。伞包现有 `^2.4.1` 范围覆盖 2.5.0；无需另外添加单独的 computer-use 插件行。更新与安装扩展后重启 dsh。
+
+**从本仓库试用：在 Ubuntu 的图形桌面终端运行**（把路径和 profile 换成自己的）：
+
+```sh
+cd /path/to/dsh-plugins
+node dsh-plugin-computer-use/scripts/wayland.mjs install
+```
+
+安装只写当前用户的扩展目录，保留已启用的其他扩展。之后需要**注销并重新登录一次**，让 GNOME 加载扩展；Wayland 下不能用 Alt+F2 → r 重启 Shell。
+
+```sh
+cd /path/to/dsh-plugins
+node dsh-plugin-computer-use/scripts/wayland.mjs status
+dsh plugin --profile web add "link:$(pwd)/dsh-plugin-computer-use"
+```
+
+重启 dsh，然后先试 `computer_windows` 和 `computer_screenshot`。第一次需要前台输入时，允许系统弹出的远程桌面/键鼠控制授权。此授权属于驱动运行时，重启后可能再次询问。插件安装不会自动授予它。
+
+**用本地 tgz 安装**：下载/复制 `dsh-plugin-computer-use-2.5.0.tgz` 到 Ubuntu 后运行：
+
+```sh
+dsh plugin --profile web add ./dsh-plugin-computer-use-2.5.0.tgz
+npx --yes --package=./dsh-plugin-computer-use-2.5.0.tgz dsh-computer-use-wayland install
+# 注销并重新登录后：
+npx --yes --package=./dsh-plugin-computer-use-2.5.0.tgz dsh-computer-use-wayland status
+```
+
+如果通过 `tofu-box` 安装，应更新伞包中的依赖；不要叠装单独的 computer-use 行。也可直接对该 profile 下已安装包的 `scripts/wayland.mjs` 运行 `install` / `status`。
+
+`status` 检查实际加载的扩展版本、Remote Desktop portal 的键鼠能力、无障碍总线与会话变量；缺项时返回非零退出码。Ubuntu 缺少组件时可以安装：
+
+```sh
+sudo apt install libglib2.0-bin at-spi2-core xdg-desktop-portal xdg-desktop-portal-gnome
+```
+
+请从同一个图形用户会话启动 dsh，并保留 `WAYLAND_DISPLAY`、`XDG_RUNTIME_DIR`、`DBUS_SESSION_BUS_ADDRESS`。不要用 root 或另一条不带桌面环境的 SSH 会话启动。若 GNOME 的 Extensions 总开关关闭，请先在扩展管理器开启，再运行检查。
+
+Wayland 的后台能力取决于应用的 AT-SPI 支持，像素/键盘输入可能需要临时前置窗口；不保证与 Windows 一样能操作完全遮挡的窗口。缺少扩展、portal 或权限时，驱动错误和空窗口表会附带安装提示。Sway/KDE 等沿用驱动各自的原生支持范围，WinRects 安装器只用于 GNOME。参见[上游平台支持说明](https://cua.ai/docs/cua-driver/concepts/platform-support)。
+
+当前开发机为 Windows；本版已做会话检测、安装器、诊断与插件接入回归，**尚未在 Ubuntu 26.04 实机完成截图/输入验收**。
+
 ## 打开应用的行为（v2.3 起）
 
 `computer_open` 只做一件事：**能复用就复用，确认没在跑才启动**。它按下面的顺序判断，顺序本身就是设计——"有没有进程"比"有没有窗口"可靠得多：
@@ -78,6 +135,7 @@
     askPolicy: once-per-agent  # 或 always / never
     telemetry: false           # Cua Driver 运行时的无内容产品遥测，默认关
     dpiAware: true             # Windows：驱动启动前把宿主进程切到 Per-Monitor-V2 DPI 感知
+    wayland: auto              # Linux：自动启用原生 Wayland；on/off 显式覆盖环境开关
     restore: true              # 允许把已运行应用的最小化窗口唤醒到前台（false = 永不抢焦点）
     activateRunning: false     # 应用在跑但没窗口（托盘态）时，是否让它的启动入口去激活（默认否，只报告）
 ```
@@ -90,7 +148,7 @@
 
 ## 平台与限制
 
-- **Windows 11 实测**（自测脚本见下）；macOS / Linux 走同一代码路径但**未实测**——macOS 需给运行 dsh 的宿主进程授予"辅助功能/屏幕录制"（TCC）权限，且驱动的 macOS 前台叠加层在进程内形态不可用。
+- **Windows 11 实测**（自测脚本见下）；macOS / Linux **未实机验证**。Linux Wayland 从 v2.5 起自动开启原生后端，GNOME 的安装与诊断见上；macOS 需给运行 dsh 的宿主进程授予"辅助功能/屏幕录制"（TCC）权限，且驱动的 macOS 前台叠加层在进程内形态不可用。
 - Windows 高 DPI：启动日志会打印 `host process DPI awareness = …`；正常为 `per-monitor-v2`。若显示 `UNAWARE`（宿主 manifest 或他方抢先固定了感知级别），桌面截图/坐标在缩放屏上不可靠，插件会在每张桌面截图摘要里带显式警告——优先改用 `app=` 窗口操作。
 - 桌面截图仅主显示器（窗口级截图不受限）；被最小化的窗口**读树可以、截图不行**，插件会先唤醒它再截——这是唯一会短暂占用前台的动作，`restore: false` 可关掉。
 - **窗口枚举可能失灵**：长生命周期的宿主里可能出现 `list_windows` 恒返回 0 窗口（此时桌面截图、光标读取、指定窗口的截图都还正常）。这种情况下按进程判断的部分仍然可靠（不会重复启动应用），但没法定位/点击那个窗口——重启 dsh 可重建枚举。
@@ -98,6 +156,12 @@
 - 原生包**没有构建脚本**（纯预编译 DLL/.node/.dylib），pnpm 安装即成功，不需要编译链。
 
 ## 自测
+
+无需图形桌面的 Wayland 回归测试（检测、扩展安装与诊断）：
+
+```sh
+node --experimental-test-module-mocks --test tests/*.test.mjs
+```
 
 ```sh
 node selftest/run.mjs
