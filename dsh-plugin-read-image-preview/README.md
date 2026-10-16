@@ -2,18 +2,15 @@
 
 把**任何工具产出的图片直接画在会话里**——`read_image` 读的文件图，和 computer-use 截图这类**结果附件图**，共用同一张卡片与同一套交互；并且就地放大、圈红框、加字、复制走人，不用再为了「让模型看一下这个前端问题」去装一个外部截图器。
 
-## 通用模式（v1.4）
+## 通用模式
 
-卡片按数据源分两轨，注册时一次认领所有图像工具（`tool.call.toolview` 的对应键，priority `-1`）：
+注册时一次认领所有图像工具（`tool.call.toolview` 的对应键，priority `-1`），**只有一条数据通路**：结果 content 里的 `{type:'image', attachment}`，字节经会话授权的 `props.loadImage`（先 `peek` 缓存）取，像素尺寸、体积、格式、降采样前的原图尺寸全在附件引用上，零额外请求。
 
-| 轨道 | 触发条件 | 字节来源 | 元数据 |
-| --- | --- | --- | --- |
-| `file` | 调用参数里有 `file_path`（read 家族） | Host 半区回环路由 `/read-image-preview/resolve`（调用一开始就能出骨架/预览） | resolve 响应 |
-| `attachment` | 结果 content 里有 `{type:'image', attachment}`（computer-use 截图及未来任何图像工具） | 会话授权的 `props.loadImage`（先 `peek` 缓存） | **全在附件引用上，零额外请求** |
+> **v1.5 起删掉了 `file` 轨。** 早期版本为 `read_image` 单独开了一条 Host 回环路由 `/read-image-preview/resolve`：按路径读盘、嗅探魔数、解析像素尺寸、签 token。DSH 0.1.7 起 `read_image` 的结果本身就携带同样的持久化附件引用（官方卡片也用它），这条通路与宿主完全重复，已移除。`read_image` 的 `file_path` 参数只用来给卡片起名、复制路径、在编辑器中打开；执行中显示骨架和路径，结果回来才出图。
 
 没有图也没有报错的调用渲染一行结果摘要（失败标红），执行中渲染按真实宽高比撑开的骨架——认领的行永远不会是空壳。
 
-**v1.4.1：图片加载零位移。** 两种模式下图片像素尺寸都在字节到达之前就已知（resolve 响应 / 附件引用），因此 `<img>` 直接带 `width/height` 渲染、信息行宽度也按已知比例预先定死。晚到的图片（上一张截图的 fetch/解码在新内容压上来之后才完成）落地时不再产生布局跳变——正是这个跳变会让 DSH 聊天流的吸底逻辑把浏览器自发的位移误读成「用户上滚」，从而停止自动跟随最新记录。
+**v1.4.1：图片加载零位移。** 图片像素尺寸在字节到达之前就已知（附件引用），因此 `<img>` 直接带 `width/height` 渲染、信息行宽度也按已知比例预先定死。晚到的图片（上一张截图的 fetch/解码在新内容压上来之后才完成）落地时不再产生布局跳变——正是这个跳变会让 DSH 聊天流的吸底逻辑把浏览器自发的位移误读成「用户上滚」，从而停止自动跟随最新记录。
 
 **dsh 0.1.7-rc.1 起工具调用分三阶段。** 官方把 `RunningToolCall` 拆成 `preparing`（参数还在流式生成，**没有 `argsRaw`**）与 `start`，并且参数开始流动时就把视图渲染出来（`tool.call.toolview` 的 owner 多了 `phase`）。因此判定「执行中」不能再只看 `argsRaw` 是否存在，否则我们认领的行在整个 preparing 阶段会是空壳——`isRunningBlock()` 现在把 `phase: 'preparing' | 'start'` 都算执行中，形状判断继续兼容更早的版本。`tests/phases.test.mjs` 用官方三种形状锁住这条约束（设 `READ_PREVIEW_CLIENT` 指向未修复的 `client.js` 可以验证它确实会失败）。
 
@@ -29,7 +26,7 @@ DSH 自带的 `read_image` 卡片（`dsh-client-ui-tool` 的 `read-image-toolvie
 
 这个插件接管这些工具的展示位（`tool.call.toolview` 的对应键，priority `-1`，同时遮蔽内置行与动态插件的兜底卡片），把图片提到最外层：
 
-- **调用一开始就出图**，不等 tool result；
+- 执行中就出骨架与路径，结果一到立刻出图；
 - 加载中是按**真实宽高比**撑开的骨架（扫光动画，`prefers-reduced-motion` 下停用）；
 - 图下一行信息：状态点（蓝闪=正在看 / 绿=看完 / 红=失败）、路径、像素尺寸、体积、格式；
 - 默认是克制的缩略图（`min(420px, 100%)` × `max-height: 300px`），不占聊天流；
@@ -119,20 +116,19 @@ Slot 视图没有文件权限，所以字节要走页面自己的传输：
 
 | 半边 | 文件 | 职责 |
 | --- | --- | --- |
-| Host | `index.js` | 解析路径、按魔数校验容器、解析像素尺寸、签发能力 token；抓屏、落盘、列表、删除、按期清理；服务下列回环路由 |
+| Host | `index.js` | 截图目录的能力 token；抓屏、落盘、列表、删除、按期清理；服务下列回环路由（不读取任何工具传入的路径） |
 | Client | `client.js` | 接管图像工具展示位、全屏查看器、标注画布、抓屏入口、截图管理页 |
 
 路由（全部在插件私有前缀上，每条都先过 `connection.requestRejection`，取不到该服务时一律 503 —— 宁可不可用，不放开一个读写文件的口子）：
 
-- `GET /read-image-preview/resolve?path=…&cwd=…` → JSON 描述 + 能力 URL
-- `GET /read-image-preview/<token>` → 图片字节，供 `<img src>` 使用
+- `GET /read-image-preview/<token>` → 截图字节，供管理页缩略图与查看器使用（token 只由 list / save 签发）
 - `GET /read-image-preview/state` → 目录、平台、保留策略、抓屏可用性
 - `GET /read-image-preview/list?limit=&offset=` → 分页的截图清单（缩略图直接复用 token 路由）
 - `POST /read-image-preview/save`（请求体是 PNG 字节）→ 落盘结果与路径
 - `POST /read-image-preview/delete?name=…` · `POST /read-image-preview/cleanup` · `POST /read-image-preview/open`
 - `POST /read-image-preview/capture?delay=` → `image/png` 字节
 
-安全边界：只放行 PNG / JPEG / WebP / GIF 四种位图，且 `Content-Type` 用的是**嗅探结果而非扩展名**，所以 SVG / HTML 永远不会被协商成脚本；URL 里带的是不透明 token 而非路径，页面无法让宿主读取任意路径；`save` 只写 PNG 魔数、只写截图目录、文件名由宿主生成且不接收任何路径分隔符；`delete` 只接收单段文件名。**不向 Cordis 服务命名空间发布任何东西**，不会和别的插件撞名。
+安全边界：只放行 PNG / JPEG / WebP / GIF 四种位图；URL 里带的是不透明 token 而非路径，且 token 只指向截图目录里的文件，页面无法让宿主读取任意路径；`save` 只写 PNG 魔数、只写截图目录、文件名由宿主生成且不接收任何路径分隔符；`delete` 只接收单段文件名。**不向 Cordis 服务命名空间发布任何东西**，不会和别的插件撞名。
 
 ## 测试
 
@@ -146,6 +142,8 @@ npm test    # node --test tests/*.test.mjs
 - `tests/shots.test.mjs` —— 保留策略、抓屏脚本（先提 DPI 精度再取屏幕）、逐平台命令序列、存/查/删/清路由与鉴权围栏。
 
 ## 已知取向
+
+**交互仍待打磨。** 实际用下来查看器与标注的手感还不顺手，后续版本继续优化；与官方重合的读盘通路已在 v1.5 删除，之后的改动集中在官方没有的部分（展开即见图、缩放平移、标注、抓屏、截图管理）。
 
 文案目前是硬编码中文（和这个仓库里的同类插件一致），没有接 `ctx.locale`；要出英文得先把 i18n 一次性补齐，而不是在这里掺一半。
 

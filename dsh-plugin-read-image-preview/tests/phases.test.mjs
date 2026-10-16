@@ -117,9 +117,10 @@ test('a settled result without images keeps the documented outcome line', () => 
     isError: true,
     subCalls: [],
   }
-  // The path names a file, so this is the file-preview row rather than an
-  // attachment row; the point is it renders something for a failed call.
-  assert.notEqual(pure.ImageToolCard(props(failed)), null)
+  // No image block, so this is the outcome line; the point is it renders
+  // something for a failed call.
+  assert.equal(pure.imageSpecOf(failed), null)
+  assert.match(textOf(pure.ImageToolCard(props(failed))), /no such file/)
   const silent = {
     kind: 'tool-result',
     callId: 'c3',
@@ -129,4 +130,29 @@ test('a settled result without images keeps the documented outcome line', () => 
     subCalls: [],
   }
   assert.equal(pure.ImageToolCard(props(silent)), null, 'an imageless settled call defers to the generic row')
+})
+
+test('read_image rides the durable attachment, with the path from its arguments', () => {
+  const block = {
+    kind: 'tool-result',
+    callId: 'c4',
+    call: { name: 'read_image', argsRaw: '{"file_path":"D:/shots/a.png"}' },
+    content: [
+      { type: 'text', text: '<path>D:/shots/a.png</path>\n<type>image</type>\n<content>\n[image]\n</content>' },
+      { type: 'image', attachment: { attachmentId: 'att-2', mediaType: 'image/png', bytes: 10, width: 4, height: 3 } },
+    ],
+    isError: false,
+    subCalls: [],
+  }
+  const spec = pure.imageSpecOf(block)
+  assert.equal(spec.mode, 'attachment', 'read_image no longer has a host-side file track')
+  assert.equal(spec.path, 'D:/shots/a.png', 'the path names the row and drives copy/open')
+  assert.equal(spec.text, '', 'the model-facing envelope is not repeated as a note')
+})
+
+test('a running read_image says the model is looking and names the path', () => {
+  const block = { callId: 'c5', name: 'read_image', subCalls: [], phase: 'start', argsRaw: '{"file_path":"D:/shots/a.png"}' }
+  const text = textOf(pure.ImageToolCard({ ...props(block), toolName: 'read_image' }))
+  assert.match(text, /正在查看/)
+  assert.match(text, /D:\/shots\/a\.png/)
 })

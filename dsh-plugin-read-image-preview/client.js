@@ -33,7 +33,6 @@ window.__ModuleLoader__.load({
     const exports = module.exports
     const React = require('react')
 
-    const HOST_ROUTE = '/read-image-preview/resolve'
     /** The screenshot workspace's routes, all owned by this plugin's host half. */
     const SHOT_ROUTE = '/read-image-preview'
     /** Draw tools, in toolbar order. `move` pans instead of drawing. */
@@ -820,16 +819,15 @@ window.__ModuleLoader__.load({
 
     const IMAGE_TOOL_KEYS = ['read_image'].concat(Object.keys(TOOL_LABELS))
 
+    /** The `<path>…</path>\n<type>image</type>` envelope read_image hands the model. */
+    const IMAGE_ENVELOPE = /^<path>[^\n]*<\/path>\n<type>image<\/type>/
+
     /**
-     * Decide what the card should render for one call.
-     *
-     * `file` when the call itself names a path (previewable before settle);
-     * otherwise `attachment` when the settled content carries image refs —
-     * collected together with the first text line, which becomes the note row.
+     * Decide what the card should render for one call: the settled content's
+     * image refs, the first non-envelope text line (the note row), and the
+     * call's `file_path` when it names one. Null until a result carries an image.
      */
     function imageSpecOf(block) {
-      const path = imagePathOf(block)
-      if (path !== null) return { mode: 'file', path, atts: [], text: '' }
       const content = isRecord(block) && Array.isArray(block.content) ? block.content : null
       if (content === null) return null
       const atts = []
@@ -839,12 +837,13 @@ window.__ModuleLoader__.load({
         if (item.type === 'image' && isRecord(item.attachment)
           && typeof item.attachment.attachmentId === 'string') {
           atts.push(item.attachment)
-        } else if (item.type === 'text' && typeof item.text === 'string' && text === '') {
+        } else if (item.type === 'text' && typeof item.text === 'string' && text === ''
+          && IMAGE_ENVELOPE.test(item.text) === false) {
           text = String(item.text).split('\n')[0]
         }
       }
       if (atts.length === 0) return null
-      return { mode: 'attachment', path: null, atts, text }
+      return { mode: 'attachment', path: imagePathOf(block), atts, text }
     }
 
     /**
@@ -1640,205 +1639,20 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * The preview card in `file` mode: frame, metadata line, one transient note.
-     *
-     * The host resolves the path once per call and answers with everything the
-     * card needs, so there is exactly one request per rendered call and no state
-     * to keep beyond this component's lifetime.
-     */
-    function FilePreview(props) {
-      const block = props.block
-      const path = imagePathOf(block)
-      const live = isRunningBlock(block)
-      const [info, setInfo] = React.useState(null)
-      // Which stage is up: nothing, the plain viewer, or the viewer opened straight
-      // into annotation. `null` is closed; both other values are truthy.
-      const [open, setOpen] = React.useState(null)
-      const [geometry, setGeometry] = React.useState(null)
-      const [checker, setChecker] = React.useState(false)
-      const [note, setNote] = React.useState(null)
-      const [copied, setCopied] = React.useState(false)
-
-      React.useEffect(() => {
-        if (path === null) return undefined
-        let alive = true
-        setInfo(null)
-        const params = new URLSearchParams()
-        params.set('path', path)
-        if (typeof props.cwd === 'string' && props.cwd !== '') params.set('cwd', props.cwd)
-        fetch(HOST_ROUTE + '?' + params.toString()).then(
-          (response) => response.json(),
-          (error) => ({ ok: false, error: String(error) }),
-        ).then((value) => {
-          if (alive !== true) return
-          setInfo(isRecord(value) ? value : { ok: false, error: 'unexpected reply' })
-        }, (error) => {
-          if (alive === true) setInfo({ ok: false, error: String(error) })
-        })
-        return () => { alive = false }
-      }, [path, props.cwd])
-
-      if (path === null) return null
-
-      const cwd = typeof props.cwd === 'string' ? props.cwd : ''
-      const shown = displayPathOf(path, cwd)
-      const ok = info !== null && info.ok === true
-      const bad = info !== null && info.ok === false
-      const failure = bad ? String(info.error) : ''
-      const src = ok && typeof info.url === 'string' ? info.url : null
-      const bytes = ok ? formatBytes(info.bytes) : null
-      const pw = ok && typeof info.width === 'number' ? info.width : null
-      const ph = ok && typeof info.height === 'number' ? info.height : null
-      const pixels = pw !== null && ph !== null ? pw + '×' + ph : null
-      const mediaType = ok && typeof info.mediaType === 'string' ? info.mediaType : ''
-      const format = mediaType === '' ? null : mediaType.replace('image/', '').toUpperCase()
-      const aspect = pw !== null && ph !== null && ph > 0 ? pw / ph : null
-      // v1.4.1：图片未加载就按已知尺寸定死一切布局。晚到的图片在已滚走的区域
-      // 加载时不再撑高内容——那会让聊天流的吸底逻辑把浏览器自发的布局位移
-      // 误判成用户上滚，从而停止自动跟随最新记录。
-      const known = geometry !== null ? geometry : pw !== null && ph !== null && ph > 0 ? { w: pw, h: ph } : null
-      const barWidth = known === null
-        ? null
-        : Math.max(320, Math.min(720, Math.round(160 * (known.w / known.h))))
-
-      /** Size the metadata line to the picture and detect a transparent container. */
-      const onImageLoad = (event) => {
-        const node = event.target
-        const w = node.naturalWidth
-        const h = node.naturalHeight
-        if (typeof w !== 'number' || typeof h !== 'number' || w <= 0 || h <= 0) return
-        setGeometry({ w, h })
-        if (format !== 'PNG' && format !== 'WEBP' && format !== 'GIF') return
-        try {
-          const size = 24
-          const canvas = document.createElement('canvas')
-          canvas.width = size
-          canvas.height = size
-          const context = canvas.getContext('2d')
-          if (context === null) return
-          context.drawImage(node, 0, 0, size, size)
-          const data = context.getImageData(0, 0, size, size).data
-          for (let i = 3; i < data.length; i += 4) {
-            if (data[i] < 250) {
-              setChecker(true)
-              return
-            }
-          }
-        } catch {
-          /* an unreadable canvas just means no checkerboard */
-        }
-      }
-
-      const copyPath = () => {
-        console.log('read_image preview path', shown)
-        try {
-          const clip = navigator.clipboard
-          if (clip && typeof clip.writeText === 'function') {
-            clip.writeText(shown).then(
-              () => setCopied(true),
-              () => setNote('无法自动复制，路径已打到控制台'),
-            )
-            return
-          }
-        } catch {
-          /* fall through to the console note */
-        }
-        setNote('无法自动复制，路径已打到控制台')
-      }
-
-      const frame = src !== null
-        ? React.createElement('div', {
-          key: 'frame',
-          className: 'dsh-imgvw-frame',
-          title: '点击打开缩放视图',
-          onClick: () => setOpen('view'),
-        }, [
-          React.createElement('img', {
-            key: 'img',
-            className: 'dsh-imgvw-img',
-            src,
-            alt: shown,
-            width: pw === null ? undefined : pw,
-            height: ph === null ? undefined : ph,
-            'data-checker': checker ? 'true' : 'false',
-            onLoad: onImageLoad,
-          }),
-          React.createElement('span', {
-            key: 'zoom',
-            className: 'dsh-imgvw-zoom',
-            'aria-hidden': 'true',
-          }, '⤢'),
-        ])
-        : React.createElement('div', { key: 'frame', className: 'dsh-imgvw-frame' }, [
-          React.createElement('div', {
-            key: 'skel',
-            className: 'dsh-imgvw-skel',
-            style: aspect === null ? undefined : { aspectRatio: String(aspect) },
-          }, [
-            React.createElement('span', {
-              key: 'label',
-              className: 'dsh-imgvw-skel-label',
-              'data-bad': bad ? 'true' : 'false',
-            }, bad
-              ? '无法预览：' + failure
-              : live
-                ? (TOOL_LABELS[props.toolName] === undefined
-                  ? 'AI 正在查看这张图片…'
-                  : TOOL_LABELS[props.toolName] + ' 执行中，画面稍后呈现…')
-                : '正在载入预览…'),
-          ]),
-        ])
-
-      return React.createElement('div', { className: 'dsh-imgvw-root' }, [
-        frame,
-        React.createElement(MediaBar, {
-          key: 'bar',
-          shown,
-          live,
-          bad,
-          ok,
-          pixels,
-          bytes,
-          format,
-          copied,
-          width: barWidth,
-          onZoomIn: src === null ? null : () => setOpen('view'),
-          onAnnotate: src === null ? null : () => setOpen('edit'),
-          onCopy: copyPath,
-          onOpenFile: typeof props.openFile === 'function' ? () => props.openFile(path) : null,
-        }),
-        note === null
-          ? null
-          : React.createElement('div', {
-            key: 'note',
-            className: 'dsh-imgvw-bar',
-            style: { opacity: 0.75 },
-          }, note),
-        open !== null && src !== null
-          ? React.createElement(ImageZoomOverlay, {
-            key: 'overlay',
-            src,
-            shown,
-            pixels,
-            initialEdit: open === 'edit',
-            onClose: () => setOpen(null),
-          })
-          : null,
-      ])
-    }
-
-    /**
-     * The preview card in `attachment` mode: the settled result owns the picture.
+     * The preview card: the settled result's durable attachment owns the picture.
      *
      * Every stat renders straight off the attachment reference, and the URL
      * comes from the session-authorized loader (`peek` first — chat keeps a warm
-     * cache of images it already resolved). There is no path semantics, so the
-     * copy-path and open-in-editor actions fall away.
+     * cache of images it already resolved). `read_image` lands here too: since
+     * dsh 0.1.7 its result carries the same durable reference (dimensions, bytes,
+     * media type), so the plugin no longer reads the file itself. Its
+     * `file_path` argument only names the row and drives copy-path / open-file.
      */
     function AttachmentPreview(props) {
       const att = props.spec.atts[0]
       const extra = props.spec.atts.length - 1
       const load = props.loadImage
+      const path = props.spec.path
       const label = TOOL_LABELS[props.toolName] === undefined ? props.toolName : TOOL_LABELS[props.toolName]
       const [url, setUrl] = React.useState(() => (
         typeof load === 'function' && typeof load.peek === 'function' ? load.peek(att) ?? null : null
@@ -1847,6 +1661,8 @@ window.__ModuleLoader__.load({
       const [open, setOpen] = React.useState(null)
       const [geometry, setGeometry] = React.useState(null)
       const [checker, setChecker] = React.useState(false)
+      const [copied, setCopied] = React.useState(false)
+      const [copyNote, setCopyNote] = React.useState(null)
 
       React.useEffect(() => {
         if (typeof load !== 'function') {
@@ -1870,10 +1686,20 @@ window.__ModuleLoader__.load({
 
       if (props.spec.atts.length === 0) return null
 
-      const shown = typeof att.name === 'string' && att.name !== '' ? att.name : label
+      const shown = path !== null
+        ? displayPathOf(path, props.cwd)
+        : typeof att.name === 'string' && att.name !== '' ? att.name : label
       const hasDims = typeof att.width === 'number' && typeof att.height === 'number'
         && att.width > 0 && att.height > 0
-      const pixels = hasDims ? att.width + '×' + att.height : null
+      // The store may have downscaled the image before the model saw it; the
+      // reference then also records the input size, which is worth naming.
+      const original = isRecord(att.originalDimensions)
+        && typeof att.originalDimensions.width === 'number' && typeof att.originalDimensions.height === 'number'
+        ? att.originalDimensions.width + '×' + att.originalDimensions.height
+        : null
+      const pixels = hasDims
+        ? att.width + '×' + att.height + (original === null ? '' : '（原图 ' + original + '）')
+        : null
       const bytes = formatBytes(att.bytes)
       const format = typeof att.mediaType === 'string' && att.mediaType.startsWith('image/')
         ? att.mediaType.slice('image/'.length).toUpperCase()
@@ -1887,6 +1713,7 @@ window.__ModuleLoader__.load({
       const noteParts = []
       if (props.spec.text !== '') noteParts.push(props.spec.text)
       if (extra > 0) noteParts.push('另有 ' + extra + ' 张未展开')
+      if (copyNote !== null) noteParts.push(copyNote)
       const note = noteParts.length === 0 ? null : noteParts.join(' · ')
 
       /** Size the metadata line to the picture and detect a transparent container. */
@@ -1915,6 +1742,16 @@ window.__ModuleLoader__.load({
         } catch {
           /* an unreadable canvas just means no checkerboard */
         }
+      }
+
+      const copyPath = path === null ? null : () => {
+        copyText(shown).then(
+          () => setCopied(true),
+          () => {
+            console.log('read_image preview path', shown)
+            setCopyNote('无法自动复制，路径已打到控制台')
+          },
+        )
       }
 
       const src = failed === false && typeof url === 'string' ? url : null
@@ -1966,12 +1803,12 @@ window.__ModuleLoader__.load({
           pixels,
           bytes,
           format,
-          copied: false,
+          copied,
           width: barWidth,
           onZoomIn: src === null ? null : () => setOpen('view'),
           onAnnotate: src === null ? null : () => setOpen('edit'),
-          onCopy: null,
-          onOpenFile: null,
+          onCopy: copyPath,
+          onOpenFile: path !== null && typeof props.openFile === 'function' ? () => props.openFile(path) : null,
         }),
         note === null
           ? null
@@ -1993,29 +1830,29 @@ window.__ModuleLoader__.load({
       ])
     }
 
+    /** What the skeleton says while a claimed call runs. */
+    function liveTextOf(toolName) {
+      if (toolName === 'read_image') return 'AI 正在查看这张图片…'
+      const label = TOOL_LABELS[toolName] === undefined ? toolName : TOOL_LABELS[toolName]
+      return label + ' 执行中，画面稍后呈现…'
+    }
+
     /**
      * The one card for every claimed tool.
      *
-     * Dispatch order: file preview (call names a path) → attachment preview
-     * (settled content carries image refs) → a live skeleton while the call
-     * runs → a plain one-line outcome for imageless/failed settled calls, so a
-     * claimed row never renders an empty shell.
+     * Dispatch order: attachment preview (settled content carries image refs) →
+     * a live skeleton while the call runs → a plain one-line outcome for
+     * imageless/failed settled calls, so a claimed row never renders an empty
+     * shell.
      */
     function ImageToolCard(props) {
       const block = props.block
       const spec = imageSpecOf(block)
-      if (spec !== null && spec.mode === 'file') {
-        return React.createElement(FilePreview, {
-          block,
-          cwd: props.cwd,
-          home: props.home,
-          openFile: props.openFile,
-          toolName: props.toolName,
-        })
-      }
       if (spec !== null) {
         return React.createElement(AttachmentPreview, {
           spec,
+          cwd: props.cwd,
+          openFile: props.openFile,
           loadImage: props.loadImage,
           toolName: props.toolName,
         })
@@ -2023,16 +1860,20 @@ window.__ModuleLoader__.load({
       const live = isRunningBlock(block)
       const failed = isFailedBlock(block)
       if (live) {
-        const liveLabel = TOOL_LABELS[props.toolName] === undefined ? props.toolName : TOOL_LABELS[props.toolName]
+        const path = imagePathOf(block)
         return React.createElement('div', { className: 'dsh-imgvw-root' }, [
           React.createElement('div', { key: 'frame', className: 'dsh-imgvw-frame' }, [
             React.createElement('div', { key: 'skel', className: 'dsh-imgvw-skel' }, [
               React.createElement('span', {
                 key: 'label',
                 className: 'dsh-imgvw-skel-label',
-              }, liveLabel + ' 执行中，画面稍后呈现…'),
+              }, liveTextOf(props.toolName)),
             ]),
           ]),
+          path === null
+            ? null
+            : React.createElement('div', { key: 'path', className: 'dsh-imgvw-bar', style: { opacity: 0.75 } },
+              displayPathOf(path, props.cwd)),
         ])
       }
       let line = ''

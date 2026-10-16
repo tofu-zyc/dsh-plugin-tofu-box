@@ -1,27 +1,20 @@
 /**
  * Host half of the read_image preview plugin.
  *
- * `read_image` hands the model a normalized copy of a local file, and a browser
- * slot view has no filesystem privileges of its own, so the bytes have to come
- * back over the page's own transport. This half reads the file through the
- * composed `fs` service, validates the container by magic bytes, and publishes
- * it on two plugin-private loopback routes:
+ * Tool-result images (read_image included) reach the page as durable
+ * attachments through the session's own loader, so this half reads no
+ * tool-supplied path. What it serves is the screenshot workspace's own
+ * directory, over plugin-private loopback routes:
  *
- * - `GET /read-image-preview/resolve?path=…&cwd=…` — resolve one tool-supplied
- *   path and answer with a JSON-safe description plus a capability URL;
- * - `GET /read-image-preview/<token>` — the bytes themselves, for `<img src>`.
+ * - `GET /read-image-preview/<token>` — a saved shot's bytes, for `<img src>`.
+ *   The URL carries an opaque token minted by the list/save routes rather than
+ *   a path, and only the four bitmap containers are served.
  *
- * Only the four bitmap containers are served, and the sniffed media type — not
- * the file extension — is what goes out in `Content-Type`, so a file that
- * happens to be SVG or HTML can never be negotiated as script. A URL carries an
- * opaque token rather than a path, so the page never hands the host an arbitrary
- * path to read back.
- *
- * Both routes are plain HTTP on the plugin's own prefix; nothing is published
+ * Every route is plain HTTP on the plugin's own prefix; nothing is published
  * into the Cordis service namespace, so a sibling plugin cannot collide with it.
  *
- * The second half of this plugin is a screenshot workspace, which is why the
- * file also owns a directory, a subprocess, and a timer:
+ * The screenshot workspace is also why the file owns a directory, a
+ * subprocess, and a timer:
  *
  * - `POST /read-image-preview/capture` grabs the desktop (every monitor) and
  *   answers with the PNG, so the browser can crop and annotate it;
@@ -33,7 +26,7 @@
  *
  * Everything the browser may reach goes through the composition's `connection`
  * trust check first (`requestRejection`), because these routes write files and
- * start a screen grab; the two read-only image routes keep their token-only
+ * start a screen grab; the read-only shot image route keeps its token-only
  * authorization. Grabs land in the OS temp directory and are unlinked as soon
  * as they are read back.
  *
@@ -50,8 +43,6 @@ import z from '@deepseek-ai/schemastery'
 const ROUTE = '/read-image-preview'
 /** Refuse to buffer an image larger than this, mirroring the read tool's own bound. */
 const MAX_BYTES = 268435456
-/** Header window large enough for a JPEG's leading segments and every other header. */
-const HEAD_BYTES = 65536
 /** Tokens are cheap; a card's worth of history is all anyone re-requests. */
 const MAX_TOKENS = 256
 /** An annotated multi-monitor grab is a few MB; this bounds what a save may carry. */
@@ -110,68 +101,12 @@ function sniff(bytes) {
 }
 
 /**
- * Read the pixel dimensions out of the container header alone.
- *
- * The card sizes its loading placeholder to the real aspect ratio and prints the
- * true size, both before the image itself has loaded, so this runs on the same
- * header window as the sniff and never touches the whole file.
- * @param {Uint8Array} bytes - the header window.
- * @param {string} mediaType - the container already identified by {@link sniff}.
- * @returns {{ width: number, height: number } | null} dimensions, or null when the header does not carry them.
- */
-function dimensionsOf(bytes, mediaType) {
-  try {
-    if (bytes.length < 24) return null
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-    if (mediaType === 'image/png') return { width: view.getUint32(16), height: view.getUint32(20) }
-    if (mediaType === 'image/gif') return { width: view.getUint16(6, true), height: view.getUint16(8, true) }
-    if (mediaType === 'image/webp') {
-      // Only the extended (VP8X) form states a canvas size in the header.
-      if (bytes.length >= 30 && bytes[15] === 86) {
-        return { width: view.getUint16(26, true) & 16383, height: view.getUint16(28, true) & 16383 }
-      }
-      return null
-    }
-    if (mediaType === 'image/jpeg') {
-      let at = 2
-      while (at + 9 < bytes.length) {
-        if (bytes[at] !== 255) {
-          at += 1
-          continue
-        }
-        const marker = bytes[at + 1]
-        // Fill bytes and the standalone markers carry no length word.
-        if (marker === 255) {
-          at += 1
-          continue
-        }
-        if (marker >= 208 && marker <= 215) {
-          at += 2
-          continue
-        }
-        if (marker === 217 || marker === 218) return null
-        const length = view.getUint16(at + 2)
-        if (length < 2) return null
-        // Any SOFn frame header states the size; the arithmetic-coded forms do not.
-        if (marker >= 192 && marker <= 207 && marker !== 196 && marker !== 200 && marker !== 204) {
-          return { height: view.getUint16(at + 5), width: view.getUint16(at + 7) }
-        }
-        at += 2 + length
-      }
-    }
-  } catch {
-    return null
-  }
-  return null
-}
-
-/**
- * Mint or reuse the capability token for one resolved image.
+ * Mint or reuse the capability token for one saved shot.
  *
  * The same path asked for twice yields one token, so a re-render cannot grow the
  * registry; the oldest entry is evicted past the cap.
- * @param {string} path - the path as the tool received it.
- * @param {string} cwd - the session workspace root used to resolve it.
+ * @param {string} path - the shot's file name.
+ * @param {string} cwd - the screenshot directory it lives in.
  * @param {string} mediaType - the sniffed container.
  * @param {number} size - the file's byte length.
  * @returns {string} the capability token.
@@ -483,54 +418,11 @@ export async function grabDesktop(platform, options = {}) {
 }
 
 /**
- * Host plugin: publish the resolve endpoint and the image route.
+ * Host plugin: publish the shot image route and the screenshot workspace routes.
  * @param {import('@deepseek-ai/cordis').Context} ctx - the plugin context.
  * @param {object} [config] - the live plugin config.
  */
 export function apply(ctx, config) {
-  /** Resolve one query-supplied path into a JSON-safe description. */
-  const resolve = async (req, res) => {
-    try {
-      const url = typeof req.url === 'string' ? req.url : ''
-      const raw = queryOf(url, 'path')
-      if (raw.trim() === '') {
-        sendJson(res, 400, { ok: false, error: 'no path supplied' })
-        return
-      }
-      const cwd = queryOf(url, 'cwd')
-      const target = await ctx.fs.resolve(raw, cwd === '' ? undefined : { cwd })
-      const info = await ctx.fs.stat(target)
-      if (info === undefined) {
-        sendJson(res, 200, { ok: false, error: 'file not found: ' + raw })
-        return
-      }
-      if (info.type !== 'file') {
-        sendJson(res, 200, { ok: false, error: 'not a regular file: ' + raw })
-        return
-      }
-      const head = await ctx.fs.readByteRange(target, { offset: 0, length: HEAD_BYTES })
-      const mediaType = sniff(head)
-      if (mediaType === null) {
-        sendJson(res, 200, { ok: false, error: 'not a PNG/JPEG/WebP/GIF image' })
-        return
-      }
-      const size = typeof info.size === 'number' ? info.size : 0
-      const dimensions = dimensionsOf(head, mediaType)
-      sendJson(res, 200, {
-        ok: true,
-        mediaType,
-        bytes: size,
-        url: ROUTE + '/' + issue(raw, cwd, mediaType, size),
-        width: dimensions === null ? null : dimensions.width,
-        height: dimensions === null ? null : dimensions.height,
-        displayPath: typeof target.displayPath === 'string' ? target.displayPath : raw,
-      })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      sendJson(res, 200, { ok: false, error: message })
-    }
-  }
-
   /** Serve the bytes one issued token stands for. */
   const serve = async (req, res) => {
     try {
@@ -578,7 +470,7 @@ export function apply(ctx, config) {
    * These routes write files and start a screen grab, so they are gated by the
    * composition's own Host/Origin and authentication fence rather than by an
    * opaque token; a deployment without that service gets a refusal instead of
-   * an unguarded writer. The two read-only image routes keep their existing
+   * an unguarded writer. The read-only shot image route keeps its existing
    * token-only authorization.
    * @param {import('node:http').IncomingMessage} req - the request to test.
    * @param {import('node:http').ServerResponse} res - the response to own on refusal.
@@ -803,10 +695,6 @@ export function apply(ctx, config) {
     })
   }
 
-  ctx.effect(
-    () => ctx.webServer.register({ kind: 'exact', path: ROUTE + '/resolve', handler: resolve }),
-    'read-image-preview: resolve endpoint',
-  )
   ctx.effect(
     () => ctx.webServer.register({ kind: 'prefix', path: ROUTE, handler: serve }),
     'read-image-preview: image route',
