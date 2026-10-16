@@ -84,6 +84,7 @@ read_image 卡片；模型参数页勾档位后看 profile）。
 ## 6. 待办
 
 - [ ] 发布：model-tuning 2.1.0、read-image-preview 1.5.0、tofu-box 1.1.0（`./publish.ps1 -Publish`）。
+  **2026-10-16 决定：等 dsh 0.2.1 正式版发布后再跟进**——届时按本文流程对正式版重跑一遍再发。
 - [ ] npm 上给 `dsh-plugin-model-search` 打 deprecate 说明（对外操作，待确认）。
 - [ ] 桌面端升级到 alpha：官方无安装包，需本地未签名打包或等官方发布，见会话结论。
 - [ ] `check-compat.mjs` 增加「宿主 helper 导出」检查（本轮破坏它查不到）。
