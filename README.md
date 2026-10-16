@@ -16,11 +16,10 @@
 dsh plugin --profile web add tofu-box
 ```
 
-`tofu-box` 是伞包：不含代码，以依赖拉入下面六个子包并用一个 patch 层注册全部插件行（dsh-base 同款 bundle 模式）。装伞包**或**逐个装子包，二选一，不要混装；伞包装完后在插件管理页是一个整体条目，不能单独禁用其中某一个。
+`tofu-box` 是伞包：不含代码，以依赖拉入下面五个子包并用一个 patch 层注册全部插件行（dsh-base 同款 bundle 模式）。装伞包**或**逐个装子包，二选一，不要混装；伞包装完后在插件管理页是一个整体条目，不能单独禁用其中某一个。
 
 | 插件 | 说明 | 支持的 dsh 版本 | 平台 | 安装 |
 | --- | --- | --- | --- | --- |
-| **model-search** | 模型选择菜单加一个搜索框，按名称 / ID / 描述 / provider 过滤 | ≥ 0.1.7-alpha.2，实测 0.1.7-rc.1 与 0.2.0-rc.2（用了 0.1.7 的新图标，0.1.6 及更早不可用） | Win11 实测；Linux/macOS 未测 | `dsh plugin --profile web add dsh-plugin-model-search` |
 | **model-tuning** | 「设置 → 模型调参」三个页签：**模型参数**（推理档位、上下文窗口、最大输出、输入模态、系统提示角色与 Anthropic 思考格式两个兼容开关、生图勾选）、**用途**（会话标题的模型路由：`inherit` 沿用会话已记录的 provider / model，或指定完全独立的一组；经 `ctx.sessionTitle.register()` 独占注册，bundle patch 先 `disabled` 官方 `session-title-llm` 行，提示词、输入输出预算、超时与结果校验全部沿用宿主共享策略）、**绘图**（绘图模型配置、`generate_image` / `list_image_models` 工具与直接绘图面板，原图逐字节保留）。**v2 起合并了原 title-model 与 image-generation 两个包**，详见 [README](dsh-plugin-model-tuning/README.md) | ≥ 0.1.7-alpha.2，实测 0.1.7-rc.1 与 0.2.0-rc.2（设置页走 profile-backed SettingsForms；0.2.0 需 ≥ 2.0.1，放宽 peer 覆盖 0.2.x） | Win11 实测；Linux/macOS 未测 | `dsh plugin --profile web add dsh-plugin-model-tuning` |
 | **read-image-preview** | 工具结果里的图片（read_image、截图等）渲染成图片卡，点击放大、滚轮缩放、拖动平移 | ≥ 0.1.7-alpha.2，已适配 0.1.7-rc.1 的三阶段工具调用（`preparing` / `start` / 结果）；0.2.0-rc.2 实测通过 | Win11 实测；Linux/macOS 未测 | `dsh plugin --profile web add dsh-plugin-read-image-preview` |
 | **shell-selector** | 「设置 → Shell」里选 AI 执行命令用哪个 shell：PowerShell 7 / Windows PowerShell 5.1 / 自定义路径。只写宿主 `pwsh-sandbox` 条目本来就支持的 `pwshPath`，保存后下一条命令即生效，不重启、不替换执行器，沙箱 / 审批 / 超时 / 退出码全部沿用内置；选中 5.1 时额外注册一条方言上下文告知模型 `&&`、`??` 不可用；Git Bash 因受限执行未验证而置灰并写明原因，详见 [README](dsh-plugin-shell-selector/README.md) | ≥ 0.1.7-alpha.2，实测 0.1.7-rc.1；0.2.0-rc.2 单测通过 | Win11 实测；Linux/macOS 未测 | `dsh plugin --profile web add dsh-plugin-shell-selector` |
@@ -29,13 +28,14 @@ dsh plugin --profile web add tofu-box
 
 computer-use **v2.5 起自动开启原生 Wayland**，并内置 Ubuntu/GNOME 的 WinRects 扩展安装与诊断入口。GNOME 用户须安装扩展并注销登录一次；键鼠操作还需系统 portal 授权。安装步骤和实测范围见 [computer-use README](dsh-plugin-computer-use/README.md#v25ubuntu-2604--gnome-wayland)。
 
+> `model-search`（模型菜单搜索框）已在 2026-10 移除：官方模型菜单自 0.2.0-rc.2 起自带搜索，而本插件以 priority -1 整块替换官方菜单，会挡住官方后续加到菜单里的功能（如 0.2.1-alpha.4 的推理档位）。已装的用户 `dsh plugin --profile <p> remove dsh-plugin-model-search` 即可回到官方菜单；伞包 tofu-box 1.1.0 起不再包含它。
+>
 > `team-task-route`（把某一次团队会话的 teammate 钉死在指定模型上）已在 2026-09 移除：它把 session id 写死在 `index.js` 里，只对一次性的调试会话有意义。需要时可在 git 历史里找回。
 
 全部插件一次装完（npm 短名；`tofu-box` 伞包等价于此命令，见上）：
 
 ```sh
 dsh plugin --profile web add \
-  dsh-plugin-model-search \
   dsh-plugin-model-tuning \
   dsh-plugin-read-image-preview \
   dsh-plugin-shell-selector \
@@ -73,11 +73,10 @@ A few [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin
 dsh plugin --profile web add tofu-box
 ```
 
-`tofu-box` is an umbrella package: no code of its own, it pulls the six plugins below as dependencies and registers all their rows in one patch layer (the same bundle pattern dsh-base uses). Install the umbrella **or** pick individual plugins — not both; after the umbrella is installed it shows up as a single entry in the plugin manager and individual pieces can't be disabled from the GUI.
+`tofu-box` is an umbrella package: no code of its own, it pulls the five plugins below as dependencies and registers all their rows in one patch layer (the same bundle pattern dsh-base uses). Install the umbrella **or** pick individual plugins — not both; after the umbrella is installed it shows up as a single entry in the plugin manager and individual pieces can't be disabled from the GUI.
 
 | Plugin | What it does | dsh versions | Platform | Install |
 | --- | --- | --- | --- | --- |
-| **model-search** | Search box in the model picker (name / ID / description / provider) | ≥ 0.1.7-alpha.2, tested on 0.1.7-rc.1 and 0.2.0-rc.2 (needs the 0.1.7 icons; won't work on 0.1.6 or older) | Tested on Win11; Linux/macOS untested | `dsh plugin --profile web add dsh-plugin-model-search` |
 | **model-tuning** | "Settings → Model tuning" with three tabs: **model parameters** (reasoning effort, context window, max output, input modality, the system-role and Anthropic thinking-format compat switches, image-model linking), **purposes** (session-title model routing: `inherit` keeps the route recorded on the session, or point it at a separate provider/model pair — registered exclusively through `ctx.sessionTitle.register()` after the bundle patch disables the shipped `session-title-llm` row, with prompt, input/output budgets, timeout and result validation all staying on the host's shared policy) and **images** (drawing-model config, the `generate_image` / `list_image_models` tools and a direct generation panel, originals kept byte-for-byte). **Since v2 it contains the former title-model and image-generation packages**, which are no longer published separately ([README](dsh-plugin-model-tuning/README.md)) | ≥ 0.1.7-alpha.2, tested on 0.1.7-rc.1 and 0.2.0-rc.2 (settings page uses profile-backed SettingsForms; 0.2.0 needs ≥ 2.0.1 with the widened peer range) | Tested on Win11; Linux/macOS untested | `dsh plugin --profile web add dsh-plugin-model-tuning` |
 | **read-image-preview** | Renders images in tool results as zoomable cards (click to enlarge, wheel to zoom, drag to pan) | ≥ 0.1.7-alpha.2, adapted to the three-stage tool calls of 0.1.7-rc.1 (`preparing` / `start` / result); verified on 0.2.0-rc.2 | Tested on Win11; Linux/macOS untested | `dsh plugin --profile web add dsh-plugin-read-image-preview` |
 | **shell-selector** | A "Settings → Shell" page for picking which shell the AI runs commands in: PowerShell 7 / Windows PowerShell 5.1 / a custom path. It only writes the `pwshPath` field the host's own `pwsh-sandbox` entry already supports, so the next command uses your choice — no restart, no swapped executor, and sandboxing, approval, timeouts and exit codes stay exactly as shipped; when 5.1 is active it also registers a dialect note so the model knows `&&` and `??` don't exist; Git Bash stays greyed out with the reason shown, because confined execution is unverified ([README](dsh-plugin-shell-selector/README.md)) | ≥ 0.1.7-alpha.2, tested on 0.1.7-rc.1; unit tests pass on 0.2.0-rc.2 | Tested on Win11; Linux/macOS untested | `dsh plugin --profile web add dsh-plugin-shell-selector` |
@@ -86,13 +85,14 @@ dsh plugin --profile web add tofu-box
 
 computer-use **v2.5 automatically enables native Wayland** and includes a WinRects installer and diagnostics for Ubuntu/GNOME. Install the extension, log out and back in once, and allow the system portal prompt for input. See the [computer-use setup guide](dsh-plugin-computer-use/README.md).
 
+> `model-search` (model picker search box) was removed in 2026-10: the official picker has had search since 0.2.0-rc.2, and this plugin replaced the whole official menu at priority -1, hiding whatever the official menu gains later (such as the reasoning levels in 0.2.1-alpha.4). Run `dsh plugin --profile <p> remove dsh-plugin-model-search` to get the official menu back; the tofu-box umbrella drops it from 1.1.0.
+>
 > `team-task-route` (pinning one specific agent-team session's teammates to a chosen model) was removed in 2026-09: it hardcoded a session id in `index.js` and only made sense for one throwaway debugging session. It can be recovered from git history if ever needed.
 
 All plugins at once (npm names; the `tofu-box` umbrella is equivalent):
 
 ```sh
 dsh plugin --profile web add \
-  dsh-plugin-model-search \
   dsh-plugin-model-tuning \
   dsh-plugin-read-image-preview \
   dsh-plugin-shell-selector \
