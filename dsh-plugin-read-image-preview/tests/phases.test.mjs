@@ -68,10 +68,13 @@ const props = (block) => ({
   useDisclosure: () => ({ open: false, toggle() {} }),
 })
 
-test('the image Tool keys still cover read_image and computer-use tools', () => {
-  for (const key of ['read_image', 'computer_screenshot', 'computer_zoom', 'generate_image']) {
+test('the claimed Tool keys cover computer-use and generate_image, but not read_image', () => {
+  for (const key of ['computer_screenshot', 'computer_zoom', 'computer_sequence', 'generate_image']) {
     assert.ok(pure.IMAGE_TOOL_KEYS.includes(key), `${key} stays claimed`)
   }
+  // read_image has an official row that hands its pictures to `tool.call.images`;
+  // the plugin fills that gallery instead of replacing the whole row.
+  assert.equal(pure.IMAGE_TOOL_KEYS.includes('read_image'), false)
 })
 
 test('a preparing call (no argsRaw yet) renders the live card, never a blank row', () => {
@@ -150,9 +153,26 @@ test('read_image rides the durable attachment, with the path from its arguments'
   assert.equal(spec.text, '', 'the model-facing envelope is not repeated as a note')
 })
 
-test('a running read_image says the model is looking and names the path', () => {
-  const block = { callId: 'c5', name: 'read_image', subCalls: [], phase: 'start', argsRaw: '{"file_path":"D:/shots/a.png"}' }
-  const text = textOf(pure.ImageToolCard({ ...props(block), toolName: 'read_image' }))
-  assert.match(text, /正在查看/)
+test('a running call that names a file shows its label and the path', () => {
+  const block = { callId: 'c5', name: 'generate_image', subCalls: [], phase: 'start', argsRaw: '{"file_path":"D:/shots/a.png"}' }
+  const text = textOf(pure.ImageToolCard({ ...props(block), toolName: 'generate_image' }))
+  assert.match(text, /绘图 执行中/)
   assert.match(text, /D:\/shots\/a\.png/)
+})
+
+test('a settled call with several pictures hands all of them to the gallery', () => {
+  const block = {
+    kind: 'tool-result',
+    callId: 'c6',
+    call: { name: 'computer_sequence', argsRaw: '{}' },
+    content: [
+      { type: 'image', attachment: { attachmentId: 'att-a', width: 4, height: 3 } },
+      { type: 'image', attachment: { attachmentId: 'att-b', width: 4, height: 3 } },
+    ],
+    isError: false,
+    subCalls: [],
+  }
+  const card = pure.ImageToolCard({ ...props(block), toolName: 'computer_sequence' })
+  assert.equal(card.type, 'AttachmentPreview', 'the settled card is the attachment preview')
+  assert.equal(card.props.spec.atts.length, 2, 'no picture is held back behind "N more"')
 })

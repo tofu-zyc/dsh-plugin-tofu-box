@@ -15,7 +15,7 @@ dsh plugin --profile <你的profile> add tofu-box
 | 子包 | 功能 |
 | --- | --- |
 | dsh-plugin-model-tuning | 「设置 → 模型调参」：模型参数 / 标题路由 / 绘图 |
-| dsh-plugin-read-image-preview | 工具结果图片渲染成可缩放卡片 |
+| dsh-plugin-read-image-preview | 会话图片的全屏查看、标注、一键截图，回车直接进输入框 |
 | dsh-plugin-shell-selector | 「设置 → Shell」选择 AI 用的 shell |
 | dsh-plugin-computer-use | 13 个 `computer_*` 桌面操作工具 |
 | dsh-plugin-mcp-ui | 「设置 → MCP 服务器」管理页 |

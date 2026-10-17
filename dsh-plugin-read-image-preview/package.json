@@ -1,13 +1,13 @@
 {
   "name": "dsh-plugin-read-image-preview",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "license": "MIT",
   "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "image", "preview", "screenshot", "tool-card", "ui"],
   "publishConfig": { "registry": "https://registry.npmjs.org" },
   "repository": { "type": "git", "url": "git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git", "directory": "dsh-plugin-read-image-preview" },
   "bugs": { "url": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/issues" },
   "homepage": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/tree/main/dsh-plugin-read-image-preview",
-  "description": "通用工具图像卡片 + 截图标注工作区：read_image 走宿主文件预览，携带 image 附件的工具自动渲染缩略图；全屏查看器用滚轮缩放、Shift/Ctrl+滚轮平移，可画红框/椭圆/箭头/画笔/文字并裁剪，一键复制到剪贴板或存进 ~/.dsh/screenshots；输入框旁可一键抓全屏，设置页可管理与按期清理截图。",
+  "description": "会话图片的全屏查看与标注：接管官方图库位置（read_image 行、消息图片）与 computer-use 等工具卡片；查看器工具常驻，标记可选中/移动/改尺寸，滚轮缩放、触控板捏合与双指平移；回车把图片（含标注、按裁剪）直接放进输入框，也可复制或存进 ~/.dsh/screenshots；输入框旁一键抓屏后直接框选；设置页管理与按期清理截图。",
   "type": "module",
   "main": "index.js",
   "exports": {

@@ -11,7 +11,7 @@
   "type": "module",
   "dependencies": {
     "dsh-plugin-model-tuning": "^2.1.0",
-    "dsh-plugin-read-image-preview": "^1.5.0",
+    "dsh-plugin-read-image-preview": "^1.6.0",
     "dsh-plugin-shell-selector": "^0.1.0",
     "dsh-plugin-computer-use": "^2.5.0",
     "dsh-plugin-mcp-ui": "^1.0.3"
