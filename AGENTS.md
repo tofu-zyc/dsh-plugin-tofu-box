@@ -61,3 +61,8 @@
   `tofu-box`（`patches/<name>.yml` 逐字节副本、`dependencies` 精确 `^当前版本`、`dsh.bundle.patch` 数组、peer 并集）。
   新增插件后必须补齐这几处并让 `node tools/check-umbrella-sync.mjs` 通过，否则 `publish.ps1` 会中止。
 - 发布后核对：`npm view <pkg> version` 与 tarball 文件清单（`npm pack --dry-run`）；README 里的版本号同步更新。
+- **npm 的 staged publishing（2026 起）**：`npm publish` 成功后，新包名会先出现一个 `0.0.0-stage` 占位版本
+  （"Temporary package placeholder for staged publishing"），实际版本进入暂存队列，需要 maintainer 批准后才会
+  出现在版本列表里（可能延后几分钟）。所以 publish 输出成功不等于立刻可装：用
+  `npm view <pkg> versions --json` 确认目标版本已出现，再验证安装（可用一次性 profile：
+  `dsh plugin --profile <tmp> add <pkg>@<version>`，验证后删除该 profile）。
