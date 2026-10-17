@@ -588,6 +588,8 @@ window.__ModuleLoader__.load({
     }
 
     // ── 官方「设置 → 模型」卡片的扩展：官方没有的兼容开关与目录推理覆盖 ──
+    // 页面长度敏感：整段默认折叠（<details>），每个模型一行紧凑控件；
+    // 推理档位是复选组，只在点开该模型时才渲染。
     function CompatCard(props) {
       const load = props.load;
       const save = props.save;
@@ -596,6 +598,7 @@ window.__ModuleLoader__.load({
       const [error, setError] = React.useState(null);
       const [toast, setToast] = React.useState(null);
       const [busy, setBusy] = React.useState(false);
+      const [openLevels, setOpenLevels] = React.useState("");
 
       const reload = React.useCallback(async () => {
         try {
@@ -627,97 +630,107 @@ window.__ModuleLoader__.load({
         return React.createElement("div", { className: "mcfg-compat" },
           React.createElement("div", { className: "mcfg-error" }, "兼容设置读取失败：" + error));
       }
-      if (!data) {
-        return React.createElement("div", { className: "mcfg-compat" },
-          React.createElement("div", { className: "mcfg-note" }, "正在读取兼容设置…"));
-      }
+      if (!data) return null;
       if (!data.models || data.models.length === 0) return null;
       const editable = !busy && data.writable;
+      const overridden = data.models.filter((model) => model.hasOverride).length;
 
-      return React.createElement("div", { className: "mcfg-compat" },
-        React.createElement("div", { className: "mcfg-compat-head" }, "兼容与推理（插件补充）"),
-        React.createElement("div", { className: "mcfg-note" },
-          "这三项官方 Models 页没有：系统提示角色、Anthropic 思考格式、内置目录路由的推理档位覆盖。写入后下一次请求生效。"),
+      return React.createElement("details", { className: "mcfg-compat" },
+        React.createElement("summary", { className: "mcfg-compat-head" },
+          React.createElement("span", null, "兼容与推理（插件补充）"),
+          React.createElement("span", { className: overridden > 0 ? "mcfg-chip mcfg-chip-on" : "mcfg-chip" },
+            overridden > 0 ? overridden + " 个模型有覆盖" : data.models.length + " 个模型"),
+          React.createElement("span", { className: "mcfg-compat-hint" }, "官方 Models 页没有这些控件")
+        ),
         toast ? React.createElement("div", { className: "mcfg-toast " + (toast.kind === "ok" ? "mcfg-toast-ok" : "mcfg-toast-err"), role: "status" }, toast.text) : null,
-        data.models.map((model) => React.createElement("div", { key: model.id, className: "mcfg-compat-model" },
-          React.createElement("div", { className: "mcfg-compat-title" },
-            React.createElement("span", { className: "mcfg-model-name" }, model.name || model.id),
-            React.createElement("span", { className: "mcfg-model-id" }, model.id),
-            model.adaptiveThinking ? React.createElement("span", { className: "mcfg-chip mcfg-chip-on" }, "自适应思考") : null
-          ),
-          React.createElement("div", { className: "mcfg-reasoning" },
-            React.createElement("span", { className: "mcfg-label" }, "系统提示角色"),
-            React.createElement("div", { className: "mcfg-levels" },
-              ["auto", "system", "developer"].map((role) =>
-                React.createElement("label", { key: role, className: "mcfg-level" },
-                  React.createElement("input", {
-                    type: "radio",
-                    name: "compat-devrole-" + model.id,
-                    disabled: !editable,
-                    checked: role === "auto"
-                      ? model.supportsDeveloperRole === undefined
-                      : (role === "developer" ? model.supportsDeveloperRole === true : model.supportsDeveloperRole === false),
-                    onChange: () => void commit("supportsDeveloperRole", model.id, role === "auto" ? null : role === "developer"),
-                  }),
-                  React.createElement("span", null, role === "auto" ? "自动" : (role === "system" ? "system（Kimi/DeepSeek 网关推荐）" : "developer"))
-                )
-              )
-            ),
-            React.createElement("div", { className: "mcfg-note" },
-              "自动：跟随网关检测；网关报 role 'developer' is not allowed 时选 system。")
-          ),
-          model.adaptiveThinkingEditable ? React.createElement("div", { className: "mcfg-reasoning" },
-            React.createElement("span", { className: "mcfg-label" }, "思考格式（Anthropic 兼容开关）"),
-            React.createElement("div", { className: "mcfg-levels" },
-              ["auto", "adaptive"].map((choice) =>
-                React.createElement("label", { key: choice, className: "mcfg-level" },
-                  React.createElement("input", {
-                    type: "radio",
-                    name: "compat-adaptive-" + model.id,
-                    disabled: !editable,
-                    checked: choice === "auto" ? !model.adaptiveThinking : model.adaptiveThinking,
-                    onChange: () => void commit("adaptiveThinking", model.id, choice === "adaptive" ? true : null),
-                  }),
-                  React.createElement("span", null, choice === "auto" ? "自动（预算式 thinking）" : "自适应 thinking")
-                )
-              )
-            ),
-            React.createElement("div", { className: "mcfg-note" },
-              "只接受自适应思考的模型（Claude Opus 4.6 及更新等）报 400 requires adaptive thinking 时切到它；Claude 4.5 及更早保持「自动」。")
-          ) : null,
-          model.reasoningEditable ? React.createElement("div", { className: "mcfg-reasoning" },
-            React.createElement("span", { className: "mcfg-label" }, "可选推理档位（内置目录路由的 modelOverrides）"),
-            React.createElement("div", { className: "mcfg-levels" },
-              REASONING_LEVELS.map((level) => React.createElement("label", { key: level, className: "mcfg-level" },
-                React.createElement("input", {
-                  type: "checkbox",
-                  checked: model.levels.indexOf(level) >= 0,
+        React.createElement("div", { className: "mcfg-compat-list" },
+          data.models.map((model) => {
+            const levelsOpen = openLevels === model.id;
+            return React.createElement("div", { key: model.id, className: "mcfg-compat-row" + (levelsOpen ? " mcfg-compat-row-open" : "") },
+              React.createElement("div", { className: "mcfg-compat-line" },
+                React.createElement("span", { className: "mcfg-compat-name", title: model.id }, model.name || model.id),
+                React.createElement("select", {
+                  className: "mcfg-mini-select",
+                  title: "系统提示角色：网关报 role 'developer' is not allowed 时选 system（Kimi/DeepSeek 网关常见）",
                   disabled: !editable,
-                  onChange: () => {
-                    const next = model.levels.slice();
-                    const index = next.indexOf(level);
-                    if (index >= 0) next.splice(index, 1); else next.push(level);
-                    void commit("reasoningLevels", model.id, next);
+                  value: model.supportsDeveloperRole === undefined ? "auto" : (model.supportsDeveloperRole ? "developer" : "system"),
+                  onChange: (event) => {
+                    const picked = event.target.value;
+                    void commit("supportsDeveloperRole", model.id, picked === "auto" ? null : picked === "developer");
                   },
-                }),
-                React.createElement("span", null, level)
-              ))
-            ),
-            React.createElement("div", { className: "mcfg-note" },
-              model.levels.length === 0
-                ? "未勾选任何档位 → 该模型视为无推理能力"
-                : "已勾选档位写入该路由的 modelOverrides；官方 Models 页已存的每档 API 值保持不变。")
-          ) : null
-        ))
+                },
+                  React.createElement("option", { value: "auto" }, "角色：自动"),
+                  React.createElement("option", { value: "system" }, "角色：system"),
+                  React.createElement("option", { value: "developer" }, "角色：developer")
+                ),
+                model.adaptiveThinkingEditable ? React.createElement("select", {
+                  className: "mcfg-mini-select",
+                  title: "思考格式：只接受 adaptive thinking 的模型（Claude Opus 4.6+ / Sonnet 5 等）切到自适应，其余保持自动",
+                  disabled: !editable,
+                  value: model.adaptiveThinking ? "adaptive" : "auto",
+                  onChange: (event) => void commit("adaptiveThinking", model.id, event.target.value === "adaptive" ? true : null),
+                },
+                  React.createElement("option", { value: "auto" }, "思考：自动"),
+                  React.createElement("option", { value: "adaptive" }, "思考：自适应")
+                ) : null,
+                model.reasoningEditable ? React.createElement("button", {
+                  type: "button",
+                  className: "mcfg-mini-button" + (levelsOpen ? " mcfg-mini-button-on" : ""),
+                  title: "内置目录路由的推理档位（写入 modelOverrides.<id>.reasoningEfforts）：当前 "
+                    + (model.levels.length === 0 ? "无档位" : model.levels.join("/"))
+                    + "；官方 Models 页只覆盖手写路由",
+                  disabled: !editable,
+                  onClick: () => setOpenLevels(levelsOpen ? "" : model.id),
+                }, (model.levels.length === 0 ? "推理：无" : "推理：" + model.levels.length + " 档")
+                  + (model.hasReasoningOverride ? " ·已改" : "")) : null
+              ),
+              levelsOpen ? React.createElement("div", { className: "mcfg-compat-levels" },
+                React.createElement("div", { className: "mcfg-levels" },
+                  REASONING_LEVELS.map((level) => React.createElement("label", { key: level, className: "mcfg-level" },
+                    React.createElement("input", {
+                      type: "checkbox",
+                      checked: model.levels.indexOf(level) >= 0,
+                      disabled: !editable,
+                      onChange: () => {
+                        const next = model.levels.slice();
+                        const index = next.indexOf(level);
+                        if (index >= 0) next.splice(index, 1); else next.push(level);
+                        void commit("reasoningLevels", model.id, next);
+                      },
+                    }),
+                    React.createElement("span", null, level)
+                  ))
+                ),
+                React.createElement("div", { className: "mcfg-note" },
+                  "不勾选任何档位 = 该模型视为无推理能力；已勾选档位写入该路由的 modelOverrides，官方已存的每档 API 值保持不变。")
+              ) : null
+            );
+          })
+        ),
+        React.createElement("div", { className: "mcfg-note" }, "改动即时保存；只有改过某一个模型时，该模型才出现在上方计数里。")
       );
     }
 
-    /** Styles the official Models card extension needs on top of the drawing page. */
+    /** Styles the official Models card extension (collapsed summary + one compact row per model). */
     const COMPAT_CSS = `
-.mcfg-compat{display:flex;flex-direction:column;gap:10px;padding:12px 0 4px;border-top:1px dashed rgba(128,128,128,.35);margin-top:12px}
-.mcfg-compat-head{font-size:12.5px;font-weight:600;opacity:.9}
-.mcfg-compat-model{display:flex;flex-direction:column;gap:8px;padding:10px 12px;border:1px solid rgba(128,128,128,.25);border-radius:8px}
-.mcfg-compat-title{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.mcfg-compat{display:block;padding:10px 0 2px;border-top:1px dashed rgba(128,128,128,.35);margin-top:12px}
+.mcfg-compat>summary{cursor:pointer;display:flex;align-items:center;gap:8px;list-style:none;font-size:12.5px;font-weight:600}
+.mcfg-compat>summary::-webkit-details-marker{display:none}
+.mcfg-compat>summary::before{content:"▸";font-size:10px;opacity:.6;width:10px}
+.mcfg-compat[open]>summary::before{content:"▾"}
+.mcfg-compat-hint{font-size:11.5px;font-weight:400;opacity:.55}
+.mcfg-compat-list{display:flex;flex-direction:column;gap:2px;padding-top:8px}
+.mcfg-compat-row{display:flex;flex-direction:column;gap:6px;padding:5px 8px;border-radius:8px}
+.mcfg-compat-row-open{background:rgba(128,128,128,.08)}
+.mcfg-compat-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:24px}
+.mcfg-compat-name{font-size:12.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 130px}
+.mcfg-mini-select{font-size:12px;padding:3px 6px;border-radius:6px;border:1px solid rgba(128,128,128,.4);background:transparent;color:inherit}
+.mcfg-mini-select:disabled{opacity:.5;cursor:not-allowed}
+.mcfg-mini-button{font-size:12px;padding:3px 8px;border-radius:6px;border:1px solid rgba(128,128,128,.4);background:transparent;color:inherit;cursor:pointer;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mcfg-mini-button:hover{border-color:rgba(128,128,128,.65)}
+.mcfg-mini-button:disabled{opacity:.5;cursor:not-allowed}
+.mcfg-mini-button-on{border-color:rgba(80,140,255,.75);background:rgba(80,140,255,.12)}
+.mcfg-compat-levels{display:flex;flex-direction:column;gap:6px;padding:2px 0 4px 2px}
 `;
 
     // 2026-09-08 (DSH 0.1.2-rc.1): `ctx.connection.api` no longer exists — the
@@ -770,19 +783,26 @@ window.__ModuleLoader__.load({
           const efforts = model.reasoning && Array.isArray(model.reasoning.efforts) ? model.reasoning.efforts : [];
           const levels = efforts.map((effort) => effort.id).filter((id) => id !== "off");
           const stored = storedReasoningEfforts(entry, nsView, model.id);
+          const devRole = entry.settingsNs === "llm-pi-ai"
+            ? readCompatField(nsView, entry.settingsPath, model.id, "supportsDeveloperRole")
+            : undefined;
+          const adaptive = snapshot.adaptiveKey !== null
+            ? readCompatField(nsView, entry.settingsPath, model.id, snapshot.adaptiveKey)
+            : undefined;
           return {
             id: model.id,
             name: model.name,
-            supportsDeveloperRole: entry.settingsNs === "llm-pi-ai"
-              ? readCompatField(nsView, entry.settingsPath, model.id, "supportsDeveloperRole")
-              : undefined,
-            adaptiveThinking: snapshot.adaptiveKey !== null
-              && readCompatField(nsView, entry.settingsPath, model.id, snapshot.adaptiveKey) === true,
+            supportsDeveloperRole: devRole,
+            adaptiveThinking: adaptive === true,
             adaptiveThinkingEditable: snapshot.adaptiveKey !== null && levels.length > 0,
             // The official Models page owns reasoning for hand-declared routes;
             // only installed-catalog routes need this override editor.
             reasoningEditable: entry.settingsNs === "llm-pi-ai" && entry.declared !== true,
             levels: stored === false ? [] : levels,
+            hasReasoningOverride: stored !== undefined,
+            // Count only fields this plugin actually wrote: catalog-declared
+            // reasoning levels are the model's own capability, not an override.
+            hasOverride: devRole !== undefined || adaptive !== undefined || stored !== undefined,
           };
         });
         return { writable: snapshot.writable, models };
