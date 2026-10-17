@@ -128,3 +128,20 @@ npm `next` = 0.2.1-rc.1（10-17 03:17），`latest` 仍是 0.2.0-rc.2。alpha.4 
 - [ ] `check-compat.mjs` 增加「宿主 helper 导出」检查（本轮破坏它查不到）。
 - [x] read-image-preview 交互打磨（1.6.0）：read_image 改为只填官方 `tool.call.images` 图库，消息图片也接同一查看器；查看器重写（无模式、标记可编辑、触控板手势、按帧写 transform 的性能修复）；截图直接框选、回车经粘贴通路进输入框。
 - [ ] read-image-preview 1.6.0 在真实页面验证消息 / read_image 行里的图库（本机无带图历史会话，未验）。
+
+## 8. 0.2.1-rc.2 复查（2026-10-17）
+
+npm `next` = **0.2.1-rc.2**（10-17 15:22 发版），`latest` 仍是 0.2.0-rc.2。rc.1 → rc.2 只有 **9 个提交**，改动面：
+
+- 官方 **DeepSeek Search / Fetch API**（新包 `packages/web/web-deepseek-api`、`web-search-deepseek` 调整、`ui-settings-web-search` 设置页、`bundle/base` 新增 `web-deepseek-api` 行）；
+- DeepSeek Flash 的临时 **1017 徽标**（新客户端包 `ui-deepseek-model-label-1017`，`bundle/web-app` 新增一行）；
+- 其余是 `sandbox-windows-acl`、`fs-observation-policy`、`schedule`、`ptc-runtime`、`sdk/client` 等与本仓库插件无关的修补。
+
+**本仓库插件依赖的契约包零源码改动**（`ui-settings-models` / `ui-attachment` / `ui-tool` / `ui-primitives` / `session-title*` / `llm-pi-ai` / `mcp` / `computer-use` / `shell` / `settings` / `typert` / `boot` / `api-remotes` 等只有 package.json 版本号变化）。验证结果：
+
+- `check-compat.mjs --deploy <rc.2 部署>`：**PASS**（唯一 WARN 是 web profile 里 computer-use 停在 2.4.1 快照，与 rc.2 无关）。
+- `model-tuning` 单测对 rc.2 部署：**42/42 通过、0 skip**（含 `compat.forceAdaptiveThinking` 的真实 pi-ai 请求体耦合守卫，说明 rc.2 的 pi-ai 行为未变）。
+- rc.2 CLI `--dump-config`：官方新行（`web-deepseek-api`、`ui-deepseek-model-label-1017`）正常出现，`session-title-llm` 启用，model-tuning 行正常。
+- rc.2 启动冒烟：`dsh web --profile tofu-rc --no-open` 正常打印 URL，无 `did not activate` 告警（随后按用户要求停止）。
+
+**结论：插件无需改动、无需发版即可适配 0.2.1-rc.2。** 新增的两行官方内容与本仓库插件不冲突。
