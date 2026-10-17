@@ -4,13 +4,17 @@
  * Three surfaces share one full-screen viewer (zoom, pan, annotate, then send
  * to the composer, copy, or save):
  *
- * - Image galleries. The official image positions — `tool.call.images` inside
- *   the read_image row, user and assistant message images, trajectory images —
- *   are filled at priority -1 with this plugin's gallery, so the official rows
- *   keep their own chrome (title, path, sizes, Inspect) and only the pictures
- *   and the viewer are ours. Older and newer hosts name the message slots
- *   differently; registering every name is safe because `slots.inject` waits
- *   for a declaration that never comes.
+ * - Image galleries. The official image positions — user and assistant message
+ *   images, trajectory images — are filled at priority -1 with this plugin's
+ *   gallery, so the official rows keep their own chrome (title, path, sizes,
+ *   Inspect) and only the pictures and the viewer are ours. Older and newer
+ *   hosts name the message slots differently; registering every name is safe
+ *   because `slots.inject` waits for a declaration that never comes.
+ * - The whole `read_image` card (1.7): the official row renders its picture
+ *   inside a collapsed-by-default body, so the plugin claims the `read_image`
+ *   key of `tool.call.toolview` and renders the image expanded with a
+ *   path/size bar. The result content already carries the durable image
+ *   attachment, so the same card renders it without the host route 1.4 used.
  * - Tool cards for image-bearing tools that have no official image row
  *   (computer-use, generate_image): their keyed `tool.call.toolview` cell is
  *   claimed at priority -1 and renders the same gallery plus one metadata line.
@@ -1006,9 +1010,10 @@ window.__ModuleLoader__.load({
 
     /**
      * The claim list: every tool whose whole card this plugin owns, with the
-     * Chinese label shown while the call runs. read_image is not here: its
-     * official row hands its gallery to the `tool.call.images` slot, which this
-     * plugin fills instead. Adding an image-bearing tool = adding one line.
+     * Chinese label shown while the call runs. `read_image` is prepended (1.7):
+     * the official row shows its picture inside a collapsed-by-default body, so
+     * this plugin claims the whole card to render it expanded. Adding an
+     * image-bearing tool = adding one line.
      */
     const TOOL_LABELS = {
       generate_image: '绘图',
@@ -1025,7 +1030,7 @@ window.__ModuleLoader__.load({
       computer_sequence: '连续动作',
     }
 
-    const IMAGE_TOOL_KEYS = Object.keys(TOOL_LABELS)
+    const IMAGE_TOOL_KEYS = ['read_image'].concat(Object.keys(TOOL_LABELS))
 
     /**
      * Every official image position this plugin's gallery fills. The message
@@ -2966,9 +2971,10 @@ window.__ModuleLoader__.load({
      * Wire the plugin into the page.
      *
      * - the image galleries of the official image positions, at priority -1;
-     * - the whole card of every image-bearing tool without an official image
-     *   row, at priority -1 (if one of our entries ever throws, the slot's
-     *   error boundary abdicates it and the previous card returns);
+     * - the whole card of `read_image` and of every image-bearing tool without
+     *   an official image row, at priority -1 (if one of our entries ever
+     *   throws, the slot's error boundary abdicates it and the previous card
+     *   returns);
      * - the composer's ✂ button and the 截图与标注 settings page.
      */
     function apply(ctx) {

@@ -452,7 +452,7 @@ test('the galleries, the capture entry and the settings page are contributed by 
   }
   const toolviews = registered.filter((row) => row.name === 'tool.call.toolview')
   assert.ok(toolviews.length > 3, 'image-bearing tools without an official image row are claimed')
-  assert.ok(!toolviews.some((row) => row.key === 'read_image'), 'read_image keeps its official row')
+  assert.ok(toolviews.some((row) => row.key === 'read_image'), 'v1.7 claims read_image to render it expanded')
   const capture = registered.find((row) => row.id === 'read-image-preview-capture')
   assert.equal(capture.name, 'conversation.input.right')
   const page = registered.find((row) => row.id === 'read-image-preview')

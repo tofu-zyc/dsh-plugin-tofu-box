@@ -6,12 +6,13 @@
 
 | 位置 | 做法 |
 | --- | --- |
-| read_image 行、用户消息里的图、助手消息里的图、轨迹里的图 | 只替换官方的**图库**位置（`tool.call.images`、`conversation.chat.user.images` / `conversation.chat.message.images`，0.2.0 叫 `conversation.message.images`；`conversation.trajectory.images`），priority `-1`。官方行自己的标题、路径、尺寸、Inspect 原样保留 |
-| computer-use 各工具、generate_image | 这些工具没有官方图片行，继续整格认领 `tool.call.toolview`（priority `-1`），渲染同一个图库加一行信息（路径、尺寸、体积、格式、复制路径、在编辑器中打开） |
+| read_image 行 | **整行认领** `tool.call.toolview`（key `read_image`，priority `-1`），图片直接展开显示，下面一行路径/尺寸/体积/格式（v1.7 恢复 1.4 的自动展开；官方行默认折叠所以不再使用官方行头与 Inspect） |
+| 用户消息里的图、助手消息里的图、轨迹里的图 | 只替换官方的**图库**位置（`conversation.chat.user.images` / `conversation.chat.message.images`，0.2.0 叫 `conversation.message.images`；`conversation.trajectory.images`），priority `-1`；官方行自己的标题、路径、尺寸、Inspect 原样保留 |
+| computer-use 各工具、generate_image | 这些工具没有官方图片行，整格认领 `tool.call.toolview`（priority `-1`），渲染同一个图库加一行信息（路径、尺寸、体积、格式、复制路径、在编辑器中打开） |
 | 输入框右侧 | `✂ 截图` 按钮 |
 | 设置 → 截图与标注 | 截图目录管理与按期清理 |
 
-> **v1.6 起 read_image 不再整行接管。** 官方 read_image 行从 0.2.0 起把图片交给 `tool.call.images` 子 slot 渲染，并自带路径与尺寸信息；本插件只填这个图库，和官方重合的部分全部交还。代价是官方行默认折叠，点开才看到图。两版 dsh 的消息图片 slot 名不同，全部注册是安全的：`slots.inject` 会一直等到 slot 被声明，没有的名字永远不会激活。
+> **v1.7：read_image 恢复自动展开。** v1.6 曾把 read_image 行交还官方（只填官方图库 slot），代价是官方行默认折叠、要点开才看到图；v1.7 重新整行接管该工具，图片默认展开显示，同时保留 v1.6 的查看器（缩放/标注/裁剪/发输入框）。官方 read_image 行头与 Inspect 在该工具上不再出现。两版 dsh 的消息图片 slot 名不同，全部注册是安全的：`slots.inject` 会一直等到 slot 被声明，没有的名字永远不会激活。
 
 图库：单张按真实宽高比显示缩略图（`min(420px, 100%)` × `max-height: 300px`），`<img>` 在字节到达前就带好 `width/height`，晚到的图片不会引起布局跳变（v1.4.1 修过的聊天吸底问题）；多张一律平铺成小图，全部可点开，查看器里 `←`/`→` 切换；透明 PNG/WebP/GIF 自动铺棋盘格；加载失败点一下重试。
 

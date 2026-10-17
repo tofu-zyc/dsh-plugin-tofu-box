@@ -68,13 +68,13 @@ const props = (block) => ({
   useDisclosure: () => ({ open: false, toggle() {} }),
 })
 
-test('the claimed Tool keys cover computer-use and generate_image, but not read_image', () => {
-  for (const key of ['computer_screenshot', 'computer_zoom', 'computer_sequence', 'generate_image']) {
-    assert.ok(pure.IMAGE_TOOL_KEYS.includes(key), `${key} stays claimed`)
+test('the claimed Tool keys cover read_image, computer-use and generate_image', () => {
+  for (const key of ['read_image', 'computer_screenshot', 'computer_zoom', 'computer_sequence', 'generate_image']) {
+    assert.ok(pure.IMAGE_TOOL_KEYS.includes(key), `${key} is claimed`)
   }
-  // read_image has an official row that hands its pictures to `tool.call.images`;
-  // the plugin fills that gallery instead of replacing the whole row.
-  assert.equal(pure.IMAGE_TOOL_KEYS.includes('read_image'), false)
+  // v1.7: the official read_image row is collapsed by default, so the plugin
+  // claims the whole card again and renders the picture expanded.
+  assert.equal(pure.IMAGE_TOOL_KEYS.includes('read_image'), true)
 })
 
 test('a preparing call (no argsRaw yet) renders the live card, never a blank row', () => {

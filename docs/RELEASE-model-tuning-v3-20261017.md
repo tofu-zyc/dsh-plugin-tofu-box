@@ -7,14 +7,14 @@
 | 包 | 版本 | 说明 |
 | --- | --- | --- |
 | `dsh-plugin-model-tuning` | **3.0.0** | 破坏性收窄：删「用途（标题）」页与「模型参数」页；标题路由交还官方；保留官方没有的兼容/推理补丁与绘图（`generate_image`）。详见 [插件 README](../dsh-plugin-model-tuning/README.md) |
-| `dsh-plugin-read-image-preview` | **1.6.0** | 查看器重写（缩放/标注/裁剪/发到输入框）、read_image 只填官方图库、抓屏框选；首次发布 |
+| `dsh-plugin-read-image-preview` | **1.7.0** | 查看器重写（缩放/标注/裁剪/发到输入框）、抓屏框选；**1.7.0 起 read_image 行恢复整行自动展开**（1.6 曾交还官方导致默认折叠） |
 | `tofu-box` | **1.1.0** | 伞包：去掉 model-search，依赖 `model-tuning ^3.0.0`、`read-image-preview ^1.6.0` |
 
 其余子包版本不变：`computer-use 2.5.0`、`mcp-ui 1.0.3`、`shell-selector 0.1.0`（已发布过）。
 
 发布顺序固定：先子包（`model-tuning`、`read-image-preview`），最后 `tofu-box`——伞包依赖子包的已发布版本。
 
-已于 **2026-10-17 发布并通过 registry 校验**：三个包的 `dist-tags.latest` 分别为 `model-tuning@3.0.0`、`read-image-preview@1.6.0`、`tofu-box@1.1.0`；`tofu-box@1.1.0` 的依赖解析到 `^3.0.0` / `^1.6.0`。
+已于 **2026-10-17 发布并通过 registry 校验**；`read-image-preview` 随后于同日热修为 **1.7.0**（`dist-tags.latest` 已指向 1.7.0）。伞包 `tofu-box@1.1.0` 的依赖 `^1.6.0` 覆盖 1.7.0，无需重发。
 
 ## 2. 下线的插件（重要）
 
