@@ -14,6 +14,8 @@
 
 发布顺序固定：先子包（`model-tuning`、`read-image-preview`），最后 `tofu-box`——伞包依赖子包的已发布版本。
 
+已于 **2026-10-17 发布并通过 registry 校验**：三个包的 `dist-tags.latest` 分别为 `model-tuning@3.0.0`、`read-image-preview@1.6.0`、`tofu-box@1.1.0`；`tofu-box@1.1.0` 的依赖解析到 `^3.0.0` / `^1.6.0`。
+
 ## 2. 下线的插件（重要）
 
 | 插件 | 状态 | 原因 / 替代 |
