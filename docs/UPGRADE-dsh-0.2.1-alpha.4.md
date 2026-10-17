@@ -119,11 +119,11 @@ npm `next` = 0.2.1-rc.1（10-17 03:17），`latest` 仍是 0.2.0-rc.2。alpha.4 
 ## 7. 待办
 
 - [x] model-tuning 2.1.0 **2026-10-17 提前发布**（桌面端 profile 锁 `2.0.2`，不先换 2.1.0 就不能升 0.2.1-rc.1）。
-- [ ] 发布：read-image-preview 1.6.0、tofu-box 1.1.0（`./publish.ps1 -Publish`）。
-  **2026-10-16 决定：等 dsh 0.2.1 正式版发布后再跟进**——届时按本文流程对正式版重跑一遍再发。
+- [x] model-tuning **3.0.0**（2026-10-17 收窄发布，基线 0.2.1-rc.1；见 [发布说明](RELEASE-model-tuning-v3-20261017.md)）。
+- [x] 发布：read-image-preview 1.6.0、tofu-box 1.1.0（2026-10-17 `./publish.ps1 -Publish` 已发；registry 传播完成后可 `npm view` 验证）。
 - [ ] npm 上给 `dsh-plugin-model-search` 打 deprecate 说明（对外操作，待确认）。
 - [x] 桌面端：应用内移除 model-search。
-- [ ] 桌面端：在应用「插件」页把 model-tuning 更新到 2.1.0（npm 已发），确认后再更新应用到 0.2.1-rc.1。
+- [ ] 桌面端：在应用「插件」页把 model-tuning 更新到 **3.0.0**（npm 已发），确认后再更新应用到 0.2.1-rc.1。
 - [ ] `scripts/dev-link-desktop.ps1` / `dev-unlink-desktop.ps1`：删除或改成复制，并在 README 说明原因。
 - [ ] `check-compat.mjs` 增加「宿主 helper 导出」检查（本轮破坏它查不到）。
 - [x] read-image-preview 交互打磨（1.6.0）：read_image 改为只填官方 `tool.call.images` 图库，消息图片也接同一查看器；查看器重写（无模式、标记可编辑、触控板手势、按帧写 transform 的性能修复）；截图直接框选、回车经粘贴通路进输入框。
