@@ -78,6 +78,17 @@ window.__ModuleLoader__.load({
 .mcfg-card p{overflow-wrap:anywhere;font-size:12px}
 .mcfg-card a{display:inline-block;text-decoration:none}
 .mcfg-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;flex-wrap:wrap}
+.mcfg-draw-item{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1 1 220px}
+.mcfg-draw-name{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;overflow-wrap:anywhere}
+.mcfg-draw-meta{font-size:11.5px;opacity:.55;overflow-wrap:anywhere}
+.mcfg-draw-row{align-items:center;gap:10px}
+.mcfg-draw-radio{display:flex;align-items:center;padding:0 2px}
+.mcfg-draw-radio input{accent-color:rgb(80,140,255);width:14px;height:14px;cursor:pointer}
+.mcfg-primary{border-color:rgba(80,140,255,.65)!important;background:rgba(80,140,255,.10)!important}
+.mcfg-advanced{margin-top:12px;border:1px solid #8884;border-radius:10px;padding:10px 14px}
+.mcfg-advanced>summary{cursor:pointer;font-size:12.5px;opacity:.85}
+.mcfg-advanced[open]>summary{margin-bottom:8px}
+.mcfg-advanced fieldset{border:0;padding:0;margin:0;min-width:0}
 .mcfg-model-list{display:flex;flex-direction:column;gap:5px;max-height:240px;overflow:auto;margin:8px 0}
 .mcfg-model-list button{text-align:left;overflow-wrap:anywhere}
 .mcfg-model-list button[aria-pressed=true]{border-color:#3987d7;background:#3987d71a}
@@ -93,6 +104,10 @@ window.__ModuleLoader__.load({
     const NS = "model-tuning";
 
     const REASONING_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"];
+
+    /** Provenance marker on a drawing entry linked from a provider model. */
+    const IMAGE_SOURCE_KEY = "source";
+    const IMAGE_API = "openai-images";
 
     /**
      * The compat switch that selects Anthropic's adaptive thinking request.
@@ -133,6 +148,109 @@ window.__ModuleLoader__.load({
     function imageModelsOf(ownView) {
       const models = ownView ? ownView.value?.models : undefined;
       return Array.isArray(models) ? models : [];
+    }
+
+    /**
+     * Derive one drawing entry from the chat provider that already holds the
+     * endpoint and credential reference, so linking never asks the user to
+     * retype either one.
+     */
+    function deriveImageEntry(profile, modelId) {
+      const base = typeof profile?.baseURL === "string" ? profile.baseURL.trim() : "";
+      return {
+        model: modelId,
+        endpoint: base ? base.replace(/\/+$/, "") + "/images/generations" : "",
+        apiKeyEnv: typeof profile?.apiKeyEnv === "string" ? profile.apiKeyEnv.trim() : "",
+      };
+    }
+
+    /** Whether an entry came from linking this provider model (has provenance). */
+    function isManagedEntry(entry, modelId) {
+      const source = entry && entry[IMAGE_SOURCE_KEY];
+      if (!source || typeof source !== "object" || source.model !== modelId) return false;
+      return source.provider === undefined || source.provider === "" || typeof source.provider === "string";
+    }
+
+    /** The per-model view of the link: can it link, is it already linked, and where. */
+    function computeImageModelState(ownView, profile, modelId) {
+      if (!ownView) return { available: false, managed: false, hasEntry: false, entry: null };
+      const models = imageModelsOf(ownView);
+      const entry = models.find((item) => item && typeof item === "object" && item.model === modelId) ?? null;
+      const derived = deriveImageEntry(profile, modelId);
+      return {
+        available: true,
+        managed: !!entry && isManagedEntry(entry, modelId),
+        hasEntry: !!entry,
+        endpoint: entry ? entry.endpoint : derived.endpoint,
+        apiKeyEnv: entry ? entry.apiKeyEnv : derived.apiKeyEnv,
+      };
+    }
+
+    function normalizeImageEndpoint(value) {
+      return typeof value === "string" ? value.trim().replace(/\/+$/, "").replace(/\/images\/generations$/, "") + "/images/generations" : "";
+    }
+
+    /** `/v1/images/generations` is the OpenAI address, not the configured one. */
+    function acceptableImageEndpoint(value) {
+      try {
+        const url = new URL(value);
+        if (!["http:", "https:"].includes(url.protocol)) return false;
+      } catch {
+        return false;
+      }
+      return !/api\.openai\.com/i.test(value);
+    }
+
+    /** The 绘图 schema validates `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`. */
+    function sanitizeImageId(value) {
+      return String(value).replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^[-_]+|[-_]+$/g, "").slice(0, 64);
+    }
+
+    function uniqueImageId(modelId, models) {
+      const taken = new Set(models.filter((item) => item && typeof item.id === "string").map((item) => item.id));
+      const base = sanitizeImageId(modelId) || "image-model";
+      let id = base;
+      for (let i = 2; taken.has(id); i++) id = sanitizeImageId(base.slice(0, 60) + "-" + i);
+      return id;
+    }
+
+    /**
+     * Everything the drawing list needs for an incremental write: only the entry
+     * the provider checkbox owns plus the default-model change it implies.
+     */
+    function planImageLink(ownView, profile, modelId, providerId) {
+      const derived = deriveImageEntry(profile, modelId);
+      const endpoint = normalizeImageEndpoint(derived.endpoint);
+      if (!acceptableImageEndpoint(endpoint)) {
+        return { models: null, reason: "该 provider 没有可用的供应商地址（baseURL），请先在「设置 → 模型」里填写后再勾选。" };
+      }
+      const models = imageModelsOf(ownView).slice();
+      const index = models.findIndex((item) => item && typeof item === "object" && item.model === modelId);
+      const owned = index >= 0
+        ? { ...models[index], model: modelId, endpoint, api: IMAGE_API, [IMAGE_SOURCE_KEY]: { provider: providerId, model: modelId } }
+        : { id: uniqueImageId(modelId, models), name: modelId, model: modelId, endpoint, api: IMAGE_API, timeoutSeconds: 300 };
+      if (index >= 0 && !owned.apiKeyEnv && derived.apiKeyEnv) owned.apiKeyEnv = derived.apiKeyEnv;
+      if (index < 0) {
+        if (derived.apiKeyEnv) owned.apiKeyEnv = derived.apiKeyEnv;
+        owned[IMAGE_SOURCE_KEY] = { provider: providerId, model: modelId };
+      }
+      const next = index >= 0 ? models.map((item, i) => (i === index ? owned : item)) : [...models, owned];
+      const currentDefault = ownView.value?.defaultModel;
+      const defaultModel = typeof currentDefault === "string" && currentDefault ? currentDefault : owned.id;
+      return { models: next, defaultModel };
+    }
+
+    /** Unlink removes only entries the provider checkbox created (has provenance). */
+    function planImageUnlink(ownView, modelId) {
+      const models = imageModelsOf(ownView);
+      const entry = models.find((item) => item && typeof item === "object" && item.model === modelId);
+      if (!entry) return { models: null, reason: "该模型未链接到绘图配置。" };
+      // A hand-authored entry is not this checkbox's to remove.
+      if (!isManagedEntry(entry, modelId)) return { models: null, reason: "该配置是在「绘图」页手工创建的，请到那边删除。" };
+      const next = models.filter((item) => item !== entry);
+      const currentDefault = ownView.value?.defaultModel;
+      const defaultModel = currentDefault === entry.id ? (next[0]?.id ?? "") : currentDefault;
+      return { models: next, defaultModel };
     }
 
     function readCompatField(nsView, settingsPath, modelId, compatKey) {
@@ -462,43 +580,61 @@ window.__ModuleLoader__.load({
       };
       const visibleModels = (catalog?.models ?? []).filter((item) => `${item.id} ${item.name}`.toLowerCase().includes(modelQuery.trim().toLowerCase()));
       const running = job?.status === "running";
+      const defaultEntry = models.find((item) => item.id === view?.value?.defaultModel);
 
       return React.createElement("div", { className: "mcfg-page" },
-        React.createElement("p", { className: "mcfg-note" }, "独立配置绘图模型。可在聊天中让助手调用 generate_image，也可在下方直接生成。接口使用 OpenAI Images 协议。"),
         notice ? React.createElement("div", { role: "status" }, notice) : null,
         !view ? React.createElement("p", null, "正在读取配置…") : React.createElement("fieldset", { disabled: busy }, React.createElement("legend", null, "绘图模型"),
-          models.length === 0 ? React.createElement("p", { className: "mcfg-note" }, "尚未配置。添加模型后即可绘图。") : models.map((item) => React.createElement("div", { className: "mcfg-row", key: item.id },
-            React.createElement("span", null, `${item.name || item.id} · ${item.model}${view.value.defaultModel === item.id ? " · 默认" : ""}${managedBy(item) ? " · " + managedBy(item) : ""}`),
-            React.createElement("div", { className: "mcfg-actions2" },
-              React.createElement("button", { disabled: !writable || !!form, onClick: () => { setForm({ ...item }); setEditing(item.id); setKey(""); setCatalog(null); } }, "编辑"),
-              React.createElement("button", {
-                // Disabled on the entry that already IS the default: the button
-                // then states a fact instead of pretending to act.
-                disabled: !writable || !!form || view.value?.defaultModel === item.id,
-                onClick: () => void action(() => commit(
-                  () => [{ op: "set", path: ["defaultModel"], value: item.id }],
-                  `已将 ${item.name || item.id} 设为默认`,
-                )),
-              }, view.value?.defaultModel === item.id ? "当前默认" : "设为默认"),
-              React.createElement("button", {
-                disabled: !writable || !!form,
-                onClick: () => void action(async () => {
-                  await commit((fresh) => {
-                    const next = imageModelsOf(fresh).filter((model) => model.id !== item.id);
-                    const currentDefault = fresh.value?.defaultModel;
-                    return [
-                      { op: "set", path: ["models"], value: next },
-                      { op: "set", path: ["defaultModel"], value: currentDefault === item.id ? (next[0]?.id ?? "") : (currentDefault ?? "") },
-                    ];
-                  }, `已删除 ${item.name || item.id}`);
-                  if (selected === item.id) setSelected("");
-                }),
-              }, "删除")))),
+          React.createElement("p", { className: "mcfg-note" }, "每条配置是一个独立的 OpenAI Images 端点（地址 + Key + 上游模型），与「设置 → 模型」里的聊天模型无关。在模型页勾选「绘图」会自动生成配置；generate_image 默认使用标记为「默认」的那条。"),
+          models.length === 0
+            ? React.createElement("p", { className: "mcfg-note" }, "尚未配置。点「添加绘图模型」填供应商地址与 Key，再从模型列表里选一个即可。")
+            : models.map((item) => {
+              const isDefault = view.value?.defaultModel === item.id;
+              return React.createElement("div", { className: "mcfg-row mcfg-draw-row", key: item.id },
+                React.createElement("label", { className: "mcfg-draw-radio", title: isDefault ? "当前默认绘图模型" : "设为默认绘图模型" },
+                  React.createElement("input", {
+                    type: "radio",
+                    name: "drawing-default",
+                    checked: isDefault,
+                    disabled: !writable || !!form || isDefault,
+                    onChange: () => void action(() => commit(
+                      () => [{ op: "set", path: ["defaultModel"], value: item.id }],
+                      `已将 ${item.name || item.id} 设为默认`,
+                    )),
+                  })
+                ),
+                React.createElement("span", { className: "mcfg-draw-item" },
+                  React.createElement("span", { className: "mcfg-draw-name" },
+                    item.name || item.id,
+                    isDefault ? React.createElement("span", { className: "mcfg-chip mcfg-chip-on" }, "默认") : null
+                  ),
+                  React.createElement("span", { className: "mcfg-draw-meta" },
+                    "配置 " + item.id + " · 上游模型 " + item.model + (managedBy(item) ? " · " + managedBy(item) : "")
+                  )
+                ),
+                React.createElement("div", { className: "mcfg-actions2" },
+                  React.createElement("button", { disabled: !writable || !!form, onClick: () => { setForm({ ...item }); setEditing(item.id); setKey(""); setCatalog(null); } }, "编辑"),
+                  React.createElement("button", {
+                    disabled: !writable || !!form,
+                    onClick: () => void action(async () => {
+                      await commit((fresh) => {
+                        const next = imageModelsOf(fresh).filter((model) => model.id !== item.id);
+                        const currentDefault = fresh.value?.defaultModel;
+                        return [
+                          { op: "set", path: ["models"], value: next },
+                          { op: "set", path: ["defaultModel"], value: currentDefault === item.id ? (next[0]?.id ?? "") : (currentDefault ?? "") },
+                        ];
+                      }, `已删除 ${item.name || item.id}`);
+                      if (selected === item.id) setSelected("");
+                    }),
+                  }, "删除")));
+            }),
           React.createElement("div", { className: "mcfg-actions2" },
-            React.createElement("button", { disabled: !writable || !!form, onClick: () => { setForm(freshImageEntry()); setEditing(""); setKey(""); setCatalog(null); } }, "添加模型"),
+            React.createElement("button", { className: "mcfg-primary", disabled: !writable || !!form, onClick: () => { setForm(freshImageEntry()); setEditing(""); setKey(""); setCatalog(null); } }, "手动添加端点"),
             React.createElement("button", { onClick: () => void action(async () => { await refresh(); setForm(null); setKey(""); }) }, "重新加载")),
           !writable ? React.createElement("p", { className: "mcfg-note" }, "当前配置只读。") : null),
-        form ? React.createElement("fieldset", { disabled: busy }, React.createElement("legend", null, editing ? "编辑模型" : "添加模型"),
+        form ? React.createElement("fieldset", { disabled: busy }, React.createElement("legend", null, editing ? "编辑绘图模型" : "手动添加端点"),
+          React.createElement("p", { className: "mcfg-note" }, "通常不需要手动添加：在「设置 → 模型」里勾选模型行的「绘图」即可自动生成。这里用于没有对应聊天模型的独立端点。填写顺序：供应商 API 地址 → API Key →「获取模型列表」选择模型 → 保存。"),
           imageField("供应商 API 地址", form.endpoint.replace(/\/images\/generations\/?$/, ""), (value) => update("endpoint")(value.replace(/\/+$/, "").replace(/\/images\/generations$/, "") + "/images/generations"), { type: "url", placeholder: "https://api.example.com/v1" }),
           imageField("API Key（留空保留现有值）", key, (value) => { setKey(value); setCatalog(null); }, { type: "password", autoComplete: "new-password" }),
           React.createElement("button", { onClick: () => void action(discover) }, "获取模型列表"),
@@ -523,15 +659,19 @@ window.__ModuleLoader__.load({
             imageField("超时（秒）", form.timeoutSeconds, update("timeoutSeconds"), { type: "number", min: 10, max: 600 }),
             ...[["尺寸", "size"], ["质量", "quality"], ["背景", "background"], ["输出格式", "output_format"], ["响应格式", "response_format"], ["风格", "style"]].map(([label, name]) => imageField(`${label}（可选）`, form[name], update(name)))),
           React.createElement("p", { className: "mcfg-note" }, "可选参数留空则不发送。GPT Image 的响应格式请留空。Key 通过 dsh 凭据服务单独保存；同名引用会被其他模型共享。"),
-          editing && managedBy(form) ? React.createElement("p", { className: "mcfg-note" }, `该配置是旧版「模型参数」页留下的链接条目（${managedBy(form)}）；链接入口已在 v3 移除，端点与凭据可直接在这里修改或删除本条。`) : null),
+          editing && managedBy(form) ? React.createElement("p", { className: "mcfg-note" }, `该配置来自「设置 → 模型」里勾选的绘图模型（${managedBy(form)}）。推荐回到那边勾选/取消，端点与凭据会自动跟随 provider。`) : null),
           React.createElement("div", { className: "mcfg-actions2" }, React.createElement("button", { onClick: () => void action(save) }, "保存"), React.createElement("button", { onClick: () => { setForm(null); setKey(""); } }, "取消"))) : null,
-        React.createElement("fieldset", { disabled: busy || running }, React.createElement("legend", null, "直接绘图"),
-          React.createElement("label", { className: "mcfg-field2" }, "绘图模型", React.createElement("select", { value: selected, onChange: (event) => setSelected(event.target.value) },
-            React.createElement("option", { value: "" }, "使用默认模型"), ...models.map((item) => React.createElement("option", { key: item.id, value: item.id }, item.name || item.id)))),
-          React.createElement("label", { className: "mcfg-field2" }, "提示词", React.createElement("textarea", { value: prompt, onChange: (event) => setPrompt(event.target.value), placeholder: "描述你想生成的画面…" })),
-          imageField("图片数量", count, setCount, { type: "number", min: 1, max: 4 }),
-          React.createElement("button", { disabled: models.length === 0 || !prompt.trim(), onClick: () => void action(generate) }, "生成图片"),
-          React.createElement("p", { className: "mcfg-note" }, "点击生成会调用所选服务，可能产生费用。此面板不发送聊天历史，结果不插入对话。任务预览保留到宿主重启、过期或被后续任务替换前，请及时下载原图。")),
+        React.createElement("details", { className: "mcfg-advanced" },
+          React.createElement("summary", null, "直接绘图（可选，不经过聊天）"),
+          React.createElement("fieldset", { disabled: busy || running },
+            React.createElement("label", { className: "mcfg-field2" }, "绘图模型", React.createElement("select", { value: selected, onChange: (event) => setSelected(event.target.value) },
+              React.createElement("option", { value: "" }, "使用默认模型" + (defaultEntry ? `（${defaultEntry.name || defaultEntry.id}）` : "")),
+              ...models.map((item) => React.createElement("option", { key: item.id, value: item.id },
+                (item.name || item.id) + (view.value?.defaultModel === item.id ? "（默认）" : "") + " · " + item.model)))),
+            React.createElement("label", { className: "mcfg-field2" }, "提示词", React.createElement("textarea", { value: prompt, onChange: (event) => setPrompt(event.target.value), placeholder: "描述你想生成的画面…" })),
+            imageField("图片数量", count, setCount, { type: "number", min: 1, max: 4 }),
+            React.createElement("button", { className: "mcfg-primary", disabled: models.length === 0 || !prompt.trim(), onClick: () => void action(generate) }, "生成图片"),
+            React.createElement("p", { className: "mcfg-note" }, "点击生成会调用所选服务，可能产生费用。此面板不发送聊天历史，结果不插入对话。任务预览保留到宿主重启、过期或被后续任务替换前，请及时下载原图。"))),
         running ? React.createElement("div", { role: "status" }, "正在生成… ", React.createElement("button", { onClick: () => void action(async () => { await call("cancel", { jobId }); }) }, "取消等待")) : null,
         job?.status === "error" ? React.createElement("div", { className: "mcfg-error", role: "alert" }, job.error) : null,
         job?.result ? React.createElement("div", { className: "mcfg-gallery" }, job.result.images.map((image, index) => React.createElement(PanelImage, { key: `${jobId}-${index}`, call, jobId, image, index }))) : null);
@@ -576,7 +716,7 @@ window.__ModuleLoader__.load({
         React.createElement("div", { className: "mcfg-head" },
           React.createElement("div", { className: "mcfg-title" }, "绘图"),
           React.createElement("div", { className: "mcfg-sub" },
-            "独立配置绘图模型：聊天里可让助手调用 generate_image / list_image_models，也可在下方直接生成。绘图模型不进入聊天模型列表。"
+            "这里管理 generate_image 使用的绘图模型。通常不用手动配置：去「设置 → 模型」给某个模型勾选「绘图」即可自动生成一条；标为默认的那条就是 generate_image 的默认模型。"
               + (writable ? "" : "（当前部署为只读，无法保存。）")
           )
         ),
@@ -612,13 +752,13 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => { void reload(); }, [reload]);
 
-      async function commit(kind, modelId, value) {
+      async function commit(kind, modelId, value, message) {
         setBusy(true);
         setToast(null);
         try {
           await save(provider.provider, modelId, kind, value);
           await reload();
-          setToast({ kind: "ok", text: "已保存，下一次请求生效" });
+          setToast({ kind: "ok", text: message || "已保存，下一次请求生效" });
         } catch (err) {
           setToast({ kind: "err", text: err && err.message ? err.message : String(err) });
         } finally {
@@ -635,14 +775,52 @@ window.__ModuleLoader__.load({
       const editable = !busy && data.writable;
       const overridden = data.models.filter((model) => model.hasOverride).length;
 
-      return React.createElement("details", { className: "mcfg-compat" },
+      const imageModels = data.models.filter((model) => model.imageAvailable);
+      const linkedCount = imageModels.filter((model) => model.imageLinked).length;
+      const toastLine = toast
+        ? React.createElement("div", { className: "mcfg-toast " + (toast.kind === "ok" ? "mcfg-toast-ok" : "mcfg-toast-err"), role: "status" }, toast.text)
+        : null;
+
+      // Drawing link lives next to the compat switches because both are
+      // per-model add-ons to the official Models page; this is also where the
+      // old 模型调参 page offered its 「生图模型」 checkbox.
+      const drawingSection = imageModels.length === 0 ? null : React.createElement("details", { className: "mcfg-compat" },
+        React.createElement("summary", { className: "mcfg-compat-head" },
+          React.createElement("span", null, "绘图模型（generate_image）"),
+          React.createElement("span", { className: linkedCount > 0 ? "mcfg-chip mcfg-chip-on" : "mcfg-chip" },
+            linkedCount > 0 ? linkedCount + " 个已勾选" : "未勾选"),
+          React.createElement("span", { className: "mcfg-compat-hint" }, "勾选后自动加入「设置 → 绘图」")
+        ),
+        React.createElement("div", { className: "mcfg-compat-list" },
+          imageModels.map((model) => React.createElement("label", {
+            key: model.id, className: "mcfg-draw-check",
+            title: "复用本 provider 的地址与凭据引用，自动生成一条绘图配置（generate_image 可直接使用）",
+          },
+            React.createElement("input", {
+              type: "checkbox",
+              checked: model.imageLinked,
+              disabled: !editable,
+              onChange: () => void commit(
+                "imageLink",
+                model.id,
+                !model.imageLinked,
+                model.imageLinked ? "已从「设置 → 绘图」移除" : "已加入「设置 → 绘图」",
+              ),
+            }),
+            React.createElement("span", { className: "mcfg-draw-check-name" }, model.name || model.id),
+            React.createElement("span", { className: "mcfg-draw-check-meta" },
+              model.imageLinked ? "已加入绘图配置" : "未加入")
+          ))
+        )
+      );
+
+      const compatSection = React.createElement("details", { className: "mcfg-compat" },
         React.createElement("summary", { className: "mcfg-compat-head" },
           React.createElement("span", null, "兼容与推理（插件补充）"),
           React.createElement("span", { className: overridden > 0 ? "mcfg-chip mcfg-chip-on" : "mcfg-chip" },
             overridden > 0 ? overridden + " 个模型有覆盖" : data.models.length + " 个模型"),
           React.createElement("span", { className: "mcfg-compat-hint" }, "官方 Models 页没有这些控件")
         ),
-        toast ? React.createElement("div", { className: "mcfg-toast " + (toast.kind === "ok" ? "mcfg-toast-ok" : "mcfg-toast-err"), role: "status" }, toast.text) : null,
         React.createElement("div", { className: "mcfg-compat-list" },
           data.models.map((model) => {
             const levelsOpen = openLevels === model.id;
@@ -706,9 +884,10 @@ window.__ModuleLoader__.load({
               ) : null
             );
           })
-        ),
-        React.createElement("div", { className: "mcfg-note" }, "改动即时保存；只有改过某一个模型时，该模型才出现在上方计数里。")
+        )
       );
+
+      return React.createElement(React.Fragment, null, toastLine, drawingSection, compatSection);
     }
 
     /** Styles the official Models card extension (collapsed summary + one compact row per model). */
@@ -730,6 +909,11 @@ window.__ModuleLoader__.load({
 .mcfg-mini-button:hover{border-color:rgba(128,128,128,.65)}
 .mcfg-mini-button:disabled{opacity:.5;cursor:not-allowed}
 .mcfg-mini-button-on{border-color:rgba(80,140,255,.75);background:rgba(80,140,255,.12)}
+.mcfg-draw-check{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:8px;font-size:12.5px;cursor:pointer}
+.mcfg-draw-check:hover{background:rgba(128,128,128,.08)}
+.mcfg-draw-check input{accent-color:rgb(80,140,255)}
+.mcfg-draw-check-name{flex:1 1 130px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mcfg-draw-check-meta{font-size:11.5px;opacity:.55}
 .mcfg-compat-levels{display:flex;flex-direction:column;gap:6px;padding:2px 0 4px 2px}
 `;
 
@@ -764,11 +948,12 @@ window.__ModuleLoader__.load({
         if (!entry) throw new Error("该 provider 不可配置");
         const namespaces = Array.isArray(settings.namespaces) ? settings.namespaces : [];
         const nsView = namespaces.find((item) => item && item.ns === entry.settingsNs);
+        const ownView = namespaces.find((item) => item && item.ns === NS);
         const groups = Array.isArray(catalog.groups) ? catalog.groups : [];
         const group = groups.find((item) => item && item.id === providerId);
         const profile = profileOf(nsView, entry.settingsPath);
         return {
-          entry, nsView, group, profile,
+          entry, nsView, ownView, group, profile,
           adaptiveKey: adaptiveThinkingCompatKey(entry.settingsNs, profile),
           writable: settings.writable !== false,
         };
@@ -789,6 +974,8 @@ window.__ModuleLoader__.load({
           const adaptive = snapshot.adaptiveKey !== null
             ? readCompatField(nsView, entry.settingsPath, model.id, snapshot.adaptiveKey)
             : undefined;
+          const image = computeImageModelState(snapshot.ownView, snapshot.profile, model.id);
+          const hasBaseURL = typeof snapshot.profile?.baseURL === "string" && snapshot.profile.baseURL.trim() !== "";
           return {
             id: model.id,
             name: model.name,
@@ -800,6 +987,11 @@ window.__ModuleLoader__.load({
             reasoningEditable: entry.settingsNs === "llm-pi-ai" && entry.declared !== true,
             levels: stored === false ? [] : levels,
             hasReasoningOverride: stored !== undefined,
+            // Drawing link: only a model whose provider carries a base URL can
+            // derive an OpenAI-Images endpoint (and reuse its credential ref).
+            imageAvailable: image.available && hasBaseURL,
+            imageLinked: image.hasEntry,
+            imageManaged: image.managed,
             // Count only fields this plugin actually wrote: catalog-declared
             // reasoning levels are the model's own capability, not an override.
             hasOverride: devRole !== undefined || adaptive !== undefined || stored !== undefined,
@@ -813,6 +1005,25 @@ window.__ModuleLoader__.load({
         const snapshot = await compatSnapshot(providerId);
         const entry = snapshot.entry;
         const nsView = snapshot.nsView;
+        if (kind === "imageLink") {
+          // The drawing list lives in this plugin's own namespace; re-read it
+          // right before writing so the plan and its revision come from one
+          // document (the same discipline the drawing page uses).
+          const freshSettings = unwrap(await remote.settings.describe());
+          const namespaces = Array.isArray(freshSettings.namespaces) ? freshSettings.namespaces : [];
+          const freshOwn = namespaces.find((item) => item && item.ns === NS);
+          if (!freshOwn) throw new Error("model-tuning 宿主行未激活，无法写入绘图配置");
+          const plan = value === true
+            ? planImageLink(freshOwn, snapshot.profile, modelId, providerId)
+            : planImageUnlink(freshOwn, modelId);
+          if (!plan || !plan.models) throw new Error((plan && plan.reason) || "无法写入绘图配置");
+          const response = await remote.settings.mutate(NS, [
+            { op: "set", path: ["models"], value: plan.models },
+            { op: "set", path: ["defaultModel"], value: plan.defaultModel || "" },
+          ], freshOwn.revision);
+          if (!response.ok) throw new Error(response.error && response.error.message ? response.error.message : "保存失败");
+          return;
+        }
         let write;
         if (kind === "supportsDeveloperRole" || kind === "adaptiveThinking") {
           if (value !== null && typeof value !== "boolean") throw new Error("取值必须是布尔值");

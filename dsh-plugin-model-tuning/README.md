@@ -16,6 +16,7 @@
 | **系统提示角色** `自动 / system / developer` | 模型条目的 `compat.supportsDeveloperRole` | 网关报 `role 'developer' is not allowed`（Kimi、部分 DeepSeek 网关）时改发 `system` |
 | **思考格式** `自动 / 自适应 thinking` | 模型条目的 `compat.forceAdaptiveThinking` | Claude Opus 4.6+ / Sonnet 5 等只接受 `thinking.type=adaptive`，预算式请求会被 400 `requires adaptive thinking` 拒绝 |
 | **可选推理档位**（内置目录路由） | 路由的 `modelOverrides.<id>.reasoningEfforts` | 官方只给**手写路由**的模型显示推理档位；内置目录路由借用 `modelOverrides` 声明/关掉档位，写入时保留官方已存的每档 API 值 |
+| **绘图模型** 勾选 | 本插件的 `models` / `defaultModel` | 把该 provider 下的模型接到 `generate_image`：自动复用 provider 的 `baseURL`（+ `/images/generations`）与 `apiKeyEnv`，并在「设置 → 绘图」生成一条配置（对应旧版「模型参数 → 生图模型」勾选） |
 
 说明：
 
@@ -24,16 +25,26 @@
 - 写入走 provider 自己的 settings 命名空间（`llm-pi-ai`），下一次请求生效，无需重启。
 - 「系统提示角色」的字段名与协议白名单由 `@deepseek-ai/dsh-llm-pi-ai` 决定；上游改名/收窄会在 `tests/adaptive-thinking.test.mjs` 的耦合守卫里失败，而不是在会话里变成 400。
 
-## 2. 绘图页
+## 2. 绘图（generate_image）
 
-独立配置绘图模型，不进入聊天模型列表、不改动会话存储或对话 provider。
+给模型一个扩散模型绘图工具；绘图配置不进入聊天模型列表、不改动会话存储或对话 provider。
 
-- 添加模型：填供应商 API 地址（默认 `https://api.openai.com/v1`）与 API Key，点「获取模型列表」搜索并选择（只请求目录、不生成、不保存草稿 Key；模型 ID 可手填）；
-- 首个模型自动成为默认项；尺寸、质量、超时等高级参数按模型配置；
-- 直接绘图面板：短请求启动任务 + 轮询状态 + 取消，不经过聊天模型；
-- 聊天中由助手调用：
-  - `list_image_models`：列出配置 ID、上游模型 ID 与默认参数；
-  - `generate_image`：按配置发起 OpenAI Images 请求（1–4 张），原图逐字节保留；当前聊天模型声明了图像输入时，预览也进模型上下文。
+**主要用法：在「设置 → 模型」里勾选。** 展开某个 pi-ai provider 卡片 → 「绘图模型（generate_image）」→ 勾上要用的模型。勾选会：
+
+- 复用该 provider 的 `baseURL` 推导 `…/images/generations`，复用其 `apiKeyEnv` 凭据引用（不用重新填 Key）；
+- 在「设置 → 绘图」生成一条配置；第一个生成的配置自动成为默认；
+- 取消勾选只移除由此勾选生成的配置（手工添加的条目不受影响）。
+
+**「设置 → 绘图」页**用于查看和管理这些配置：
+
+- 单选按钮切换默认绘图模型（`generate_image` 不带 `model` 参数时用它）；
+- 「手动添加端点」：给没有对应聊天模型的独立 Images 端点用（地址 + Key + 模型列表/手填模型 ID，高级参数在折叠区）；
+- 底部「直接绘图（可选）」：不经过聊天，直接提交提示词、轮询状态、取消。
+
+聊天中由助手调用：
+
+- `list_image_models`：列出配置 ID、上游模型 ID 与默认参数；
+- `generate_image`：按配置发起 OpenAI Images 请求（1–4 张），原图逐字节保留；当前聊天模型声明了图像输入时，预览也进模型上下文。
 
 协议：OpenAI Images（`POST`，解析 `data[].b64_json` 或 `data[].url`）。凭据通过 dsh 凭据服务保存为引用（`apiKeyEnv`），不写明文。
 
@@ -77,7 +88,7 @@ v2 的标题字段（`titleMode` / `titleProvider` / `titleModel` 与四个预�
 
    官方可选组合包「随对话更新的标题」也不再与本插件互斥。
 2. **模型参数**：上下文窗口、最大输出、输入模态、模型列表、API Key、模型发现都在官方「设置 → 模型」页；本插件只保留上表的三项官方缺口。
-3. **绘图**：配置键（`models` / `defaultModel`）与命名空间都没变，升级后原配置继续生效。旧版「模型参数 → 生图模型」勾选留下的条目（带 `source` 标记）仍可显示与编辑，链接入口已移除。
+3. **绘图**：配置键（`models` / `defaultModel`）与命名空间都没变，升级后原配置继续生效；「在模型行勾选生图模型」的入口已恢复，只是位置从旧「模型参数」页移到了官方「设置 → 模型」的 provider 卡片里。
 
 ## 安装 / 卸载
 
@@ -101,6 +112,7 @@ node --test tests/*.test.mjs
 ```
 
 - `image.test.mjs`：绘图传输、工具 schema、Remote 方法与热配置（本地 HTTP，不外联）；
+- `image-link.test.mjs`：模型行「绘图」勾选的推导与增量写入（端点/凭据复用、默认项、取消勾选只删自己创建的条目）；
 - `reasoning-efforts.test.mjs`：推理档位写入规划，不覆盖官方已存 API 值；
 - `adaptive-thinking.test.mjs`：思考格式开关的写入规划 + 对已部署 pi-ai 的请求体耦合守卫（需要 `DSH_TEST_DEPLOY_ROOT`，跳过时不算失败）。
 
