@@ -41,5 +41,23 @@
 ## 交付约定
 
 - 新插件放在 `dsh-plugin-<name>/` 目录；凭据、临时 profile、截图等产物不要提交（见 `.gitignore`）。
-- 发布 npm 前先在仓库根跑 `./publish.ps1`（dry-run）确认文件清单；`-Publish` 需要用户明确同意且 `npm login` 已完成。
+- 发布 npm 前先在仓库根跑 `./publish.ps1`（dry-run）确认文件清单；`-Publish` 需要用户明确同意。
 - 发版纪律：已发布版本号不可复用；改代码必须 bump `package.json` 的 `version`。
+
+## npm 发布与凭据（用户 2026-10-17 交代）
+
+- 用户的 `NPM_TOKEN` 在 **PowerShell profile 里设置**（`~/.npmrc` 里是 `//registry.npmjs.org/:_authToken=${NPM_TOKEN}`）。
+  注意：DSH 的 shell 子进程是 `pwsh -NoProfile` 启动的，**默认看不到该变量**，直接跑 `npm whoami` 会 E401；
+  发版必须再套一层**会加载 profile 的 pwsh**：
+
+  ```powershell
+  pwsh -NoLogo -File publish.ps1            # dry-run 预览（加载 profile → NPM_TOKEN 生效）
+  pwsh -NoLogo -File publish.ps1 -Publish dsh-plugin-billing-card tofu-box
+  ```
+
+- **绝不回显、打印、写入文件或在命令行明文出现 token**；只用环境变量透传。不要把 token 加进仓库、日志或提交信息。
+- 发布顺序：先发子包，再发 `tofu-box` 伞包（伞包的 dependencies 依赖子包已发布版本）。
+- 伞包成员由 `tools/check-umbrella-sync.mjs` 强制：所有 git 已跟踪且非 `private` 的 `dsh-plugin-*` 都必须同步进
+  `tofu-box`（`patches/<name>.yml` 逐字节副本、`dependencies` 精确 `^当前版本`、`dsh.bundle.patch` 数组、peer 并集）。
+  新增插件后必须补齐这几处并让 `node tools/check-umbrella-sync.mjs` 通过，否则 `publish.ps1` 会中止。
+- 发布后核对：`npm view <pkg> version` 与 tarball 文件清单（`npm pack --dry-run`）；README 里的版本号同步更新。
