@@ -1,6 +1,6 @@
 {
   "name": "tofu-box",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "license": "MIT",
   "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "tofu-box", "pack"],
   "publishConfig": { "registry": "https://registry.npmjs.org" },
@@ -11,7 +11,7 @@
   "type": "module",
   "dependencies": {
     "dsh-plugin-model-tuning": "^3.0.0",
-    "dsh-plugin-read-image-preview": "^1.6.0",
+    "dsh-plugin-read-image-preview": "^1.7.0",
     "dsh-plugin-shell-selector": "^0.1.0",
     "dsh-plugin-computer-use": "^2.5.0",
     "dsh-plugin-mcp-ui": "^1.0.3"
