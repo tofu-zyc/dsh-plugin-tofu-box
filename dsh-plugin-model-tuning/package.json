@@ -1,13 +1,13 @@
 {
   "name": "dsh-plugin-model-tuning",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "license": "MIT",
-  "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "model", "settings", "reasoning", "context", "session-title", "image-generation"],
+  "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "model", "settings", "reasoning", "compat", "image-generation"],
   "publishConfig": { "registry": "https://registry.npmjs.org" },
   "repository": { "type": "git", "url": "git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git", "directory": "dsh-plugin-model-tuning" },
   "bugs": { "url": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/issues" },
   "homepage": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/tree/main/dsh-plugin-model-tuning",
-  "description": "「设置 → 模型调参」页：模型参数（推理档位/上下文/最大输出/输入模态）、「用途」页（标题生成独立路由，替换宿主标题行）、「绘图」页（绘图模型配置 + generate_image 工具 + 直接绘图面板）。v2 合并了原 dsh-plugin-title-model 与 dsh-plugin-image-generation。",
+  "description": "只补官方没有的两块：①「设置 → 模型」卡片里的兼容开关与内置目录路由推理覆盖（官方 Models 页没有的 compat.supportsDeveloperRole / compat.forceAdaptiveThinking / modelOverrides.reasoningEfforts）；②「设置 → 绘图」页（绘图模型配置 + generate_image / list_image_models 工具 + 直接绘图面板）。v3 起标题生成路由交还官方 session-title 行，模型参数页交还官方 Models 页。",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -24,7 +24,7 @@
       "platform": "web",
       "inject": [
         "@deepseek-ai/dsh-client-ui-settings",
-        "@deepseek-ai/dsh-client-ui-tool",
+        "@deepseek-ai/dsh-client-ui-settings-models",
         "@deepseek-ai/dsh-api-remotes"
       ]
     }
@@ -32,13 +32,7 @@
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": ">=0.1.6-alpha.1",
     "@deepseek-ai/dsh-typert-protocol": ">=0.1.6-alpha.1",
-    "@deepseek-ai/schemastery": "^3.18.2",
-    "@deepseek-ai/dsh-session-title-llm": ">=0.1.6-alpha.2"
-  },
-  "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-session-title-llm": {
-      "optional": true
-    }
+    "@deepseek-ai/schemastery": "^3.18.2"
   },
   "scripts": {
     "test": "node --test tests/*.test.mjs"

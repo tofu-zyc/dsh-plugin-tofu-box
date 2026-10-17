@@ -23,6 +23,8 @@ dist/
 /.dsh-017rc1-test/
 # Persistent production copy installed only during an approved cutover.
 /.dsh-017-prod/
+# Isolated dsh home + rc test profile for plugin development; never the live desktop profile.
+/.dsh-rc-test/
 /deepseek-harness/
 /.workbuddy/
 /.chrome-new-instance/

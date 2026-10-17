@@ -1,34 +1,17 @@
 /**
- * Host half of `dsh-plugin-model-tuning` (v2: merged with the former
- * `dsh-plugin-title-model` and `dsh-plugin-image-generation`).
+ * Host half of `dsh-plugin-model-tuning` v3.
  *
- * Three responsibilities, one entry:
- *
- * 1. Session-title routing (ex dsh-plugin-title-model). This plugin REPLACES
- *    the deployment's shipped title provider row
- *    (`@deepseek-ai/dsh-session-title-first-prompt-llm`) through the bundle
- *    patch in `cordis.patch.yml`. It is still exactly one provider:
- *    `ctx.sessionTitle.register()` throws on a second registration, so a
- *    competing generator cannot coexist. Everything except the route is
- *    delegated to the public shared policy (`executeSessionTitleLlm`, or
- *    `generateSessionTitleWithLlm` before dsh 0.2.1) from
- *    `@deepseek-ai/dsh-session-title-llm`, resolved from the RUNNING
- *    deployment (see hostRequire) — never from this package's directory, which
- *    for a linked workspace package would risk a second copy of the host's
- *    shared module graph.
- *
- * 2. Image generation (ex dsh-plugin-image-generation): the `generate_image`
- *    and `list_image_models` tools plus the `imageGeneration` Remote service
- *    that the 直接绘图 panel drives. Transport lives in `./core.js`.
- *
- * 3. Nothing else: the settings surface (模型参数 / 用途 / 绘图 tabs) lives in
- *    the browser implementation exported from `./client`.
+ * v3 keeps exactly one capability here: image generation (the former
+ * `dsh-plugin-image-generation`). Session-title routing was removed because the
+ * host's own `@deepseek-ai/dsh-session-title-first-prompt-llm` row already
+ * supports a provider/model route plus budgets in its Config; configure it in
+ * the profile's `cordis.patch.yml`. The per-model compatibility switches and
+ * the catalog-route reasoning override need no host half: the browser half
+ * writes the provider's settings namespace directly.
  *
  * @module dsh-plugin-model-tuning
  */
 import { randomUUID } from 'node:crypto'
-import { pathToFileURL } from 'node:url'
-import { createRequire } from 'node:module'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { TypertRemoteService, RemoteError } from '@deepseek-ai/dsh-typert-protocol'
@@ -37,27 +20,12 @@ import { discoverImageModels, generateImages, resolveRequest, validateConfig } f
 export const name = 'dsh-plugin-model-tuning'
 
 /** Services this plugin reads. */
-export const inject = ['tools', 'attachments', 'sessionTitle', 'llm']
+export const inject = ['tools', 'attachments']
 
-/** Settings namespace owned by this plugin (one entry, one schema). */
+/** Settings namespace owned by this plugin. */
 export const NS = 'model-tuning'
 
-/**
- * Provider identity recorded with generated titles. Kept equal to the row this
- * plugin replaces so durable logs and the folded title source stay unchanged.
- */
-const TITLE_PROVIDER_ID = 'session-title-llm'
-
-/**
- * Unified Config: image-generation fields (models / defaultModel) plus the
- * title route fields (titleMode / titleProvider / titleModel), all volatile.
- *
- * The title budget fields mirror the `session-title-llm` config in
- * `@deepseek-ai/dsh-base` so that removing this bundle's `config:` block
- * cannot change title behaviour. Title fields are prefixed `title` so the
- * pre-merge `title-model` section could be migrated mechanically; the former
- * `image-generation` section's `models`/`defaultModel` keys are kept verbatim.
- */
+/** One drawing model. `source` is legacy provenance kept so old linked entries still parse. */
 const imageModelSchema = z.object({
   id: z.string().required(), name: z.string(), model: z.string().required(),
   api: z.union(['openai-images']).default('openai-images'),
@@ -72,218 +40,15 @@ const imageModelSchema = z.object({
   output_format: z.string(), response_format: z.string(), style: z.string(),
 })
 
+/**
+ * Config: drawing models only. Removed v2 title fields (`titleMode` etc.) are
+ * tolerated by the loader's schema and ignored, so an existing profile keeps
+ * loading without a migration step.
+ */
 export const Config = z.object({
-  // ── 绘图（ex image-generation；键名原样保留，旧数据可直接搬入） ──
   models: z.array(imageModelSchema).default([]).volatile(),
   defaultModel: z.string().volatile(),
-  // ── 标题生成（ex title-model；title 前缀迁移自 mode/provider/model） ──
-  titleMode: z.union([z.const('inherit'), z.const('custom')]).default('inherit').volatile(),
-  titleProvider: z.string().volatile(),
-  titleModel: z.string().volatile(),
-  // ── 标题请求预算（用户可在「用途」页改；默认值与 dsh-base 的 session-title-llm 行一致） ──
-  targetWords: z.number().step(1).min(1).default(5).volatile(),
-  targetCjkCharacters: z.number().step(1).min(1).default(10).volatile(),
-  maxInputBytes: z.number().step(1).min(1).default(4096).volatile(),
-  maxOutputTokens: z.number().step(1).min(1).default(64).volatile(),
-  timeoutMs: z.number().step(1).min(1).default(60000).volatile(),
 })
-
-/** Reject a custom title mode that cannot name both halves of a route. */
-export function validateTitleModel(value) {
-  const provider = value?.titleProvider
-  const model = value?.titleModel
-  const hasProvider = provider !== undefined && provider !== null && provider !== ''
-  const hasModel = model !== undefined && model !== null && model !== ''
-  if (hasProvider !== hasModel) throw new Error('model-tuning: titleProvider 与 titleModel 必须同时填写或同时留空')
-  if (value?.titleMode === 'custom' && !hasProvider) throw new Error('model-tuning: titleMode 为 custom 时必须同时选择 provider 与 model')
-}
-
-/**
- * Resolve the exact route recorded for one generation request.
- * @param settings - resolved title fields (`titleMode`/`titleProvider`/`titleModel`).
- * @param request - service-owned request carrying the session's logged route.
- * @returns the provider/model pair to dispatch.
- */
-export function resolveTitleRoute(settings, request) {
-  validateTitleModel(settings)
-  if (settings?.titleMode === 'custom') {
-    return { provider: settings.titleProvider, model: settings.titleModel }
-  }
-  if (request?.route === undefined) {
-    throw new Error('session-title-llm: no logged request route is available; configure provider and model together')
-  }
-  return { provider: request.route.provider, model: request.route.model }
-}
-
-/** The shared title policy module, loaded once per process. */
-const HELPER_PACKAGE = '@deepseek-ai/dsh-session-title-llm'
-
-/**
- * Resolve the shared title policy.
- *
- * A plain `import '@deepseek-ai/dsh-session-title-llm'` would have to be
- * resolvable from THIS package's directory, which for a linked workspace package
- * means risking another installation of the host's shared module graph. The
- * helper therefore resolves from the deployment that loads this plugin.
- */
-function hostRequire() {
-  const anchors = [process.argv[1], process.execPath, import.meta.url]
-  for (const anchor of anchors) {
-    if (anchor === undefined) continue
-    try {
-      const require = createRequire(anchor)
-      require.resolve(HELPER_PACKAGE)
-      return require
-    } catch {
-      // Try the next anchor: a test or tool process may not sit inside the deployment.
-    }
-  }
-  return undefined
-}
-
-/** Title-service package that owns `normalizeSessionTitle`; resolved next to the helper. */
-const TITLE_SERVICE_PACKAGE = '@deepseek-ai/dsh-session-title'
-
-/**
- * Language-aware system instruction, mirroring the shipped first-prompt
- * provider (dsh ≥ 0.2.1 hands prompt ownership to each provider).
- * @param budget - the live title budget.
- * @returns the system prompt.
- */
-export function titleSystemPrompt(budget) {
-  return [
-    'Create a concise title for an AI coding-assistant session from the supplied human messages.',
-    'Return only the title on one line, **in plain text of natural language**, with no quotes, prefix, explanation, Markdown, XML, or terminal control codes. No code is allowed.',
-    'Use the language of the messages.',
-    `Aim for about ${budget.targetWords} words in non-CJK languages or ${budget.targetCjkCharacters} CJK characters.`,
-    'If the messages give little to name, still return a short best-effort title, such as Greeting, instead of explaining.',
-  ].join('\n')
-}
-
-/** Asterisk emphasis wrapping a whole line, such as `**Title**`. */
-const EMPHASIS_WRAPPER = /^(?<marker>\*{1,3})(?<inner>\S(?:.*\S)?)\k<marker>$/u
-
-/**
- * Take the title from model output: the first non-empty line, without
- * asterisk emphasis wrapping that whole line (same rule as the shipped provider).
- * @param text - the joined text blocks.
- * @returns the raw title line.
- */
-export function titleFromOutput(text) {
-  const line = text.split(/\r?\n/u).map(item => item.trim()).find(item => item.length > 0) ?? ''
-  const groups = EMPHASIS_WRAPPER.exec(line)?.groups
-  const marker = groups?.marker
-  const inner = groups?.inner
-  return marker === undefined || inner === undefined || inner.includes(marker) ? line : inner
-}
-
-/**
- * Adapt the prepared-request API (`executeSessionTitleLlm`, dsh ≥ 0.2.1) to the
- * one-call shape this plugin drives.
- * @param execute - the host's `executeSessionTitleLlm`.
- * @param normalize - the host's `normalizeSessionTitle`.
- * @returns `(ctx, budget, request, selected, providerId) => { title, messageSeqs, model }`.
- */
-export function preparedTitleGenerator(execute, normalize) {
-  return async (ctx, budget, request, selected, providerId) => {
-    const config = { maxInputBytes: budget.maxInputBytes, maxOutputTokens: budget.maxOutputTokens, timeoutMs: budget.timeoutMs }
-    const messageSeqs = selected.map(message => message.seq)
-    const response = await execute(ctx, config, request, providerId, {
-      system: titleSystemPrompt(budget),
-      input: `Generate the session title from this JSON array of human messages:\n${JSON.stringify(selected)}`,
-      messageSeqs,
-      // A title needs no deliberation: take the route's least effort.
-      selectReasoningEffort: model => model.reasoning?.efforts?.[0]?.id,
-    })
-    if (response.finish.kind === 'tool-calls' || response.blocks.some(block => block.type === 'tool-call')) {
-      throw new Error('session-title-llm: title output must contain text only')
-    }
-    if (response.finish.kind === 'max-tokens') {
-      throw new Error('session-title-llm: title output reached maxOutputTokens')
-    }
-    const text = response.blocks.filter(block => block.type === 'text').map(block => block.text).join(' ')
-    const title = normalize(titleFromOutput(text), Number.MAX_SAFE_INTEGER)
-    if (title.length === 0) throw new Error('session-title-llm: title model produced no text')
-    return { title, messageSeqs, model: response.model }
-  }
-}
-
-let helperPromise
-/**
- * Load a title generator from the running deployment: the prepared-request
- * API when the host has it (≥ 0.2.1), else the one-call
- * `generateSessionTitleWithLlm` (0.1.7 – 0.2.0).
- */
-function loadTitleHelper() {
-  helperPromise ??= (async () => {
-    const require = hostRequire()
-    if (require === undefined) {
-      throw new Error(
-        `model-tuning: 无法从宿主解析 ${HELPER_PACKAGE}；本插件必须与提供该包的部署一起运行。`,
-      )
-    }
-    const helperPath = require.resolve(HELPER_PACKAGE)
-    const loaded = await import(pathToFileURL(helperPath).href)
-    if (typeof loaded.executeSessionTitleLlm === 'function') {
-      const service = await import(pathToFileURL(createRequire(helperPath).resolve(TITLE_SERVICE_PACKAGE)).href)
-      if (typeof service.normalizeSessionTitle !== 'function') {
-        throw new Error(`model-tuning: ${TITLE_SERVICE_PACKAGE} 未导出 normalizeSessionTitle`)
-      }
-      return preparedTitleGenerator(loaded.executeSessionTitleLlm, service.normalizeSessionTitle)
-    }
-    if (typeof loaded.generateSessionTitleWithLlm === 'function') return loaded.generateSessionTitleWithLlm
-    throw new Error(`model-tuning: ${HELPER_PACKAGE} 既没有 executeSessionTitleLlm 也没有 generateSessionTitleWithLlm`)
-  })()
-  return helperPromise
-}
-
-/**
- * Read the live title budget.
- *
- * Every field is user-editable from the 用途 tab, so each generation re-reads
- * them instead of freezing the apply-time values. A reasoning model that only
- * starts answering after a long think needs a larger `maxOutputTokens` here;
- * that is the user's call, not a constant in this file.
- * @param config - the plugin's live Config.
- * @returns the prompt/byte/token/timeout policy for one title request.
- */
-export function titleBudgetOf(config) {
-  const policy = {
-    targetWords: config.targetWords.get(),
-    targetCjkCharacters: config.targetCjkCharacters.get(),
-    maxInputBytes: config.maxInputBytes.get(),
-    maxOutputTokens: config.maxOutputTokens.get(),
-    timeoutMs: config.timeoutMs.get(),
-  }
-  for (const [key, value] of Object.entries(policy)) {
-    if (!Number.isInteger(value) || value < 1) throw new Error(`model-tuning: ${key} 必须是正整数`)
-  }
-  return policy
-}
-
-/**
- * Register the settings-owned title provider.
- * @param ctx - context exposing session-title and LLM services.
- * @param config - the live Config (route and budget are re-read per generation).
- */
-export async function registerTitleProvider(ctx, config) {
-  const generateTitle = await loadTitleHelper()
-  validateTitleModel({ titleMode: config.titleMode.get(), titleProvider: config.titleProvider.get(), titleModel: config.titleModel.get() })
-  titleBudgetOf(config)
-  ctx.sessionTitle.register({
-    id: TITLE_PROVIDER_ID,
-    automatic: 'first-prompt',
-    async generate(request) {
-      const route = resolveTitleRoute({
-        titleMode: config.titleMode.get(), titleProvider: config.titleProvider.get(), titleModel: config.titleModel.get(),
-      }, request)
-      const selected = request.messages.slice(0, 1)
-      return await generateTitle(ctx, titleBudgetOf(config), { ...request, route }, selected, TITLE_PROVIDER_ID)
-    },
-  })
-}
-
-// ── 绘图：工具 + Remote 服务（ex dsh-plugin-image-generation/index.js） ──
 
 const IMAGE_PARAMETERS = {
   model: { type: 'string', description: 'Configuration ID from list_image_models, not the upstream model ID. Omit to use the configured default.' },
@@ -434,18 +199,10 @@ export function registerImageTools(ctx, config) {
 }
 
 /**
- * Register everything: title provider, image tools, and the Remote service.
- * @param ctx - context exposing tools, attachments, sessionTitle and llm.
- * @param config - the unified Config described above.
+ * Register the drawing tools and their Remote service.
+ * @param ctx - context exposing tools, attachments and llm.
+ * @param config - the drawing Config.
  */
-export async function apply(ctx, config) {
-  // The title route leans on a host helper whose API has changed between
-  // releases. If it breaks again, lose only title routing — never the image
-  // tools and settings page that ride on the same row.
-  try {
-    await registerTitleProvider(ctx, config)
-  } catch (error) {
-    ctx.logger?.warn?.(`model-tuning: 标题路由未启用（${error instanceof Error ? error.message : String(error)}）；绘图与设置页照常工作`)
-  }
+export function apply(ctx, config) {
   registerImageTools(ctx, config)
 }

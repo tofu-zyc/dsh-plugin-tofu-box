@@ -5,7 +5,6 @@ window.__ModuleLoader__.load({
     var exports = module.exports;
     Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
     const React = require("react");
-
     const CSS = `
 .mcfg{display:flex;flex-direction:column;gap:16px;padding:4px 0 24px;color:inherit}
 .mcfg-head{display:flex;flex-direction:column;gap:4px}
@@ -44,8 +43,8 @@ window.__ModuleLoader__.load({
 .mcfg-select,.mcfg-input{font-size:12.5px;padding:6px 8px;border-radius:7px;border:1px solid rgba(128,128,128,.4);background:transparent;color:inherit;width:100%;box-sizing:border-box}
 .mcfg-custom{width:100%}
 .mcfg-input:disabled,.mcfg-select:disabled{opacity:.5;cursor:not-allowed}
-/* 模型参数 / 用途 / 绘图 三个页签：v2 起 title-model 与 image-generation
-   并入本插件，标题路由与绘图模型列表都是本命名空间自己的字段。 */
+/* 页签样式：v3 起设置页只剩「绘图」一页，页签控件不再使用，样式保留给
+   未来多页布局，不影响当前渲染。 */
 .mcfg-tabs{display:flex;gap:6px;flex-wrap:wrap}
 .mcfg-tab{font-size:12.5px;padding:6px 14px;border-radius:8px;border:1px solid rgba(128,128,128,.35);background:transparent;color:inherit;cursor:pointer}
 .mcfg-tab:hover{border-color:rgba(128,128,128,.6)}
@@ -87,60 +86,13 @@ window.__ModuleLoader__.load({
 `;
 
     /**
-     * v2: ONE namespace. Before the merge, three plugins shared this page's
-     * writes through two foreign namespaces (`title-model`,
-     * `image-generation`). Both are now fields of `model-tuning` itself, so
-     * every write below targets ns "model-tuning".
+     * v3: one namespace. Drawing models (the former `dsh-plugin-image-generation`
+     * Config keys) still live under `model-tuning` so existing profiles keep
+     * working; the removed title fields are ignored.
      */
     const NS = "model-tuning";
 
-    /** Provenance marker on an image entry the 模型参数 tab linked. */
-    const IMAGE_SOURCE_KEY = "source";
-    const IMAGE_API = "openai-images";
-
     const REASONING_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"];
-    const CTX_OPTIONS = [
-      { label: "64K", value: 64000 },
-      { label: "128K", value: 128000 },
-      { label: "256K", value: 256000 },
-      { label: "512K", value: 512000 },
-      { label: "1M", value: 1000000 },
-      { label: "2M", value: 2000000 },
-    ];
-    const MAX_OPTIONS = [
-      { label: "4K", value: 4000 },
-      { label: "8K", value: 8000 },
-      { label: "16K", value: 16000 },
-      { label: "32K", value: 32000 },
-      { label: "64K", value: 64000 },
-      { label: "128K", value: 128000 },
-      { label: "256K", value: 256000 },
-      { label: "384K", value: 384000 },
-      { label: "512K", value: 512000 },
-    ];
-
-    /**
-     * Per-namespace settings field where a provider records the input
-     * modalities one model accepts. The harness vocabulary is closed
-     * (`text` | `image`) at both the adapter and the core content block, so a
-     * provider that names no such field is shown without the control.
-     */
-    const MODALITY_FIELD_BY_NS = {
-      "llm-pi-ai": "input",
-      "llm-deepseek": "inputModalities",
-    };
-    /**
-     * DeepSeek-side image request budgets. Its schema refuses these on a
-     * text-only model, so clearing image capability must clear them too.
-     */
-    const DEEPSEEK_IMAGE_LIMIT_FIELDS = ["imagePixelBudget", "imageMaxBytes", "imageDetail"];
-    /**
-     * Tri-state of the control. `auto` states nothing and leaves resolution to
-     * the installed catalog entry, then the route's `defaultInput` (default
-     * `[text]`); an empty list means the same thing there, never "no modality".
-     */
-    const MODALITY_CHOICES = ["auto", "text", "text-image"];
-    const MODALITY_LABELS = { auto: "自动", text: "纯文本", "text-image": "文本 + 图像" };
 
     /**
      * The compat switch that selects Anthropic's adaptive thinking request.
@@ -163,24 +115,6 @@ window.__ModuleLoader__.load({
      */
     const ADAPTIVE_THINKING_API = "anthropic-messages";
 
-    function formatCapacity(n) {
-      if (n == null || typeof n !== "number" || !Number.isFinite(n)) return "";
-      if (n % 1000000 === 0) return String(n / 1000000) + "M";
-      if (n % 1000 === 0) return String(n / 1000) + "K";
-      return String(n);
-    }
-
-    function parseCapacity(text) {
-      if (typeof text !== "string") return null;
-      const match = text.trim().match(/^(\d+(?:\.\d+)?)\s*([kKmM]?)$/);
-      if (!match) return null;
-      const base = parseFloat(match[1]);
-      const suffix = match[2].toUpperCase();
-      const value = suffix === "K" ? base * 1000 : suffix === "M" ? base * 1000000 : base;
-      if (!Number.isInteger(value) || value <= 0) return null;
-      return value;
-    }
-
     function at(value, path) {
       let current = value;
       for (const part of path || []) {
@@ -196,138 +130,9 @@ window.__ModuleLoader__.load({
       return profile && typeof profile === "object" ? profile : undefined;
     }
 
-    function findNamespace(settingsView, ns) {
-      const namespaces = settingsView && Array.isArray(settingsView.namespaces) ? settingsView.namespaces : [];
-      return namespaces.find((item) => item && item.ns === ns);
-    }
-
-    /** v2: the page's own namespace view — always present once the host row is up. */
-    function ownNsView(settingsView) {
-      return findNamespace(settingsView, NS);
-    }
-
-    /**
-     * Derive one image entry from the chat provider that already holds the
-     * endpoint and credential reference, so linking never asks the user to
-     * retype either one.
-     */
-    function deriveImageEntry(profile, modelId) {
-      const base = typeof profile?.baseURL === "string" ? profile.baseURL.trim() : "";
-      return {
-        model: modelId,
-        endpoint: base ? base.replace(/\/+$/, "") + "/images/generations" : "",
-        apiKeyEnv: typeof profile?.apiKeyEnv === "string" ? profile.apiKeyEnv.trim() : "",
-      };
-    }
-
-    /** Whether an entry is ours, in entries stored before the provider was recorded. */
-    function isManagedEntry(entry, modelId) {
-      const source = entry && entry[IMAGE_SOURCE_KEY];
-      if (!source || typeof source !== "object" || source.model !== modelId) return false;
-      return source.provider === undefined || source.provider === "" || typeof source.provider === "string";
-    }
-
-    /** The per-model view of the link, shared by the checkbox and its note. */
-    function computeImageModelState(ownView, profile, modelId) {
-      if (!ownView) return { available: false, managed: false, hasEntry: false, entry: null };
-      const models = imageModelsOf(ownView);
-      const entry = models.find((item) => item && typeof item === "object" && item.model === modelId) ?? null;
-      const derived = deriveImageEntry(profile, modelId);
-      return {
-        available: true,
-        managed: !!entry && isManagedEntry(entry, modelId),
-        hasEntry: !!entry,
-        endpoint: entry ? entry.endpoint : derived.endpoint,
-        apiKeyEnv: entry ? entry.apiKeyEnv : derived.apiKeyEnv,
-      };
-    }
-
     function imageModelsOf(ownView) {
       const models = ownView ? ownView.value?.models : undefined;
       return Array.isArray(models) ? models : [];
-    }
-
-    function normalizeImageEndpoint(value) {
-      return typeof value === "string" ? value.trim().replace(/\/+$/, "").replace(/\/images\/generations$/, "") + "/images/generations" : "";
-    }
-
-    /** `/v1/images/generations` is the OpenAI address, not the configured one. */
-    function acceptableImageEndpoint(value) {
-      try {
-        const url = new URL(value);
-        if (!["http:", "https:"].includes(url.protocol)) return false;
-      } catch {
-        return false;
-      }
-      return !/api\.openai\.com/i.test(value);
-    }
-
-    /** The 绘图 schema validates `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`. */
-    function sanitizeImageId(value) {
-      return String(value).replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^[-_]+|[-_]+$/g, "").slice(0, 64);
-    }
-
-    function uniqueImageId(modelId, models) {
-      const taken = new Set(models.filter((item) => item && typeof item.id === "string").map((item) => item.id));
-      const base = sanitizeImageId(modelId) || "image-model";
-      let id = base;
-      for (let i = 2; taken.has(id); i++) id = sanitizeImageId(base.slice(0, 60) + "-" + i);
-      return id;
-    }
-
-    /**
-     * Everything the image list needs for an incremental write: only the entry
-     * the 模型参数 tab owns plus the default-model change it implies.
-     */
-    function planImageLink(ownView, profile, modelId, providerId) {
-      const derived = deriveImageEntry(profile, modelId);
-      const endpoint = normalizeImageEndpoint(derived.endpoint);
-      if (!acceptableImageEndpoint(endpoint)) {
-        return { models: null, reason: "该 provider 没有可用的供应商地址（api.baseURL），请先在「模型」页填写后再勾选。" };
-      }
-      const models = imageModelsOf(ownView).slice();
-      const index = models.findIndex((item) => item && typeof item === "object" && item.model === modelId);
-      const owned = index >= 0
-        ? { ...models[index], model: modelId, endpoint, api: IMAGE_API, [IMAGE_SOURCE_KEY]: { provider: providerId, model: modelId } }
-        : { id: uniqueImageId(modelId, models), name: modelId, model: modelId, endpoint, api: IMAGE_API, timeoutSeconds: 300 };
-      if (index >= 0 && !owned.apiKeyEnv && derived.apiKeyEnv) owned.apiKeyEnv = derived.apiKeyEnv;
-      if (index < 0) {
-        if (derived.apiKeyEnv) owned.apiKeyEnv = derived.apiKeyEnv;
-        owned[IMAGE_SOURCE_KEY] = { provider: providerId, model: modelId };
-      }
-      const next = index >= 0 ? models.map((item, i) => (i === index ? owned : item)) : [...models, owned];
-      const currentDefault = ownView.value?.defaultModel;
-      const defaultModel = typeof currentDefault === "string" && currentDefault ? currentDefault : owned.id;
-      return { models: next, defaultModel };
-    }
-
-    /** Unlink removes only the entry the 模型参数 tab created (has provenance). */
-    function planImageUnlink(ownView, modelId) {
-      const models = imageModelsOf(ownView);
-      const entry = models.find((item) => item && typeof item === "object" && item.model === modelId);
-      if (!entry) return { models: null, reason: "该模型未链接到绘图配置。" };
-      // v2: a hand-authored entry is not this checkbox's to remove — deleting it
-      // here would surprise an entry the user built on the 绘图 tab. It can be
-      // deleted there directly.
-      if (!isManagedEntry(entry, modelId)) return { models: null, reason: "该配置在「绘图」页手工创建，请在那边删除。" };
-      const next = models.filter((item) => item !== entry);
-      const currentDefault = ownView.value?.defaultModel;
-      const defaultModel = currentDefault === entry.id ? (next[0]?.id ?? "") : currentDefault;
-      return { models: next, defaultModel };
-    }
-
-    function readModelField(nsView, settingsPath, modelId, field) {
-      if (!nsView) return undefined;
-      const profile = at(nsView.value, settingsPath);
-      if (!profile || typeof profile !== "object") return undefined;
-      const models = Array.isArray(profile.models) ? profile.models : [];
-      const index = models.findIndex((m) => m && typeof m === "object" && m.id === modelId);
-      if (index >= 0) return models[index][field];
-      const overrides = profile.modelOverrides;
-      if (overrides && typeof overrides === "object" && overrides[modelId] && typeof overrides[modelId] === "object") {
-        return overrides[modelId][field];
-      }
-      return undefined;
     }
 
     function readCompatField(nsView, settingsPath, modelId, compatKey) {
@@ -495,202 +300,6 @@ window.__ModuleLoader__.load({
       return { ns, ops: [{ op: "set", path: [...basePath, "models"], value: [entryObj] }] };
     }
 
-    /** The modality field one provider namespace records, or undefined when it records none. */
-    function modalityFieldFor(ns) {
-      return MODALITY_FIELD_BY_NS[ns];
-    }
-
-    /** Map a raw modality list to the control's tri-state. Absent and empty both mean `auto`. */
-    function modalityChoice(raw) {
-      if (!Array.isArray(raw) || raw.length === 0) return "auto";
-      return raw.indexOf("image") >= 0 ? "text-image" : "text";
-    }
-
-    /**
-     * Explain what the current state costs, in the terms the harness applies.
-     */
-    function modalityNote(choice, model) {
-      if (choice === "text-image") {
-        return "图像输入已开启：贴图与 read_image 可用，下一次请求即生效（无需重启）。";
-      }
-      if (choice === "text") {
-        return "已显式声明为纯文本：附图会在发送前被拒绝，read_image 同样拒绝。";
-      }
-      if (!model.declared) {
-        return "自动：由该 provider 内置的模型目录决定，本页读不到目录内容，不做推测。";
-      }
-      const route = model.routeDefaultInput;
-      if (route && route.indexOf("image") >= 0) {
-        return "自动：本路由未逐个声明，跟随路由 defaultInput，其中含图像。";
-      }
-      return "自动：手写路由没有模型目录可查，落到路由 defaultInput（未设置即为纯文本），"
-        + "所以附图会被拒绝。端点确实收图时请选「文本 + 图像」。";
-    }
-
-    /**
-     * Ops for one modality choice. Non-DeepSeek namespaces write a single
-     * field; DeepSeek additionally drops the image request budgets its schema
-     * refuses beside a text-only declaration.
-     */
-    function computeModalityWriteOps(entry, nsView, modelId, choice) {
-      const field = modalityFieldFor(entry.settingsNs);
-      if (!field) return null;
-      const value = choice === "text-image" ? ["text", "image"] : choice === "text" ? ["text"] : null;
-      const write = computeWriteOps(entry, nsView, modelId, field, value);
-      if (!write || entry.settingsNs !== "llm-deepseek" || choice === "text-image") return write;
-      const profile = at(nsView ? nsView.value : undefined, entry.settingsPath || []);
-      const models = (profile && Array.isArray(profile.models)) ? profile.models : [];
-      const current = models.find((m) => m && typeof m === "object" && m.id === modelId) || {};
-      const stale = DEEPSEEK_IMAGE_LIMIT_FIELDS.filter((name) => current[name] !== undefined);
-      if (stale.length === 0) return write;
-      const modelsOp = write.ops[0];
-      modelsOp.value = modelsOp.value.map((m) => {
-        if (!m || typeof m !== "object" || m.id !== modelId) return m;
-        const copy = { ...m };
-        for (const name of stale) delete copy[name];
-        return copy;
-      });
-      return write;
-    }
-
-    // ── 用途：标题生成（v2：本插件自己的字段，title* 键） ────────────────────
-    /** Same vocabulary as the host schema (`inherit` is the default). */
-    const TITLE_MODES = ["inherit", "custom"];
-
-    /**
-     * Title-request budget. Defaults mirror the shipped dsh-base row, but every
-     * field is user-editable from this page — a reasoning model that answers
-     * only after a long think needs a larger `maxOutputTokens`, and that choice
-     * belongs to the user, not to a constant in the plugin.
-     */
-    const TITLE_BUDGET_FIELDS = [
-      { key: "targetWords", label: "目标词数", hint: "非中日韩语言的目标词数", fallback: 5 },
-      { key: "targetCjkCharacters", label: "目标汉字数", hint: "中文 / 日文标题的目标字数", fallback: 10 },
-      { key: "maxInputBytes", label: "输入上限（字节）", hint: "首条消息送进标题请求的截断上限", fallback: 4096 },
-      { key: "maxOutputTokens", label: "输出上限（token）", hint: "推理模型会先思考再作答，需留足预算（例如 1024）；直接作答的模型 64 足够", fallback: 64 },
-      { key: "timeoutMs", label: "超时（毫秒）", hint: "整次标题请求的超时", fallback: 60000 },
-    ];
-
-    /**
-     * Read the title purpose view out of our own namespace view.
-     * @param {object|undefined} settingsView - `remote.settings.describe()` value.
-     * @returns the title view; `available` mirrors whether our host row is up.
-     */
-    function titleViewOf(settingsView) {
-      const budget = {};
-      for (const field of TITLE_BUDGET_FIELDS) budget[field.key] = field.fallback;
-      const view = ownNsView(settingsView);
-      if (!view) return { available: false, mode: "inherit", provider: null, model: null, revision: null, ...budget };
-      const value = view.value && typeof view.value === "object" ? view.value : {};
-      const mode = TITLE_MODES.indexOf(value.titleMode) >= 0 ? value.titleMode : "inherit";
-      for (const field of TITLE_BUDGET_FIELDS) {
-        const raw = value[field.key];
-        if (typeof raw === "number" && Number.isInteger(raw) && raw > 0) budget[field.key] = raw;
-      }
-      return {
-        available: true,
-        mode,
-        provider: typeof value.titleProvider === "string" && value.titleProvider !== "" ? value.titleProvider : null,
-        model: typeof value.titleModel === "string" && value.titleModel !== "" ? value.titleModel : null,
-        revision: typeof view.revision === "number" ? view.revision : null,
-        ...budget,
-      };
-    }
-
-    /**
-     * Plan the write for one title purpose edit.
-     *
-     * Always returns the COMPLETE field set: switching back to `inherit` must
-     * clear a previously chosen route instead of leaving it behind in the user
-     * section, where it would silently stay authoritative for a later switch.
-     * The budget is written the same way, so a field the user clears returns to
-     * the shipped default rather than keeping a stale value.
-     * @param next - `{ mode, provider, model, ...budget }` as chosen in the UI.
-     * @returns the mutate request body.
-     */
-    function planTitleWrite(next) {
-      const ops = [];
-      for (const field of TITLE_BUDGET_FIELDS) {
-        const raw = next ? next[field.key] : undefined;
-        const value = raw === undefined || raw === null || raw === "" ? field.fallback : Number(raw);
-        if (!Number.isInteger(value) || value < 1) throw new Error(`「${field.label}」必须是正整数`);
-        ops.push({ op: "set", path: [field.key], value });
-      }
-      const mode = next && next.mode === "custom" ? "custom" : "inherit";
-      if (mode === "inherit") {
-        ops.push(
-          { op: "unset", path: ["titleMode"] },
-          { op: "unset", path: ["titleProvider"] },
-          { op: "unset", path: ["titleModel"] },
-        );
-      } else {
-        ops.push(
-          { op: "set", path: ["titleMode"], value: "custom" },
-          { op: "set", path: ["titleProvider"], value: String(next.provider || "") },
-          { op: "set", path: ["titleModel"], value: String(next.model || "") },
-        );
-      }
-      return { ns: NS, ops };
-    }
-
-    function CapacityField(props) {
-      const value = props.value;
-      const options = props.options;
-      const matched = value != null ? options.find((o) => o.value === value) : undefined;
-      const [mode, setMode] = React.useState(matched ? "option" : "custom");
-      const [text, setText] = React.useState(value != null ? formatCapacity(value) : "");
-
-      React.useEffect(() => {
-        const m = value != null ? options.find((o) => o.value === value) : undefined;
-        setMode(m ? "option" : "custom");
-        setText(value != null ? formatCapacity(value) : "");
-      }, [value]);
-
-      function commit() {
-        const parsed = parseCapacity(text);
-        if (parsed == null) {
-          props.onToast("err", "请输入正整数，可用 K/M 后缀（如 256K、1M）");
-          setText(value != null ? formatCapacity(value) : "");
-          return;
-        }
-        if (parsed === value) return;
-        props.onApply(props.provider, props.model, props.kind, parsed);
-      }
-
-      return React.createElement("label", { className: "mcfg-field" },
-        React.createElement("span", { className: "mcfg-label" }, props.label),
-        React.createElement("div", { className: "mcfg-fieldrow" },
-          React.createElement("select", {
-            className: "mcfg-select",
-            disabled: props.disabled,
-            value: mode === "option" ? String(value) : "__custom__",
-            onChange: (e) => {
-              if (e.target.value === "__custom__") {
-                setMode("custom");
-                setText(value != null ? formatCapacity(value) : "");
-              } else {
-                setMode("option");
-                props.onApply(props.provider, props.model, props.kind, Number(e.target.value));
-              }
-            },
-          },
-            options.map((o) => React.createElement("option", { key: o.value, value: String(o.value) }, o.label)),
-            React.createElement("option", { value: "__custom__" }, "自定义…")
-          ),
-          mode === "custom" ? React.createElement("input", {
-            className: "mcfg-input mcfg-custom",
-            type: "text",
-            disabled: props.disabled,
-            value: text,
-            placeholder: "如 256K / 1M",
-            onChange: (e) => setText(e.target.value),
-            onBlur: commit,
-            onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); },
-          }) : null
-        )
-      );
-    }
-
     // ── 绘图页组件（ex dsh-plugin-image-generation/client.js，样式前缀统一） ──
     const JOB_KEY = "dsh-image-generation-job";
 
@@ -700,8 +309,8 @@ window.__ModuleLoader__.load({
     }
     const freshImageEntry = () => ({ id: "", name: "", model: "", api: "openai-images", endpoint: "https://api.openai.com/v1/images/generations", apiKeyEnv: "IMAGE_API_KEY", timeoutSeconds: 300 })
 
-    /** An entry the 模型参数 tab linked carries its origin. */
-    function managedBy(item) { return item?.source?.provider ? `模型参数 · ${item.source.provider}` : "" }
+    /** An entry an earlier version's 模型参数 checkbox linked carries its origin. */
+    function managedBy(item) { return item?.source?.provider ? `旧版链接 · ${item.source.provider}` : "" }
 
     function PanelImage({ call, jobId, index, image }) {
       const [url, setUrl] = React.useState("");
@@ -783,10 +392,10 @@ window.__ModuleLoader__.load({
       /**
        * Commit one drawing-config edit.
        *
-       * Always re-reads immediately before writing (the same discipline the
-       * 模型参数 tab uses). Using the view captured at render time made a page
-       * left open across any other write fail on a stale revision — the
-       * optimistic lock rejects it and the button silently looks dead.
+       * Always re-reads immediately before writing. Using the view captured at
+       * render time made a page left open across any other write fail on a
+       * stale revision — the optimistic lock rejects it and the button
+       * silently looks dead.
        * @param buildOps - derives the ops from the freshly read view.
        * @param successMessage - toast shown after the write and refresh.
        */
@@ -812,10 +421,9 @@ window.__ModuleLoader__.load({
         // revision nor write a stale model list back over it.
         await commit((fresh) => {
           const freshModels = imageModelsOf(fresh);
-          // v2: `source` is provenance display only. Editing a linked entry
-          // keeps the marker (so 模型参数 still shows where it came from), but
-          // its identity fields are now editable in place — one plugin owns
-          // both tabs.
+          // `source` is provenance display only. Editing a linked entry keeps
+          // the marker so the row still tells where it came from; the identity
+          // fields are editable in place.
           const stored = editing ? freshModels.find((item) => item.id === editing) : undefined;
           if (managedBy(stored)) normalized.source = stored.source;
           const entry = { ...normalized };
@@ -859,7 +467,7 @@ window.__ModuleLoader__.load({
         React.createElement("p", { className: "mcfg-note" }, "独立配置绘图模型。可在聊天中让助手调用 generate_image，也可在下方直接生成。接口使用 OpenAI Images 协议。"),
         notice ? React.createElement("div", { role: "status" }, notice) : null,
         !view ? React.createElement("p", null, "正在读取配置…") : React.createElement("fieldset", { disabled: busy }, React.createElement("legend", null, "绘图模型"),
-          models.length === 0 ? React.createElement("p", { className: "mcfg-note" }, "尚未配置。添加模型后即可绘图；也可在「模型参数」页勾选生图模型自动生成。") : models.map((item) => React.createElement("div", { className: "mcfg-row", key: item.id },
+          models.length === 0 ? React.createElement("p", { className: "mcfg-note" }, "尚未配置。添加模型后即可绘图。") : models.map((item) => React.createElement("div", { className: "mcfg-row", key: item.id },
             React.createElement("span", null, `${item.name || item.id} · ${item.model}${view.value.defaultModel === item.id ? " · 默认" : ""}${managedBy(item) ? " · " + managedBy(item) : ""}`),
             React.createElement("div", { className: "mcfg-actions2" },
               React.createElement("button", { disabled: !writable || !!form, onClick: () => { setForm({ ...item }); setEditing(item.id); setKey(""); setCatalog(null); } }, "编辑"),
@@ -915,7 +523,7 @@ window.__ModuleLoader__.load({
             imageField("超时（秒）", form.timeoutSeconds, update("timeoutSeconds"), { type: "number", min: 10, max: 600 }),
             ...[["尺寸", "size"], ["质量", "quality"], ["背景", "background"], ["输出格式", "output_format"], ["响应格式", "response_format"], ["风格", "style"]].map(([label, name]) => imageField(`${label}（可选）`, form[name], update(name)))),
           React.createElement("p", { className: "mcfg-note" }, "可选参数留空则不发送。GPT Image 的响应格式请留空。Key 通过 dsh 凭据服务单独保存；同名引用会被其他模型共享。"),
-          editing && managedBy(form) ? React.createElement("p", { className: "mcfg-note" }, `该配置最初由「模型参数」页从 ${managedBy(form)} 链接生成；如需同步 provider 最新地址，可在那边取消勾选后重新勾选，或直接在此修改。`) : null),
+          editing && managedBy(form) ? React.createElement("p", { className: "mcfg-note" }, `该配置是旧版「模型参数」页留下的链接条目（${managedBy(form)}）；链接入口已在 v3 移除，端点与凭据可直接在这里修改或删除本条。`) : null),
           React.createElement("div", { className: "mcfg-actions2" }, React.createElement("button", { onClick: () => void action(save) }, "保存"), React.createElement("button", { onClick: () => { setForm(null); setKey(""); } }, "取消"))) : null,
         React.createElement("fieldset", { disabled: busy || running }, React.createElement("legend", null, "直接绘图"),
           React.createElement("label", { className: "mcfg-field2" }, "绘图模型", React.createElement("select", { value: selected, onChange: (event) => setSelected(event.target.value) },
@@ -929,725 +537,298 @@ window.__ModuleLoader__.load({
         job?.result ? React.createElement("div", { className: "mcfg-gallery" }, job.result.images.map((image, index) => React.createElement(PanelImage, { key: `${jobId}-${index}`, call, jobId, image, index }))) : null);
     }
 
-    function ModelTuningPage(props) {
-      const api = props.api;
+    // ── 设置页：绘图（v3 后本插件唯一的独立页面） ─────────────────────────
+    function DrawingPage(props) {
+      const remote = props.remote;
       const timer = props.timer;
-      const [data, setData] = React.useState(null);
-      const [ownView, setOwnView] = React.useState(null);
-      const [loading, setLoading] = React.useState(true);
+      const [view, setView] = React.useState(null);
+      const [writable, setWritable] = React.useState(false);
       const [error, setError] = React.useState(null);
       const [toast, setToast] = React.useState(null);
-      const [query, setQuery] = React.useState("");
-      const [tab, setTab] = React.useState("models");
-      const [title, setTitle] = React.useState(null);
-      const [titleDraft, setTitleDraft] = React.useState(null);
-      const [titleBusy, setTitleBusy] = React.useState(false);
 
-      async function reload() {
+      async function refresh() {
         try {
-          const [providersRes, modelsRes, settingsRes] = await Promise.all([
-            api.llm.providers({}),
-            api.llm.models({}),
-            api.settings.describe({}),
-          ]);
-          if (!providersRes.result.ok) throw new Error(providersRes.result.error.message);
-          if (!modelsRes.result.ok) throw new Error(modelsRes.result.error.message);
-          if (!settingsRes.result.ok) throw new Error(settingsRes.result.error.message);
-
-          const providers = providersRes.result.value.providers;
-          const groups = modelsRes.result.value.groups;
-          const namespaces = settingsRes.result.value.namespaces;
-          const writable = settingsRes.result.value.writable;
-
-          const metaByProvider = new Map(providers.map((p) => [p.provider, p]));
-          const nsByNs = new Map(namespaces.map((n) => [n.ns, n]));
-          // v2: our own view; absent only when our host row failed to activate.
-          const view = ownNsView(settingsRes.result.value);
-          setTitle(titleViewOf(settingsRes.result.value));
-          setTitleDraft(null);
-          setError(null);
-
-          const built = { writable, providers: [] };
-          for (const group of groups) {
-            const entry = metaByProvider.get(group.id);
-            const nsView = entry ? nsByNs.get(entry.settingsNs) : undefined;
-            const providerProfile = profileOf(nsView, entry ? entry.settingsPath : []);
-            const reasoningEditable = !!(entry && entry.settingsNs === "llm-pi-ai");
-            const adaptiveKey = entry ? adaptiveThinkingCompatKey(entry.settingsNs, providerProfile) : null;
-            const routeDefaultInput = providerProfile && Array.isArray(providerProfile.defaultInput)
-              ? providerProfile.defaultInput
-              : null;
-            const models = group.models.map((m) => {
-              const ctx = readModelField(nsView, entry ? entry.settingsPath : [], m.id, "contextWindow");
-              const mx = readModelField(nsView, entry ? entry.settingsPath : [], m.id, "maxTokens");
-              const devRole = entry && entry.settingsNs === "llm-pi-ai"
-                ? readCompatField(nsView, entry.settingsPath, m.id, "supportsDeveloperRole")
-                : undefined;
-              const adaptiveThinking = adaptiveKey
-                ? readCompatField(nsView, entry.settingsPath, m.id, adaptiveKey)
-                : undefined;
-              const modalityField = entry ? modalityFieldFor(entry.settingsNs) : undefined;
-              const rawInput = modalityField
-                ? readModelField(nsView, entry.settingsPath, m.id, modalityField)
-                : undefined;
-              const image = computeImageModelState(view, providerProfile, m.id);
-              const efforts = (m.reasoning && Array.isArray(m.reasoning.efforts)) ? m.reasoning.efforts.map((e) => ({ id: e.id, name: e.name })) : [];
-              return {
-                id: m.id,
-                name: m.name,
-                description: m.description != null ? m.description : null,
-                contextWindow: ctx != null ? ctx : null,
-                maxTokens: mx != null ? mx : null,
-                supportsDeveloperRole: devRole,
-                adaptiveThinking: adaptiveThinking === true,
-                // The flag only changes a request that carries thinking at all,
-                // so it is offered where a level can be selected.
-                adaptiveThinkingEditable: adaptiveKey !== null && efforts.length > 0,
-                modalityField: modalityField || null,
-                modality: modalityField ? modalityChoice(rawInput) : null,
-                imageAvailable: image.available,
-                imageLinked: image.hasEntry,
-                imageManaged: image.managed,
-                imageEndpoint: image.endpoint || null,
-                imageApiKeyEnv: image.apiKeyEnv || null,
-                declared: !!(entry && entry.declared),
-                routeDefaultInput: routeDefaultInput,
-                efforts,
-                defaultEffort: (m.reasoning && m.reasoning.defaultEffort != null) ? m.reasoning.defaultEffort : null,
-              };
-            });
-            built.providers.push({
-              provider: group.id,
-              name: group.name,
-              configurable: !!entry,
-              reasoningEditable,
-              imageNsAvailable: !!view,
-              models,
-            });
-          }
-          const imageModels = imageModelsOf(view);
-          const linkedIds = new Set(imageModels.filter((item) => item && item.model).map((item) => item.model));
-          for (const row of built.providers) {
-            row.imageLinkedCount = row.models.filter((m) => linkedIds.has(m.id)).length;
-          }
-          built.imageModels = imageModels.map((item) => item?.model).filter(Boolean);
-          built.imageDefault = typeof view?.value?.defaultModel === "string" ? view.value.defaultModel : "";
-          setData(built);
-          setOwnView(view ?? null);
+          const response = await remote.settings.describe();
+          if (!response.ok) throw new Error(response.error && response.error.message ? response.error.message : "读取设置失败");
+          const namespaces = Array.isArray(response.value?.namespaces) ? response.value.namespaces : [];
+          const found = namespaces.find((item) => item && item.ns === NS);
+          setView(found ?? null);
+          setWritable(response.value?.writable !== false);
           setError(null);
           return true;
         } catch (err) {
           setError(err && err.message ? err.message : String(err));
           return false;
-        } finally {
-          setLoading(false);
         }
       }
 
-      React.useEffect(() => {
-        reload();
-      }, []);
+      React.useEffect(() => { void refresh(); }, []);
 
       function showToast(kind, text) {
         setToast({ kind, text });
         if (timer) timer.timeout(() => setToast(null), 3000);
       }
 
-      async function applyChange(provider, model, kind, value) {
-        try {
-          const [providersRes, settingsRes] = await Promise.all([
-            api.llm.providers({}),
-            api.settings.describe({}),
-          ]);
-          if (!providersRes.result.ok) throw new Error(providersRes.result.error.message);
-          if (!settingsRes.result.ok) throw new Error(settingsRes.result.error.message);
-
-          const entry = providersRes.result.value.providers.find((p) => p.provider === provider);
-          if (!entry) throw new Error("该 provider 不可配置");
-          const nsView = settingsRes.result.value.namespaces.find((n) => n.ns === entry.settingsNs);
-
-          if (kind === "imageLink") {
-            // Re-read immediately before writing, so the plan and the revision
-            // it is applied against come from the same document.
-            const freshRes = await api.settings.describe({});
-            if (!freshRes.result.ok) throw new Error(freshRes.result.error.message);
-            const freshView = ownNsView(freshRes.result.value);
-            if (!freshView) throw new Error("模型调参宿主行未激活，无法写入绘图配置。");
-            const providerProfile = profileOf(nsView, entry.settingsPath);
-            const plan = value === true
-              ? planImageLink(freshView, providerProfile, model, provider)
-              : planImageUnlink(freshView, model);
-            if (!plan || !plan.models) throw new Error((plan && plan.reason) || "无法写入绘图配置");
-            const written = await api.settings.mutate({
-              ns: NS,
-              ops: [
-                { op: "set", path: ["models"], value: plan.models },
-                { op: "set", path: ["defaultModel"], value: plan.defaultModel || "" },
-              ],
-              expectedRevision: freshView.revision,
-            });
-            if (!written.result.ok) throw new Error(written.result.error.message);
-            showToast("ok", value === true ? "已在「绘图」页生成模型配置" : "已取消生图标记");
-            await reload();
-            return;
-          }
-
-          let field;
-          let payload;
-          if (kind === "reasoningLevels") {
-            field = "reasoningEfforts";
-            const raw = value && Array.isArray(value.levels) ? value.levels : [];
-            payload = reasoningEffortsPayload(raw, storedReasoningEfforts(entry, nsView, model));
-          } else if (kind === "contextWindow" || kind === "maxTokens") {
-            field = kind;
-            if (value != null && (typeof value !== "number" || !Number.isInteger(value) || value <= 0)) {
-              throw new Error("取值必须是正整数");
-            }
-            payload = value;
-          } else if (kind === "supportsDeveloperRole" || kind === "adaptiveThinking") {
-            if (value !== null && typeof value !== "boolean") {
-              throw new Error("取值必须是布尔值");
-            }
-            const compatKey = kind === "supportsDeveloperRole" ? "supportsDeveloperRole" : ADAPTIVE_THINKING_COMPAT_KEY;
-            const write = computeCompatWriteOps(entry, nsView, model, compatKey, value);
-            if (write) {
-              const res = await api.settings.mutate({ ns: write.ns, ops: write.ops });
-              if (!res.result.ok) throw new Error(res.result.error.message);
-            }
-            showToast("ok", "已保存");
-            await reload();
-            return;
-          } else if (kind === "modalities") {
-            if (MODALITY_CHOICES.indexOf(value) < 0) throw new Error("未知的模态取值");
-            const write = computeModalityWriteOps(entry, nsView, model, value);
-            if (!write) throw new Error("该 provider 不接受模态声明");
-            const res = await api.settings.mutate({ ns: write.ns, ops: write.ops });
-            if (!res.result.ok) throw new Error(res.result.error.message);
-            showToast("ok", value === "text-image" ? "已开启图像输入，下一次请求即生效" : "已保存");
-            await reload();
-            return;
-          } else {
-            throw new Error("未知的修改类型");
-          }
-
-          const write = computeWriteOps(entry, nsView, model, field, payload);
-          if (write) {
-            const res = await api.settings.mutate({ ns: write.ns, ops: write.ops });
-            if (!res.result.ok) throw new Error(res.result.error.message);
-          }
-          showToast("ok", "已保存");
-          await reload();
-        } catch (err) {
-          showToast("err", err && err.message ? err.message : String(err));
-        }
-      }
-
-      if (loading) {
-        return React.createElement("div", { className: "mcfg-state" }, "正在加载模型配置…");
-      }
-      if (error) {
-        return React.createElement("div", { className: "mcfg-state mcfg-error" }, "加载失败：" + error);
-      }
-
-      /** The effective title selection: an unsaved draft wins over the stored value. */
-      const titleShown = titleDraft || title || { available: false, mode: "inherit", provider: null, model: null, revision: null };
-      const titleProviders = data && data.providers ? data.providers : [];
-      const titleProvider = titleProviders.find((p) => p.provider === titleShown.provider) || null;
-      const titleModels = titleProvider ? titleProvider.models : [];
-      const titleDirty = !!title && (
-        titleShown.mode !== title.mode
-        || (titleShown.provider || null) !== (title.provider || null)
-        || (titleShown.model || null) !== (title.model || null)
-        || TITLE_BUDGET_FIELDS.some((field) => Number(titleShown[field.key]) !== Number(title[field.key]))
-      );
-      const titleSaveDisabled = !data || !data.writable || !titleShown.available || titleBusy
-        || (titleShown.mode === "custom" && (!titleShown.provider || !titleShown.model));
-
-      function editTitleDraft(patch) {
-        setTitleDraft({ ...titleShown, ...patch });
-      }
-
-      async function saveTitle() {
-        // Budget travels with the route: both are this page's to write.
-        const payload = {
-          mode: titleShown.mode === "custom" ? "custom" : "inherit",
-          provider: titleShown.provider,
-          model: titleShown.model,
-        };
-        for (const field of TITLE_BUDGET_FIELDS) payload[field.key] = titleShown[field.key];
-        setTitleBusy(true);
-        let saved = false;
-        try {
-          const write = planTitleWrite(payload);
-          const res = await api.settings.mutate({ ns: write.ns, ops: write.ops });
-          if (!res.result.ok) throw new Error(res.result.error.message);
-          saved = true;
-        } catch (err) {
-          showToast("err", err && err.message ? err.message : String(err));
-        } finally {
-          setTitleBusy(false);
-        }
-        if (!saved) return;
-        showToast("ok", "标题生成设置已保存，对之后生成的标题生效");
-        if (!await reload()) showToast("err", "设置已保存，但页面数据刷新失败，请重新打开本页确认。");
-      }
-
-      const q = query.trim().toLowerCase();
-      const filtered = !data || !data.providers || data.providers.length === 0 ? [] : q.length === 0 ? data.providers : data.providers.map((provider) => {
-        const providerMatch = provider.name.toLowerCase().indexOf(q) >= 0 || provider.provider.toLowerCase().indexOf(q) >= 0;
-        const models = providerMatch ? provider.models : provider.models.filter((m) =>
-          m.id.toLowerCase().indexOf(q) >= 0 ||
-          m.name.toLowerCase().indexOf(q) >= 0 ||
-          (m.description || "").toLowerCase().indexOf(q) >= 0
-        );
-        return models.length > 0 ? { ...provider, models } : null;
-      }).filter(Boolean);
-      const totalMatched = filtered.reduce((n, p) => n + p.models.length, 0);
-
-      const tabButton = (id, label) => React.createElement("button", {
-        key: id,
-        type: "button",
-        className: "mcfg-tab" + (tab === id ? " mcfg-tab-on" : ""),
-        "aria-pressed": tab === id,
-        onClick: () => setTab(id),
-      }, label);
-      const tabBar = React.createElement("div", { className: "mcfg-tabs", role: "tablist" },
-        tabButton("models", "模型参数"),
-        tabButton("purpose", "用途"),
-        tabButton("image", "绘图")
-      );
-
-      const modelsPanel = [
-        React.createElement("div", { className: "mcfg-searchrow", key: "search" },
-          React.createElement("input", {
-            className: "mcfg-search",
-            type: "text",
-            value: query,
-            placeholder: "搜索模型 / provider…",
-            onChange: (e) => setQuery(e.target.value),
-          }),
-          query.trim().length > 0 ? React.createElement("span", { className: "mcfg-count" }, totalMatched + " 个模型") : null
-        ),
-        data.imageModels.length > 0
-          ? React.createElement("div", { className: "mcfg-note", key: "img" },
-              "绘图页当前 " + data.imageModels.length + " 个配置：" + data.imageModels.join("、")
-                + (data.imageDefault ? "（默认 " + data.imageDefault + "）" : "（未设默认，generate_image 需显式指定）"))
-          : React.createElement("div", { className: "mcfg-note", key: "img" }, "绘图页尚未配置任何模型。"),
-        !data.providers || data.providers.length === 0
-          ? React.createElement("div", { className: "mcfg-state", key: "none" }, "当前没有已注册的模型。")
-          : filtered.length === 0
-            ? React.createElement("div", { className: "mcfg-state", key: "empty" }, "没有匹配的模型。")
-            : filtered.map((provider) =>
-              React.createElement("div", { key: provider.provider, className: "mcfg-provider" },
-                React.createElement("div", { className: "mcfg-provider-name" },
-                  provider.name,
-                  React.createElement("span", { className: "mcfg-provider-id" }, provider.provider)
-                ),
-                provider.models.map((model) => {
-                  const editable = data.writable && provider.configurable;
-                  const selectedLevels = new Set((model.efforts || []).filter((e) => e.id !== "off").map((e) => e.id));
-
-                  return React.createElement("div", { key: model.id, className: "mcfg-model" },
-                    React.createElement("div", { className: "mcfg-model-head" },
-                      React.createElement("div", { className: "mcfg-model-title" },
-                        React.createElement("span", { className: "mcfg-model-name" }, model.name),
-                        React.createElement("span", { className: "mcfg-model-id" }, model.id),
-                        model.modality === "text-image"
-                          ? React.createElement("span", { className: "mcfg-chip mcfg-chip-on" }, "图像输入")
-                          : null,
-                        model.imageLinked
-                          ? React.createElement("span", { className: "mcfg-chip mcfg-chip-on" }, "生图模型")
-                          : null,
-                        model.adaptiveThinking
-                          ? React.createElement("span", { className: "mcfg-chip mcfg-chip-on" }, "自适应思考")
-                          : null
-                      )
-                    ),
-                    model.description ? React.createElement("div", { className: "mcfg-desc" }, model.description) : null,
-                    provider.reasoningEditable ? React.createElement("div", { className: "mcfg-reasoning" },
-                      React.createElement("span", { className: "mcfg-label" }, "可选推理档位"),
-                      React.createElement("div", { className: "mcfg-levels" },
-                        REASONING_LEVELS.map((level) =>
-                          React.createElement("label", { key: level, className: "mcfg-level" },
-                            React.createElement("input", {
-                              type: "checkbox",
-                              checked: selectedLevels.has(level),
-                              onChange: () => {
-                                const next = new Set(selectedLevels);
-                                if (next.has(level)) next.delete(level); else next.add(level);
-                                applyChange(provider.provider, model.id, "reasoningLevels", { levels: [...next] });
-                              },
-                            }),
-                            React.createElement("span", null, level)
-                          )
-                        )
-                      ),
-                      selectedLevels.size === 0 ? React.createElement("div", { className: "mcfg-note" }, "未勾选任何档位 → 该模型视为无推理能力") : null
-                    ) : React.createElement("div", { className: "mcfg-reasoning" },
-                      React.createElement("span", { className: "mcfg-label" }, "推理档位（由 provider 固定）"),
-                      React.createElement("div", { className: "mcfg-levels" },
-                        (model.efforts || []).map((effort) =>
-                          React.createElement("span", { key: effort.id, className: "mcfg-chip" }, effort.name)
-                        )
-                      )
-                    ),
-                    provider.reasoningEditable ? React.createElement("div", { className: "mcfg-reasoning" },
-                      React.createElement("span", { className: "mcfg-label" }, "系统提示角色（兼容开关）"),
-                      React.createElement("div", { className: "mcfg-levels" },
-                        ["auto", "system", "developer"].map((role) =>
-                          React.createElement("label", { key: role, className: "mcfg-level" },
-                            React.createElement("input", {
-                              type: "radio",
-                              name: "devrole-" + model.id,
-                              disabled: !editable,
-                              checked: role === "auto"
-                                ? model.supportsDeveloperRole === undefined
-                                : (role === "developer" ? model.supportsDeveloperRole === true : model.supportsDeveloperRole === false),
-                              onChange: () => {
-                                if (role === "auto") {
-                                  applyChange(provider.provider, model.id, "supportsDeveloperRole", null);
-                                } else {
-                                  applyChange(provider.provider, model.id, "supportsDeveloperRole", role === "developer");
-                                }
-                              },
-                            }),
-                            React.createElement("span", null,
-                              role === "auto" ? "自动" : (role === "system" ? "system（推荐 Kimi/DeepSeek）" : "developer")
-                            )
-                          )
-                        )
-                      ),
-                      React.createElement("div", { className: "mcfg-note" },
-                        "自动：跟随网关检测；如遇 role 'developer' is not allowed，请选 system"
-                      )
-                    ) : null,
-                    model.adaptiveThinkingEditable ? React.createElement("div", { className: "mcfg-reasoning" },
-                      React.createElement("span", { className: "mcfg-label" }, "思考格式（Anthropic 兼容开关）"),
-                      React.createElement("div", { className: "mcfg-levels" },
-                        ["auto", "adaptive"].map((choice) =>
-                          React.createElement("label", { key: choice, className: "mcfg-level" },
-                            React.createElement("input", {
-                              type: "radio",
-                              name: "adaptive-" + model.id,
-                              disabled: !editable,
-                              checked: choice === "auto" ? !model.adaptiveThinking : model.adaptiveThinking,
-                              onChange: () => applyChange(provider.provider, model.id, "adaptiveThinking", choice === "adaptive" ? true : null),
-                            }),
-                            React.createElement("span", null, choice === "auto" ? "自动（预算式 thinking）" : "自适应 thinking")
-                          )
-                        )
-                      ),
-                      React.createElement("div", { className: "mcfg-note" },
-                        "上面选中档位后，请求体由这里决定：自适应写 compat." + ADAPTIVE_THINKING_COMPAT_KEY
-                        + "，发出 thinking.type=adaptive 与 output_config.effort；Claude Opus 4.6 及更新、Sonnet 5、"
-                        + "Fable 5 等只接受这种，报 400 requires adaptive thinking 就切到它。"
-                        + "Claude 4.5 及更早只认预算式，保持「自动」。"
-                      )
-                    ) : null,
-                    model.modalityField ? React.createElement("div", { className: "mcfg-reasoning" },
-                      React.createElement("span", { className: "mcfg-label" }, "输入模态（写入 " + model.modalityField + "）"),
-                      React.createElement("div", { className: "mcfg-levels" },
-                        MODALITY_CHOICES.map((choice) =>
-                          React.createElement("label", { key: choice, className: "mcfg-level" },
-                            React.createElement("input", {
-                              type: "radio",
-                              name: "modality-" + model.id,
-                              disabled: !editable,
-                              checked: model.modality === choice,
-                              onChange: () => applyChange(provider.provider, model.id, "modalities", choice),
-                            }),
-                            React.createElement("span", null, MODALITY_LABELS[choice])
-                          )
-                        )
-                      ),
-                      React.createElement("div", { className: "mcfg-note" },
-                        modalityNote(model.modality, model)
-                      )
-                    ) : null,
-                    model.imageAvailable ? React.createElement("div", { className: "mcfg-reasoning" },
-                      React.createElement("span", { className: "mcfg-label" }, "生图模型"),
-                      React.createElement("div", { className: "mcfg-img-actions" },
-                        React.createElement("label", { className: "mcfg-level" },
-                          React.createElement("input", {
-                            type: "checkbox",
-                            checked: model.imageLinked,
-                            disabled: !editable,
-                            onChange: () => applyChange(provider.provider, model.id, "imageLink", !model.imageLinked),
-                          }),
-                          React.createElement("span", null, "在「绘图」页自动配置该模型")
-                        ),
-                        model.imageLinked ? React.createElement("span", { className: "mcfg-chip mcfg-chip-on" }, "已在绘图页配置") : null
-                      ),
-                      React.createElement("div", { className: "mcfg-note" },
-                        model.imageLinked
-                          ? "端点 " + (model.imageEndpoint || "（未填写）") + (model.imageApiKeyEnv ? "，凭据 " + model.imageApiKeyEnv : "")
-                            + "。取消勾选会移除该配置；也可以直接在「绘图」页编辑或删除它。"
-                          : "勾选后写入「绘图」页的模型列表（模型 ID 复用 " + model.id + "，端点由本 provider 的供应商地址加 /images/generations 推导）。"
-                      )
-                    ) : null,
-                    React.createElement("div", { className: "mcfg-fields" },
-                      React.createElement(CapacityField, {
-                        label: "上下文窗口", options: CTX_OPTIONS, value: model.contextWindow, disabled: !editable,
-                        provider: provider.provider, model: model.id, kind: "contextWindow", onApply: applyChange, onToast: showToast,
-                      }),
-                      React.createElement(CapacityField, {
-                        label: "最大输出", options: MAX_OPTIONS, value: model.maxTokens, disabled: !editable,
-                        provider: provider.provider, model: model.id, kind: "maxTokens", onApply: applyChange, onToast: showToast,
-                      })
-                    )
-                  );
-                })
-              )
-            )
-      ];
-
-      // ── 用途页 ────────────────────────────────────────────────────────────
-      const purposePanel = [
-        React.createElement("div", { className: "mcfg-purpose", key: "title" },
-          React.createElement("div", { className: "mcfg-purpose-head" },
-            React.createElement("span", { className: "mcfg-purpose-name" }, "标题生成"),
-            React.createElement("span", { className: "mcfg-chip" }, "独立请求"),
-            title && title.available
-              ? React.createElement("span", { className: "mcfg-chip mcfg-chip-on" }, "已启用")
-              : React.createElement("span", { className: "mcfg-chip" }, "宿主行未激活")
-          ),
-          React.createElement("div", { className: "mcfg-desc" },
-            "会话标题由一次独立的辅助请求生成，不会改动对话模型。默认继承当前会话的 provider / model。"
-          ),
-          !titleShown.available
-            ? React.createElement("div", { className: "mcfg-state mcfg-error" },
-                "未检测到 model-tuning 设置命名空间：宿主半区未激活（标题 provider 未注册），请检查插件是否启用并重启 dsh。"
-              )
-            : [
-                React.createElement("div", { className: "mcfg-radio", key: "mode" },
-                  React.createElement("label", { className: "mcfg-radio-row" },
-                    React.createElement("input", {
-                      type: "radio",
-                      name: "title-mode",
-                      checked: titleShown.mode === "inherit",
-                      disabled: !data.writable || titleBusy,
-                      onChange: () => editTitleDraft({ mode: "inherit", provider: null, model: null }),
-                    }),
-                    React.createElement("span", null,
-                      "继承当前会话（默认）",
-                      React.createElement("div", { className: "mcfg-note" },
-                        "标题请求沿用该会话已记录的 provider / model，行为与内置标题生成一致。")
-                    )
-                  ),
-                  React.createElement("label", { className: "mcfg-radio-row" },
-                    React.createElement("input", {
-                      type: "radio",
-                      name: "title-mode",
-                      checked: titleShown.mode === "custom",
-                      disabled: !data.writable || titleBusy,
-                      onChange: () => {
-                        const fallback = titleProviders[0];
-                        editTitleDraft({
-                          mode: "custom",
-                          provider: titleShown.provider || (fallback ? fallback.provider : null),
-                          model: titleShown.model || (fallback && fallback.models[0] ? fallback.models[0].id : null),
-                        });
-                      },
-                    }),
-                    React.createElement("span", null,
-                      "使用指定模型",
-                      React.createElement("div", { className: "mcfg-note" },
-                        "标题请求改投所选 provider / model；会话的对话模型保持不变。")
-                    )
-                  )
-                ),
-                titleShown.mode === "custom"
-                  ? React.createElement("div", { className: "mcfg-fields", key: "route" },
-                      React.createElement("label", { className: "mcfg-field" },
-                        React.createElement("span", { className: "mcfg-label" }, "Provider"),
-                        React.createElement("select", {
-                          className: "mcfg-select",
-                          disabled: !data.writable || titleBusy,
-                          value: titleShown.provider || "",
-                          onChange: (e) => {
-                            const next = titleProviders.find((p) => p.provider === e.target.value);
-                            editTitleDraft({
-                              provider: e.target.value,
-                              model: next && next.models[0] ? next.models[0].id : null,
-                            });
-                          },
-                        },
-                          React.createElement("option", { value: "" }, "（请选择 provider）"),
-                          titleProviders.map((p) => React.createElement("option", { key: p.provider, value: p.provider },
-                            p.name + " · " + p.provider))
-                        )
-                      ),
-                      React.createElement("label", { className: "mcfg-field" },
-                        React.createElement("span", { className: "mcfg-label" }, "Model"),
-                        React.createElement("select", {
-                          className: "mcfg-select",
-                          disabled: !data.writable || titleBusy || !titleShown.provider,
-                          value: titleShown.model || "",
-                          onChange: (e) => editTitleDraft({ model: e.target.value }),
-                        },
-                          React.createElement("option", { value: "" }, "（请选择 model）"),
-                          titleModels.map((m) => React.createElement("option", { key: m.id, value: m.id },
-                            m.name + " · " + m.id))
-                        )
-                      )
-                    )
-                  : null,
-                React.createElement("div", { className: "mcfg-note", key: "scope" },
-                  "生效范围：保存后对本 profile 之后生成的标题生效（包含新会话与后续标题生成）；不会改动已有标题、手动重命名，也不会改动会话的对话模型。"
-                ),
-                React.createElement("div", { className: "mcfg-reasoning", key: "budget" },
-                  React.createElement("span", { className: "mcfg-label" }, "标题请求预算"),
-                  React.createElement("div", { className: "mcfg-fields" },
-                    TITLE_BUDGET_FIELDS.map((field) => React.createElement("label", { className: "mcfg-field", key: field.key },
-                      React.createElement("span", { className: "mcfg-label" }, field.label),
-                      React.createElement("input", {
-                        className: "mcfg-input",
-                        type: "number",
-                        min: 1,
-                        step: 1,
-                        disabled: !data.writable || titleBusy,
-                        value: titleShown[field.key] === undefined || titleShown[field.key] === null ? "" : String(titleShown[field.key]),
-                        onChange: (event) => editTitleDraft({
-                          [field.key]: event.target.value === "" ? "" : Number(event.target.value),
-                        }),
-                      }),
-                      React.createElement("span", { className: "mcfg-note" }, field.hint)
-                    ))
-                  )
-                ),
-                React.createElement("div", { className: "mcfg-note", key: "budgetNote" },
-                  "上面的数值由本页写入设置，保存后对之后生成的标题生效；清空某项会回到宿主默认值。标题请求不传递推理档位，由所选模型自己决定是否思考——因此推理模型需要更大的「输出上限」。"
-                ),
-                React.createElement("div", { className: "mcfg-actions", key: "actions" },
-                  React.createElement("button", {
-                    type: "button",
-                    className: "mcfg-save",
-                    disabled: titleSaveDisabled || !titleDirty,
-                    onClick: saveTitle,
-                  }, titleBusy ? "正在保存…" : (titleDirty ? "保存标题设置" : "已保存")),
-                  titleDirty ? React.createElement("span", { className: "mcfg-note" }, "有未保存的修改") : null
-                )
-              ]
-        ),
-        React.createElement("div", { className: "mcfg-purpose", key: "image" },
-          React.createElement("div", { className: "mcfg-purpose-head" },
-            React.createElement("span", { className: "mcfg-purpose-name" }, "绘图"),
-            React.createElement("span", { className: "mcfg-chip" }, "图像专有参数")
-          ),
-          React.createElement("div", { className: "mcfg-desc" },
-            "绘图模型、端点、尺寸与质量属于图像专有参数，请在「绘图」页签配置；本页的「生图模型」勾选会把所选模型写入那里的模型列表。"
-          ),
-          data.imageModels && data.imageModels.length > 0
-            ? React.createElement("div", { className: "mcfg-note" },
-                "绘图页当前 " + data.imageModels.length + " 个配置：" + data.imageModels.join("、")
-                  + (data.imageDefault ? "（默认 " + data.imageDefault + "）" : "（未设默认，generate_image 需显式指定）"))
-            : React.createElement("div", { className: "mcfg-note" }, "绘图页尚未配置任何模型。")
-        )
-      ];
+      if (error) return React.createElement("div", { className: "mcfg-state mcfg-error" }, "加载失败：" + error);
+      if (!view) return React.createElement("div", { className: "mcfg-state" }, "正在读取绘图配置…");
 
       return React.createElement("div", { className: "mcfg" },
         React.createElement("div", { className: "mcfg-head" },
-          React.createElement("div", { className: "mcfg-title" }, "模型调参"),
+          React.createElement("div", { className: "mcfg-title" }, "绘图"),
           React.createElement("div", { className: "mcfg-sub" },
-            "集中配置每个模型的可选推理档位、上下文窗口、最大输出和输入模态；「用途」页管理标题生成路由；「绘图」页管理绘图模型与直接绘图。" +
-            "修改即时保存；API 密钥与端点请在「模型」页配置。" +
-            (data.writable ? "" : "（当前部署为只读，无法保存。）")
+            "独立配置绘图模型：聊天里可让助手调用 generate_image / list_image_models，也可在下方直接生成。绘图模型不进入聊天模型列表。"
+              + (writable ? "" : "（当前部署为只读，无法保存。）")
           )
         ),
-        tabBar,
         toast ? React.createElement("div", { className: "mcfg-toast " + (toast.kind === "ok" ? "mcfg-toast-ok" : "mcfg-toast-err") }, toast.text) : null,
-        tab === "models" ? modelsPanel : null,
-        tab === "purpose" ? purposePanel : null,
-        tab === "image" && ownView ? React.createElement(ImagePanel, {
-          remote: props.remote, call: props.call,
-          writable: !!data.writable, view: ownView, refresh: reload, showToast,
-        }) : null,
-        tab === "image" && !ownView ? React.createElement("div", { className: "mcfg-state mcfg-error" }, "宿主行未激活，无法读写绘图配置。") : null
+        React.createElement(ImagePanel, {
+          remote, call: props.call, writable, view, refresh, showToast,
+        })
       );
     }
 
+    // ── 官方「设置 → 模型」卡片的扩展：官方没有的兼容开关与目录推理覆盖 ──
+    function CompatCard(props) {
+      const load = props.load;
+      const save = props.save;
+      const provider = props.provider;
+      const [data, setData] = React.useState(null);
+      const [error, setError] = React.useState(null);
+      const [toast, setToast] = React.useState(null);
+      const [busy, setBusy] = React.useState(false);
+
+      const reload = React.useCallback(async () => {
+        try {
+          const value = await load(provider.provider);
+          setData(value);
+          setError(null);
+        } catch (err) {
+          setError(err && err.message ? err.message : String(err));
+        }
+      }, [load, provider.provider]);
+
+      React.useEffect(() => { void reload(); }, [reload]);
+
+      async function commit(kind, modelId, value) {
+        setBusy(true);
+        setToast(null);
+        try {
+          await save(provider.provider, modelId, kind, value);
+          await reload();
+          setToast({ kind: "ok", text: "已保存，下一次请求生效" });
+        } catch (err) {
+          setToast({ kind: "err", text: err && err.message ? err.message : String(err) });
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      if (error) {
+        return React.createElement("div", { className: "mcfg-compat" },
+          React.createElement("div", { className: "mcfg-error" }, "兼容设置读取失败：" + error));
+      }
+      if (!data) {
+        return React.createElement("div", { className: "mcfg-compat" },
+          React.createElement("div", { className: "mcfg-note" }, "正在读取兼容设置…"));
+      }
+      if (!data.models || data.models.length === 0) return null;
+      const editable = !busy && data.writable;
+
+      return React.createElement("div", { className: "mcfg-compat" },
+        React.createElement("div", { className: "mcfg-compat-head" }, "兼容与推理（插件补充）"),
+        React.createElement("div", { className: "mcfg-note" },
+          "这三项官方 Models 页没有：系统提示角色、Anthropic 思考格式、内置目录路由的推理档位覆盖。写入后下一次请求生效。"),
+        toast ? React.createElement("div", { className: "mcfg-toast " + (toast.kind === "ok" ? "mcfg-toast-ok" : "mcfg-toast-err"), role: "status" }, toast.text) : null,
+        data.models.map((model) => React.createElement("div", { key: model.id, className: "mcfg-compat-model" },
+          React.createElement("div", { className: "mcfg-compat-title" },
+            React.createElement("span", { className: "mcfg-model-name" }, model.name || model.id),
+            React.createElement("span", { className: "mcfg-model-id" }, model.id),
+            model.adaptiveThinking ? React.createElement("span", { className: "mcfg-chip mcfg-chip-on" }, "自适应思考") : null
+          ),
+          React.createElement("div", { className: "mcfg-reasoning" },
+            React.createElement("span", { className: "mcfg-label" }, "系统提示角色"),
+            React.createElement("div", { className: "mcfg-levels" },
+              ["auto", "system", "developer"].map((role) =>
+                React.createElement("label", { key: role, className: "mcfg-level" },
+                  React.createElement("input", {
+                    type: "radio",
+                    name: "compat-devrole-" + model.id,
+                    disabled: !editable,
+                    checked: role === "auto"
+                      ? model.supportsDeveloperRole === undefined
+                      : (role === "developer" ? model.supportsDeveloperRole === true : model.supportsDeveloperRole === false),
+                    onChange: () => void commit("supportsDeveloperRole", model.id, role === "auto" ? null : role === "developer"),
+                  }),
+                  React.createElement("span", null, role === "auto" ? "自动" : (role === "system" ? "system（Kimi/DeepSeek 网关推荐）" : "developer"))
+                )
+              )
+            ),
+            React.createElement("div", { className: "mcfg-note" },
+              "自动：跟随网关检测；网关报 role 'developer' is not allowed 时选 system。")
+          ),
+          model.adaptiveThinkingEditable ? React.createElement("div", { className: "mcfg-reasoning" },
+            React.createElement("span", { className: "mcfg-label" }, "思考格式（Anthropic 兼容开关）"),
+            React.createElement("div", { className: "mcfg-levels" },
+              ["auto", "adaptive"].map((choice) =>
+                React.createElement("label", { key: choice, className: "mcfg-level" },
+                  React.createElement("input", {
+                    type: "radio",
+                    name: "compat-adaptive-" + model.id,
+                    disabled: !editable,
+                    checked: choice === "auto" ? !model.adaptiveThinking : model.adaptiveThinking,
+                    onChange: () => void commit("adaptiveThinking", model.id, choice === "adaptive" ? true : null),
+                  }),
+                  React.createElement("span", null, choice === "auto" ? "自动（预算式 thinking）" : "自适应 thinking")
+                )
+              )
+            ),
+            React.createElement("div", { className: "mcfg-note" },
+              "只接受自适应思考的模型（Claude Opus 4.6 及更新等）报 400 requires adaptive thinking 时切到它；Claude 4.5 及更早保持「自动」。")
+          ) : null,
+          model.reasoningEditable ? React.createElement("div", { className: "mcfg-reasoning" },
+            React.createElement("span", { className: "mcfg-label" }, "可选推理档位（内置目录路由的 modelOverrides）"),
+            React.createElement("div", { className: "mcfg-levels" },
+              REASONING_LEVELS.map((level) => React.createElement("label", { key: level, className: "mcfg-level" },
+                React.createElement("input", {
+                  type: "checkbox",
+                  checked: model.levels.indexOf(level) >= 0,
+                  disabled: !editable,
+                  onChange: () => {
+                    const next = model.levels.slice();
+                    const index = next.indexOf(level);
+                    if (index >= 0) next.splice(index, 1); else next.push(level);
+                    void commit("reasoningLevels", model.id, next);
+                  },
+                }),
+                React.createElement("span", null, level)
+              ))
+            ),
+            React.createElement("div", { className: "mcfg-note" },
+              model.levels.length === 0
+                ? "未勾选任何档位 → 该模型视为无推理能力"
+                : "已勾选档位写入该路由的 modelOverrides；官方 Models 页已存的每档 API 值保持不变。")
+          ) : null
+        ))
+      );
+    }
+
+    /** Styles the official Models card extension needs on top of the drawing page. */
+    const COMPAT_CSS = `
+.mcfg-compat{display:flex;flex-direction:column;gap:10px;padding:12px 0 4px;border-top:1px dashed rgba(128,128,128,.35);margin-top:12px}
+.mcfg-compat-head{font-size:12.5px;font-weight:600;opacity:.9}
+.mcfg-compat-model{display:flex;flex-direction:column;gap:8px;padding:10px 12px;border:1px solid rgba(128,128,128,.25);border-radius:8px}
+.mcfg-compat-title{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+`;
+
     // 2026-09-08 (DSH 0.1.2-rc.1): `ctx.connection.api` no longer exists — the
-    // client API moved to the `remote.*` service namespace (remote.llm.*,
-    // remote.settings.*, remote.session.*). Declaring them also defers this
-    // plugin until the mux connection is up, so the settings page never loads
-    // against a dead API surface.
-    const inject = ["slots", "remote", "remote.llm", "remote.settings", "remote.session", "remote.credentials", "locale", "connection"];
+    // client API lives on the `remote.*` service namespace. Declaring them also
+    // defers this plugin until the mux connection is up.
+    const inject = ["slots", "remote", "remote.llm", "remote.settings", "remote.session", "remote.credentials", "connection"];
 
     function apply(ctx) {
       const style = document.createElement("style");
       style.dataset.plugin = "dsh-plugin-model-tuning";
-      style.textContent = CSS;
+      style.textContent = CSS + COMPAT_CSS;
       document.head.appendChild(style);
       ctx.effect(() => () => { style.remove(); });
 
-      if (ctx.locale) {
-        // 生产 dsh-client-locale 的 LOCALE_IDS 是 ["zh", "en"]；multi-locale
-        // 形态一次写入 zh / en。ctx.effect 挂进 fiber 生命周期，HMR 再激活
-        // 不会重复注册。
-        ctx.effect(() => ctx.locale.register("dsh-plugin-model-tuning", {
-          en: {
-            "tab.models": "Model parameters",
-            "tab.purpose": "Purposes",
-            "tab.image": "Images",
-            "title.name": "Session titles",
-            "title.desc": "A session title comes from a separate auxiliary request and never changes the chat model. By default it inherits the session's provider / model.",
-            "title.inherit": "Inherit from the current session (default)",
-            "title.custom": "Use a specific model",
-            "title.scope": "Scope: applying this affects titles generated afterwards in this profile. Existing titles, manual renames, and the session's chat model are left untouched.",
-            "title.missing": "The model-tuning settings namespace is missing: the host half did not activate (no title provider registered). Check that the plugin is enabled and restart dsh.",
-            "title.save": "Save title settings",
-          },
-          zh: {
-            "tab.models": "模型参数",
-            "tab.purpose": "用途",
-            "tab.image": "绘图",
-            "title.name": "标题生成",
-            "title.desc": "会话标题由一次独立的辅助请求生成，不会改动对话模型。默认继承当前会话的 provider / model。",
-            "title.inherit": "继承当前会话（默认）",
-            "title.custom": "使用指定模型",
-            "title.scope": "生效范围：保存后对本 profile 之后生成的标题生效；不会改动已有标题、手动重命名，也不会改动会话的对话模型。",
-            "title.missing": "未检测到 model-tuning 设置命名空间：宿主半区未激活（标题 provider 未注册），请检查插件是否启用并重启 dsh。",
-            "title.save": "保存标题设置",
-          },
-        }));
-      }
-
       const remote = ctx.remote;
-      const wrap = (response, map) => response.ok
-        ? { result: { ok: true, value: map(response.value) } }
-        : { result: { ok: false, error: response.error } };
-      const api = {
-        llm: {
-          providers: async () => {
-            const response = await remote.llm.listConfigurableProviders();
-            return wrap(response, (value) => ({ providers: value }));
-          },
-          models: async () => {
-            const response = await remote.session.modelCatalog();
-            return wrap(response, (value) => ({ groups: value.groups }));
-          },
-        },
-        settings: {
-          describe: async () => {
-            const response = await remote.settings.describe();
-            return wrap(response, (value) => value);
-          },
-          mutate: async (args) => {
-            const response = await remote.settings.mutate(args.ns, args.ops, args.expectedRevision);
-            return wrap(response, () => ({}));
-          },
-        },
-      };
       const timer = ctx.get("timer");
-
-      // v2: the Remote call path for the 直接绘图 panel (ex image-generation
-      // client half). `connection.rpc.call('/api', 'imageGeneration/<method>')`.
-      const unwrap = (response) => { if (!response.ok) throw new Error(response.error?.message ?? "请求失败"); return response.value; };
+      const unwrap = (response) => {
+        if (!response.ok) throw new Error(response.error && response.error.message ? response.error.message : "请求失败");
+        return response.value;
+      };
       const call = async (method, args) => unwrap(await ctx.connection.rpc.call("/api", `imageGeneration/${method}`, { args }));
 
+      /** Provider metadata, its settings section and the model catalog, read together. */
+      async function compatSnapshot(providerId) {
+        const [providers, catalog, settings] = await Promise.all([
+          unwrap(await remote.llm.listConfigurableProviders()),
+          unwrap(await remote.session.modelCatalog()),
+          unwrap(await remote.settings.describe()),
+        ]);
+        const entry = providers.find((item) => item && item.provider === providerId);
+        if (!entry) throw new Error("该 provider 不可配置");
+        const namespaces = Array.isArray(settings.namespaces) ? settings.namespaces : [];
+        const nsView = namespaces.find((item) => item && item.ns === entry.settingsNs);
+        const groups = Array.isArray(catalog.groups) ? catalog.groups : [];
+        const group = groups.find((item) => item && item.id === providerId);
+        const profile = profileOf(nsView, entry.settingsPath);
+        return {
+          entry, nsView, group, profile,
+          adaptiveKey: adaptiveThinkingCompatKey(entry.settingsNs, profile),
+          writable: settings.writable !== false,
+        };
+      }
+
+      /** One provider card's compat rows: the switches and the catalog-route levels. */
+      async function loadCompat(providerId) {
+        const snapshot = await compatSnapshot(providerId);
+        const entry = snapshot.entry;
+        const nsView = snapshot.nsView;
+        const models = ((snapshot.group && snapshot.group.models) || []).map((model) => {
+          const efforts = model.reasoning && Array.isArray(model.reasoning.efforts) ? model.reasoning.efforts : [];
+          const levels = efforts.map((effort) => effort.id).filter((id) => id !== "off");
+          const stored = storedReasoningEfforts(entry, nsView, model.id);
+          return {
+            id: model.id,
+            name: model.name,
+            supportsDeveloperRole: entry.settingsNs === "llm-pi-ai"
+              ? readCompatField(nsView, entry.settingsPath, model.id, "supportsDeveloperRole")
+              : undefined,
+            adaptiveThinking: snapshot.adaptiveKey !== null
+              && readCompatField(nsView, entry.settingsPath, model.id, snapshot.adaptiveKey) === true,
+            adaptiveThinkingEditable: snapshot.adaptiveKey !== null && levels.length > 0,
+            // The official Models page owns reasoning for hand-declared routes;
+            // only installed-catalog routes need this override editor.
+            reasoningEditable: entry.settingsNs === "llm-pi-ai" && entry.declared !== true,
+            levels: stored === false ? [] : levels,
+          };
+        });
+        return { writable: snapshot.writable, models };
+      }
+
+      /** Apply one compat edit through the provider's own settings namespace. */
+      async function saveCompat(providerId, modelId, kind, value) {
+        const snapshot = await compatSnapshot(providerId);
+        const entry = snapshot.entry;
+        const nsView = snapshot.nsView;
+        let write;
+        if (kind === "supportsDeveloperRole" || kind === "adaptiveThinking") {
+          if (value !== null && typeof value !== "boolean") throw new Error("取值必须是布尔值");
+          const compatKey = kind === "supportsDeveloperRole" ? "supportsDeveloperRole" : snapshot.adaptiveKey;
+          if (compatKey === null || compatKey === undefined) throw new Error("该路由不是 anthropic-messages，不能设置思考格式");
+          write = computeCompatWriteOps(entry, nsView, modelId, compatKey, value);
+        } else if (kind === "reasoningLevels") {
+          const levels = Array.isArray(value) ? value : [];
+          for (const level of levels) {
+            if (REASONING_LEVELS.indexOf(level) < 0) throw new Error("未知的推理档位：" + level);
+          }
+          const payload = reasoningEffortsPayload(levels, storedReasoningEfforts(entry, nsView, modelId));
+          write = computeWriteOps(entry, nsView, modelId, "reasoningEfforts", payload);
+        } else {
+          throw new Error("未知的修改类型");
+        }
+        if (!write) throw new Error("该 provider 不接受这个字段");
+        const response = await remote.settings.mutate(write.ns, write.ops);
+        if (!response.ok) throw new Error(response.error && response.error.message ? response.error.message : "保存失败");
+      }
+
       ctx.slots.inject("settings.section", () => ctx.slots.register(
-        { name: "settings.section", id: "model-tuning", order: 11, label: () => "模型调参" },
-        () => React.createElement(ModelTuningPage, { api, timer, remote, call }),
+        { name: "settings.section", id: "model-tuning", order: 11, label: () => "绘图" },
+        () => React.createElement(DrawingPage, { remote, timer, call }),
+      ));
+
+      // Official seat for plugins distributed outside the repository: one
+      // registration under the pi-ai settings namespace receives every pi-ai
+      // provider card (shipped, added and hand-declared alike).
+      ctx.slots.inject("settings.models.provider-card", () => ctx.slots.register(
+        {
+          name: "settings.models.provider-card",
+          key: "llm-pi-ai",
+          inject: () => ({ load: loadCompat, save: saveCompat }),
+        },
+        CompatCard,
       ));
     }
 

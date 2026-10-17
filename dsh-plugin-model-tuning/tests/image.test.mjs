@@ -4,7 +4,7 @@ import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { test } from 'node:test'
 import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
-import { Config, apply } from '../index.js'
+import { Config } from '../index.js'
 import { discoverImageModels, discoveryUrl, generateImages, resolveRequest, validateConfig, imageType } from '../core.js'
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAHklEQVQ4jWPo23H3PyWYYdSA/6NhcHc0DHYMizAAALd0Ii6qzJXIAAAAAElFTkSuQmCC', 'base64')
@@ -154,9 +154,6 @@ function pluginHarness(cfg) {
   const liveConfig = {
     models: { get: () => current.models },
     defaultModel: { get: () => current.defaultModel },
-    titleMode: { get: () => 'inherit' },
-    titleProvider: { get: () => undefined },
-    titleModel: { get: () => undefined },
     targetWords: 5, targetCjkCharacters: 10, maxInputBytes: 4096, maxOutputTokens: 64, timeoutMs: 60000,
   }
   const tools = new Map(), cleanups = [], services = new Map()
@@ -208,7 +205,7 @@ test('host plugin registers real tool schemas and Remote methods; hot config and
   assert.equal(harness.tools.size, 0)
 })
 
-/** Drive ONLY the image half: the title provider needs the real host helper. */
+/** Drive the drawing half directly through its exported registration. */
 
 test('direct panel jobs return previews and exact original, and reject unknown image tickets', async t => {
   const host = await server(t, (_req, res) => json(res, imageResponse))

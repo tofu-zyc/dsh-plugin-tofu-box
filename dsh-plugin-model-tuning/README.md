@@ -1,72 +1,50 @@
 # dsh-plugin-model-tuning
 
-「设置 → 模型调参」页面插件。页面分为**「模型参数」「用途」「绘图」**三个页签。
+只补**官方没有的两块**：
 
-> **v2.0 合并说明**：本插件现已并入原 `dsh-plugin-title-model`（标题生成独立路由）
-> 与原 `dsh-plugin-image-generation`（绘图模型配置、`generate_image` 工具、直接绘图面板）。
-> 三个曾经的包现在是一个包、一个设置命名空间（`model-tuning`）、一个 Config schema。
-> 原 `title-model` 与 `image-generation` 两个包已从本仓库移除；合并动机与决策记录见文末。
+1. **官方「设置 → 模型」卡片里的兼容与推理补丁**（内嵌在官方 Models 页，不再有独立参数页）；
+2. **「设置 → 绘图」页**：绘图模型配置 + `generate_image` / `list_image_models` 工具 + 直接绘图面板。
 
-## 功能
+> **v3 边界收缩（2026-10，基线 dsh 0.2.1-rc.1）**：v2 合并进来的「标题生成路由」交还官方 `session-title-llm` 行，「模型参数」页交还官方 Models 页。官方已经能做的，本插件不再复制；官方没有的，见下面两节。重叠盘点记录见 [docs/PLUGIN-SCOPE-dsh-0.2.1-rc.1.md](../docs/PLUGIN-SCOPE-dsh-0.2.1-rc.1.md)。
 
-### 模型参数
+## 1. 兼容与推理（官方 Models 页扩展）
 
-- 按 provider 分组展示当前模型目录；
-- 为每个模型配置：
-  - 可选推理档位（仅 `llm-pi-ai` 可编辑，其他 provider 只读展示）；
-  - 上下文窗口；
-  - 最大输出 tokens；
-  - 输入模态三态开关（见下）；
-  - 系统提示角色兼容开关：`自动` / `system` / `developer`（仅 `llm-pi-ai`，
-    写入模型条目的 `compat.supportsDeveloperRole`；遇到 kimi/DeepSeek 等
-    报 `role 'developer' is not allowed` 时选 `system`）；
-  - 思考格式兼容开关：`自动` / `自适应 thinking`（仅 `llm-pi-ai` 且路由 `api: anthropic-messages`，
-    写入模型条目的 `compat.forceAdaptiveThinking`；见下节「Anthropic 思考格式」。
-    该模型一个推理档位都没勾选时不显示——那时请求里根本没有 `thinking`）；
-  - 生图模型勾选（把该模型写入「绘图」页签的模型列表，见「绘图页签」）；
-- 顶部搜索框按模型名 / ID / 描述 / provider 过滤；
-- 修改即时保存（`remote.settings.mutate`；模型目录来自 `remote.session.modelCatalog()`）。
+通过官方为仓库外插件留的 `settings.models.provider-card` 席位，在每张 pi-ai provider 卡片里追加一节「兼容与推理（插件补充）」。**这些控件官方 Models 页没有**：
 
-### 用途（标题生成）
+| 控件 | 写入位置 | 解决什么 |
+| --- | --- | --- |
+| **系统提示角色** `自动 / system / developer` | 模型条目的 `compat.supportsDeveloperRole` | 网关报 `role 'developer' is not allowed`（Kimi、部分 DeepSeek 网关）时改发 `system` |
+| **思考格式** `自动 / 自适应 thinking` | 模型条目的 `compat.forceAdaptiveThinking` | Claude Opus 4.6+ / Sonnet 5 等只接受 `thinking.type=adaptive`，预算式请求会被 400 `requires adaptive thinking` 拒绝 |
+| **可选推理档位**（内置目录路由） | 路由的 `modelOverrides.<id>.reasoningEfforts` | 官方只给**手写路由**的模型显示推理档位；内置目录路由借用 `modelOverrides` 声明/关掉档位，写入时保留官方已存的每档 API 值 |
 
-按「用途」组织的配置。目前含**标题生成**一项：
+说明：
 
-- 默认**继承当前会话**已记录的 provider / model（与内置标题生成一致）；
-- 也可指定独立的 provider / model，选项全部来自真实模型目录（不提供自由输入框，避免臆造 ID）；
-- **标题请求预算也在本页配置**（目标词数 / 汉字数、输入字节上限、输出 token 上限、超时）：
-  这些字段是 volatile 配置，写入后按需覆盖插件行的默认值；清空某一项即回到默认；
-- 每次生成都重新读取路由与预算，保存后下一次标题生成即生效，**不需要重启宿主**；
-- 生效范围是本 profile 之后生成的标题；已有标题、手动重命名、会话的对话模型都不受影响；
-- 不提供推理档位控件：标题策略不向标题请求传递 `reasoningEffort`，加一个不生效的控件会误导。
-  但这意味着**是否思考由所选模型自己决定**——推理模型会先思考再作答，需要更大的
-  「输出上限」（例如 1024）才能在预算内产出标题；直接作答的模型用默认的 64 就够。
-  例外：内置 DeepSeek 适配器对 `purpose === "session-title"` 强制关闭思考
-  （`dsh-llm-deepseek` 里 `options.purpose === "session-title" ? "off"`），所以
-  `deepseek-official` 的模型在默认预算下即可直接出标题；
-- 「宿主行未激活」提示只在标题 provider 注册失败（插件半区未启动）时出现。
+- provider 卡片里只显示 **pi-ai** 家族；`llm-deepseek` 不出现这一节。
+- 思考格式只在路由自己声明 `api: anthropic-messages` 时出现；推理档位只在**已安装目录路由**（`declared !== true`）出现——手写路由交给官方页面，避免两个编辑器抢同一字段。
+- 写入走 provider 自己的 settings 命名空间（`llm-pi-ai`），下一次请求生效，无需重启。
+- 「系统提示角色」的字段名与协议白名单由 `@deepseek-ai/dsh-llm-pi-ai` 决定；上游改名/收窄会在 `tests/adaptive-thinking.test.mjs` 的耦合守卫里失败，而不是在会话里变成 400。
 
-### 绘图页签
+## 2. 绘图页
 
-独立配置绘图模型、`generate_image` / `list_image_models` 工具与「直接绘图」面板。
-绘图模型不进入聊天模型列表，不改动现有会话存储或对话 provider。
+独立配置绘图模型，不进入聊天模型列表、不改动会话存储或对话 provider。
 
-- 添加模型：填供应商 API 地址（默认 `https://api.openai.com/v1`）与 API Key，
-  点「获取模型列表」搜索并选择（只请求目录、不生成、不保存草稿 Key；模型 ID 可手填）；
-- 也可在「模型参数」页勾选某模型的「生图模型」，自动按该 provider 的
-  `baseURL + /images/generations` 与 `apiKeyEnv` 推导出一条配置（带 `source` 溯源标记）；
+- 添加模型：填供应商 API 地址（默认 `https://api.openai.com/v1`）与 API Key，点「获取模型列表」搜索并选择（只请求目录、不生成、不保存草稿 Key；模型 ID 可手填）；
 - 首个模型自动成为默认项；尺寸、质量、超时等高级参数按模型配置；
 - 直接绘图面板：短请求启动任务 + 轮询状态 + 取消，不经过聊天模型；
-- 协议：OpenAI Images（`POST`，解析 `data[].b64_json` 或 `data[].url`，1–4 张）。
+- 聊天中由助手调用：
+  - `list_image_models`：列出配置 ID、上游模型 ID 与默认参数；
+  - `generate_image`：按配置发起 OpenAI Images 请求（1–4 张），原图逐字节保留；当前聊天模型声明了图像输入时，预览也进模型上下文。
 
-## 配置结构（单一命名空间）
+协议：OpenAI Images（`POST`，解析 `data[].b64_json` 或 `data[].url`）。凭据通过 dsh 凭据服务保存为引用（`apiKeyEnv`），不写明文。
 
-profile 条目 id `model-tuning` 的 Config 字段（volatile，热更新即时生效）：
+## 配置结构
+
+profile 条目 id `model-tuning` 的 Config（volatile，热更新即时生效）：
 
 ```yaml
 - id: model-tuning
   name: dsh-plugin-model-tuning
   config:
-    # ── 绘图（原 image-generation 命名空间字段原样保留） ──
     models:
       - id: my-art
         name: 我的绘图模型
@@ -76,155 +54,30 @@ profile 条目 id `model-tuning` 的 Config 字段（volatile，热更新即时�
         apiKeyEnv: IMAGE_API_KEY
         timeoutSeconds: 300
     defaultModel: my-art
-    # ── 标题生成（原 title-model 的 mode/provider/model 加 title 前缀） ──
-    titleMode: inherit        # inherit | custom
-    # titleProvider: tofu-gpt # custom 时必填
-    # titleModel: gpt-5       # custom 时必填
-    # ── 标题预算（volatile：可在「用途」页改；这里是未改时的默认值） ──
-    targetWords: 5
-    targetCjkCharacters: 10
-    maxInputBytes: 4096
-    maxOutputTokens: 64
-    timeoutMs: 60000
 ```
 
-## 它替换了什么（标题行）
+v2 的标题字段（`titleMode` / `titleProvider` / `titleModel` 与四个预算字段）已从 schema 移除；Loader 的配置校验保留未知键，所以旧 profile 仍能启动，多余字段被忽略。
 
-宿主自带一行标题生成 provider（`@deepseek-ai/dsh-session-title-first-prompt-llm`）。
-`ctx.sessionTitle.register()` **只允许一个 provider，第二次注册直接抛错**，所以本包的
-`cordis.patch.yml` 显式替换该行：
+## 从 v2 升级
 
-```yaml
-- id: session-title-llm
-  disabled: true          # 必须先摘掉原行，否则 boot 时重复注册会失败
-- insert:
-    - id: model-tuning
-      name: dsh-plugin-model-tuning
-      config: { targetWords: 5, targetCjkCharacters: 10, maxInputBytes: 4096, maxOutputTokens: 64, timeoutMs: 60000 }
-```
+1. **标题生成**：v2 会禁用官方 `session-title-llm` 行并换上自己的 provider；v3 不再动组合，官方行恢复。需要独立标题模型时，在 profile 的 `cordis.patch.yml` 直接覆盖官方行（字段与官方一致）：
 
-- **顺序即语义**：`disabled` 必须排在 `insert` 之前，否则两行会同时注册。
-- `config` 与 base 的数值逐项相同：**未在「用途」页改动预算时**，删掉本包的 `config:` 块也不改变标题行为；
-  页面写入的用户层值会覆盖这些默认值。
-- 注册时沿用原 provider id（`session-title-llm`）与原 cadence（`first-prompt`），会话日志里的标题归因不变。
-- 标题请求的提示词组装、取消与结果校验沿用宿主共享策略
-  （`@deepseek-ai/dsh-session-title-llm` 的 `generateSessionTitleWithLlm`）；
-  本插件决定**路由**与**预算**（提示词目标词数 / 汉字数、输入字节上限、输出 token 上限、超时）。
-- 卸载本 bundle 会同时移除 `disabled` 与 `insert` 两条 patch，宿主自带 provider 自动恢复。
+   ```yaml
+   - id: session-title-llm
+     name: '@deepseek-ai/dsh-session-title-first-prompt-llm'
+     config:
+       targetWords: 5
+       targetCjkCharacters: 10
+       maxInputBytes: 4096
+       maxOutputTokens: 4096
+       timeoutMs: 60000
+       provider: your-provider     # 成对出现；省略两者即继承会话路由
+       model: your-model
+   ```
 
-## 模块解析（重要）
-
-`@deepseek-ai/dsh-session-title-llm` 由**运行本插件的那个部署**提供，而不是从本包目录解析。
-原因：本包在工作区里是 `link:` 依赖，若在包内安装该依赖，会连带把 `@deepseek-ai/dsh-llm` 等
-peer 装成与部署不同的版本，形成重复模块图。`index.js` 用宿主自身入口锚点
-`createRequire(process.argv[1])` 定位并动态 `import()` 该包。
-
-## 输入模态
-
-harness 的请求模态是**闭合集合 `text | image`**：`dsh-llm` 的 `ModelModalityMap` 与
-`dsh-llm-pi-ai` 的 `MODALITY_GATE` 都只有这两个成员。**视频没有配置项可开**。
-
-| 选项 | 写入值 | 生效语义 |
-| --- | --- | --- |
-| `自动` | 删除该字段 | 交由模型条目 → 已安装目录条目 → 路由 `defaultInput`（默认 `[text]`）解析。空数组 `[]` 与「不存在」等价。 |
-| `纯文本` | `["text"]` | 显式声明。附图在发送前被拒，`read_image` 同样拒绝。 |
-| `文本 + 图像` | `["text", "image"]` | 贴图、`read_image`、MCP 结果图全部可用。 |
-
-- 字段名按 namespace 区分：`llm-pi-ai` 写模型条目的 `input`，`llm-deepseek` 写 `inputModalities`；
-- 内置目录 provider 走 `modelOverrides.<id>.input`；
-- `llm-deepseek` 从「文本 + 图像」切走会连 `imagePixelBudget` / `imageMaxBytes` / `imageDetail` 一起删除；
-- 保存即生效，无需重启 `dsh web`。
-
-> 注意：网关是否真收图像无法从配置读出。开「文本 + 图像」前建议先对端点实测一次。
-> 「系统提示角色」开关依赖 DSH 适配层 `dsh-llm-pi-ai` 透传 `compat.supportsDeveloperRole`
->（`0.1.0-rc.6` 默认不透传，需按本仓库 `deepseek-harness` 的 catalog.ts 补丁同步，或等上游合入）。
-
-## Anthropic 思考格式（自适应 vs 预算式）
-
-「模型参数」页的**思考格式**开关解决的是这一条报错：
-
-```
-400 {"error":{"message":"claude-opus-5-5 requires adaptive thinking; omit thinking or use
-thinking.type=adaptive and output_config.effort","type":"invalid_request_error"}}
-```
-
-- **原因**：pi-ai 只有在模型的 `compat.forceAdaptiveThinking === true` 时才发
-  `thinking: {type:"adaptive"}` + `output_config: {effort:"…"}`；否则发旧的预算式
-  `thinking: {type:"enabled", budget_tokens:N}`。只接受自适应思考的模型（Claude Opus 4.6 及更新、
-  Sonnet 5、Fable 5、Kimi K3 等）会直接 400 拒掉预算式请求。
-- **为什么手写路由会中招**：pi-ai 内置目录给它自己带的模型 ID 标了这个标记，
-  而 `dsh-llm-pi-ai` 只在「模型 ID 命中该 provider 自己的目录条目」时才继承目录 `compat`
-  （`resolveModelCompat` 要求 `base.api === api`）。手写路由（例如 `providers.ironman-claude`
-  这种目录里不存在的 key）没有任何目录条目可继承，`claude-opus-5-5` 这类目录里其实认识、
-  但挂在 `anthropic` 名下的 ID 也一样继承不到——于是请求退化成预算式。
-- **怎么修**：在该模型的「思考格式」里选**自适应 thinking**，页面把
-  `compat.forceAdaptiveThinking: true` 写进模型条目（与 `系统提示角色` 同一套写法），
-  下一次请求即生效，无需重启。Claude 4.5 及更早只认预算式，保持「自动」。
-- **另一条路（不动插件）**：把这条路由改成目录里已有的 key（例如 `providers.anthropic`
-  只覆盖 `baseURL` / `apiKeyEnv`，用 `models:` 收窄到要用的几个 ID），模型 ID 因此命中目录条目，
-  自适应标记、`supportsTemperature` 等兼容位都会自动继承。代价是 provider ID 变了，
-  老会话里记录的路由名会对不上，所以通常仍是逐个模型打勾更省事。
-
-> **已知边界**：思考强度选 `off` 时，`dsh-llm-pi-ai` 会把声明里 `off: null` 的那一项**移出**
-> `thinkingLevelMap`，pi-ai 因此发 `thinking: {type:"disabled"}`（只有把 `off` 钉成 `null` 才会
-> 整个省略该参数——那是内置目录条目的写法），本开关管不到这一段。若网关连 `disabled` 也拒绝，
-> 把该模型的「可选推理档位」全部取消（写成 `reasoningEfforts: false`，即视为无推理能力），
-> 请求里就完全不会出现 `thinking`。
-
-> **耦合点**：字段名 `forceAdaptiveThinking` 与「只在该协议的白名单内」都由上游决定
-> ——`dsh-llm-pi-ai` 的 `anthropic-messages` compat 门（`0.1.7-alpha.2` 起已含该字段，
-> `884f7b9c41` 于 2026-08-18 引入）会拒收白名单外的字段，pi-ai 的
-> `dist/api/anthropic-messages.js` 是唯一读它的地方。`tests/adaptive-thinking.test.mjs`
-> 在有 `DSH_TEST_DEPLOY_ROOT` 时直接问该部署的 pi-ai 要请求体，上游改名会在这里失败而不是在会话里变成 400。
-
-## dsh 0.2.1（alpha）适配（v2.1）
-
-- **标题 helper 换了 API。** 0.2.1-alpha 系列删掉了 `generateSessionTitleWithLlm`，改成
-  `executeSessionTitleLlm(ctx, config, request, providerId, prepared)`：提示词、输入包装、推理档位选择
-  与输出解析都交还给提供方。本插件按宿主实际导出择一：有新 API 就走新 API（提示词与解析规则复刻官方
-  `session-title-first-prompt-llm`，推理档位取路由最低档），否则回落旧 helper，0.1.7–0.2.0 不受影响。
-  2.0.x 在 0.2.1 上会因为找不到旧导出而整行激活失败（绘图与设置页一起没了）。
-- **标题注册失败不再拖垮整个插件。** `apply` 里标题路由单独兜底：失败只打一条 warn、不注册标题提供方，
-  绘图工具与设置页照常。
-- **与官方「会话标题刷新」（可选目录里的 `session-titles-bundle`）互斥。** 两者都要独占
-  `ctx.sessionTitle.register()`，后注册的一方失败——本插件这边表现为上面那条 warn。二选一。
-- **推理档位与官方 Models 页写的是同一个字段。** 0.2.1-alpha.4 起官方 Models 页可以给手工声明的 pi-ai
-  模型编辑 `reasoningEfforts`，并允许每一档发送自定义 API 值（如 `high → deep`）。本页勾选档位时保留
-  已存的值，只有新加的档位才默认用档位名；`off` 的已存值也原样保留。
-
-## 与 DSH 版本的耦合点（0.1.7-alpha.2）
-
-- **provider 目录必须取 `llm.listConfigurableProviders()`**（返回 `LlmConfigurableProvider`
-  含 `settingsNs` / `settingsPath` / `declared`）。`llm.listProviders()` 返回的
-  `LlmProviderInfo { id, name }` 没有这些字段，用错会让整页控件被禁用。
-- 绘图 Remote 面板走 `ctx.connection.rpc.call('/api', 'imageGeneration/<method>', { args })`
-  （浏览器半区）× `TypertRemoteService`（宿主半区）。
-- 标题 helper `@deepseek-ai/dsh-session-title-llm` 需 `>=0.1.6-alpha.2`；
-  `@deepseek-ai/schemastery` 需 `^3.18.4`（`volatile()` 链式方法 3.18.4 才有）。
-
-## 测试
-
-```sh
-node --test tests/*.test.mjs                      # 全部（title-provider 需要 DSH_TEST_DEPLOY_ROOT）
-# 或分开：
-node --test tests/title-route.test.mjs            # 标题路由解析与 Config schema（纯函数）
-node --test tests/title-purpose.test.mjs          # 用途页读写规划 + locale 回归
-node --test tests/image-link.test.mjs             # 生图链接写入规划（纯函数）
-node --test tests/image.test.mjs                  # 绘图传输/工具/Remote（本地 HTTP，不外联）
-node --test tests/adaptive-thinking.test.mjs      # 思考格式开关：白名单 + 写入规划（+ 部署耦合守卫）
-DSH_TEST_DEPLOY_ROOT=<隔离部署> node --test tests/title-provider.test.mjs   # 真 helper + 假 ctx
-```
-
-- `title-provider.test.mjs` 用**假 ctx + 真共享策略**（只 mock `ctx.llm.stream`）验证唯一注册、
-  继承/指定路由、首条消息选择、辅助请求记录、失败与取消路径。`tests/_host.mjs` 要求
-  `DSH_TEST_DEPLOY_ROOT` 指向隔离的 0.1.7-alpha.2 部署。
-- `adaptive-thinking.test.mjs` 的前半段是纯函数（开关只出现在 `anthropic-messages` 路由、
-  写入落在模型条目的 `compat` 上，目录路由落到 `modelOverrides`）；后半段只在有
-  `DSH_TEST_DEPLOY_ROOT` 时运行，把该部署的 pi-ai 拦在假 `fetch` 前，直接读出请求体，
-  证明「打勾 → `thinking.type=adaptive` + `output_config.effort`，不打勾 → 预算式」。
-- **这些测试不是实机验证**。实机验收：标题从会话日志读 `session/title-llm-request` 的 `route`
-  与最终 `session/title` 的 `source.model`；绘图确认「模型参数」勾选 → 绘图页出现条目 →
-  直接绘图面板出图；思考格式在模型下拉里选一档后看会话日志里那次请求的请求体。
+   官方可选组合包「随对话更新的标题」也不再与本插件互斥。
+2. **模型参数**：上下文窗口、最大输出、输入模态、模型列表、API Key、模型发现都在官方「设置 → 模型」页；本插件只保留上表的三项官方缺口。
+3. **绘图**：配置键（`models` / `defaultModel`）与命名空间都没变，升级后原配置继续生效。旧版「模型参数 → 生图模型」勾选留下的条目（带 `source` 标记）仍可显示与编辑，链接入口已移除。
 
 ## 安装 / 卸载
 
@@ -233,38 +86,22 @@ dsh plugin --profile web add "link:D:\program\dsh-plugins\dsh-plugin-model-tunin
 dsh plugin --profile web remove dsh-plugin-model-tuning
 ```
 
-装/卸后**重启 profile** 生效（composition 在进程启动时组树；patch 层 live 重载只对 config 变更生效）。
-卸载后：宿主自带标题 provider 恢复；绘图配置在用户 settings 里的段落成为未注册命名空间的普通文本，
-不再被读取；已有图片附件与共享凭据不会被删除。
+装/卸后重启 profile 生效（组合在进程启动时组树）。卸载后：官方 Models 页少一节「兼容与推理」；绘图页消失、`generate_image` 工具下线；已存绘图配置留在 settings 里成为未注册命名空间的数据，不删除任何图片附件或共享凭据。
 
-## 移动端
+## 与 dsh 版本的耦合点
 
-「容量字段」的「下拉框 + 自定义输入」在**所有视口**都上下堆叠（1.1.1 起）。
+- 基线：**dsh 0.2.1-rc.1**（本机实测）。官方 `settings.models.provider-card` 席位自 0.1.2-alpha 存在，`plugins.row.config` 自 0.1.6；但本包只按 rc 线验证。
+- 依赖宿主包：`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-typert-protocol`、`@deepseek-ai/schemastery`。
+- 绘图 Remote：浏览器 `ctx.connection.rpc.call('/api', 'imageGeneration/<method>')` × 宿主 `TypertRemoteService`。
 
-## v2 合并决策记录（2026-10）
+## 测试与验证
 
-**合并了什么**：`dsh-plugin-title-model`（宿主侧标题路由）与 `dsh-plugin-image-generation`
-（绘图工具/面板）并入本包。9 包 → 7 包。
+```sh
+node --test tests/*.test.mjs
+```
 
-**为什么**：
+- `image.test.mjs`：绘图传输、工具 schema、Remote 方法与热配置（本地 HTTP，不外联）；
+- `reasoning-efforts.test.mjs`：推理档位写入规划，不覆盖官方已存 API 值；
+- `adaptive-thinking.test.mjs`：思考格式开关的写入规划 + 对已部署 pi-ai 的请求体耦合守卫（需要 `DSH_TEST_DEPLOY_ROOT`，跳过时不算失败）。
 
-1. **UI 早已同居**。「用途」页与「生图模型」勾选本来就在本页，旧结构下同一个页面要跨三个包、
-   两个外部命名空间（`title-model`、`image-generation`）读写，任何一处 schema 变更都要双包同步，
-   还有专门的跨包契约测试守着同步——这是分布式单体，不是解耦。
-2. **卸载粒度论点不成立**。单 profile 部署下不存在「只要绘图不要调参」的场景；且旧结构下卸载
-   image-generation 会让调参页的生图勾选静默降级，粒度本来就是假的。
-3. **数据迁移可控**。绘图 `models`/`defaultModel` 字段名原样保留；标题 `mode/provider/model`
-   改为 `titleMode/titleProvider/titleModel`（一次性迁移 cordis.patch.yml 中的配置块）。
-
-**没合并谁**：`model-search`（占输入栏 slot，崩溃自动回退内置菜单，独立价值明确）、
-`computer-use`（原生运行时）、`read-image-preview`（通用图像卡片，刻意为任何图像工具设计）、
-`mcp-ui` / `shell-selector`（功能域不同）保持独立。
-
-**迁移指引**（从旧结构升级时）：
-
-1. `cordis.patch.yml` 里原 `- id: image-generation` 块的 `config:` 内容（models、defaultModel）
-   原样搬进 `- id: model-tuning` 块；
-2. 原用户 settings 里 `title-model:` 段的 `mode/provider/model` 若为 custom，改写到
-   `model-tuning:` 段的 `titleMode/titleProvider/titleModel`；
-3. 从 profile 移除 `dsh-plugin-image-generation` 与 `dsh-plugin-title-model` 两个 bundle；
-4. 重启 profile。
+这些测试不是实机验证。实机验证放在隔离 profile（见 [docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md#隔离测试-profile不要动桌面端的-profile)）：确认官方 Models 卡片出现「兼容与推理」、开关写入后会话日志里的请求体变化、绘图页能出图。**不要用桌面端正在运行的 profile 做验证。**
