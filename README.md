@@ -21,7 +21,7 @@ dsh plugin --profile web add tofu-box
 | 插件 | 说明 | 支持的 dsh 版本 | 平台 | 安装 |
 | --- | --- | --- | --- | --- |
 | **model-tuning** | 只补官方没有的两块：①**官方「设置 → 模型」卡片里的兼容补丁**——系统提示角色 `compat.supportsDeveloperRole`、Anthropic 思考格式 `compat.forceAdaptiveThinking`、内置目录路由的推理档位 `modelOverrides.<id>.reasoningEfforts`，官方 Models 页没有这些控件；经官方 `settings.models.provider-card` 席位内嵌，没有独立参数页。②**绘图**（绘图模型配置、`generate_image` / `list_image_models` 工具与直接绘图面板，原图逐字节保留）。**v3 起标题路由交还官方 `session-title-llm` 行、模型参数交还官方 Models 页**；标题字段已从 Config 移除，旧 profile 仍可加载。详见 [README](dsh-plugin-model-tuning/README.md) | 基线 **0.2.1-rc.1** 实测；`provider-card` 席位自 0.1.2-alpha 存在，但本包只按 rc 线验证 | Win11 实测；Linux/macOS 未测 | `dsh plugin --profile web add dsh-plugin-model-tuning` |
-| **read-image-preview** | 会话里的图片（read_image、computer-use 截图、消息图片）共用一个查看器：缩放平移、标注、裁剪，回车直接放进输入框；输入框旁一键抓屏框选 | 1.6 起接官方图库 slot，需 ≥ 0.2.0-rc.2；0.2.1-alpha.4 实测通过 | Win11 实测；Linux/macOS 未测 | `dsh plugin --profile web add dsh-plugin-read-image-preview` |
+| **read-image-preview** | 会话里的图片（read_image、computer-use 截图、消息图片）共用一个查看器：缩放平移、标注、裁剪，回车直接放进输入框；输入框旁一键抓屏框选 | 1.6 起接官方图库 slot，需 ≥ 0.2.0-rc.2；**0.2.1-rc.1 实测通过** | Win11 实测；Linux/macOS 未测 | `dsh plugin --profile web add dsh-plugin-read-image-preview` |
 | **shell-selector** | 「设置 → Shell」里选 AI 执行命令用哪个 shell：PowerShell 7 / Windows PowerShell 5.1 / 自定义路径。只写宿主 `pwsh-sandbox` 条目本来就支持的 `pwshPath`，保存后下一条命令即生效，不重启、不替换执行器，沙箱 / 审批 / 超时 / 退出码全部沿用内置；选中 5.1 时额外注册一条方言上下文告知模型 `&&`、`??` 不可用；Git Bash 因受限执行未验证而置灰并写明原因，详见 [README](dsh-plugin-shell-selector/README.md) | ≥ 0.1.7-alpha.2，实测 0.1.7-rc.1；0.2.0-rc.2 单测通过 | Win11 实测；Linux/macOS 未测 | `dsh plugin --profile web add dsh-plugin-shell-selector` |
 | **computer-use** | 13 个 `computer_*` 工具：截图/元素树、鼠标、键盘、开应用，写操作有审批弹窗；v2 基于 Cua Driver 进程内 SDK（无守护/MCP/PowerShell），v2.3 起「打开应用」先在窗口表里复用已有窗口（含唤醒最小化），**绝不重复启动**已登录的应用，详见 [README](dsh-plugin-computer-use/README.md) | ≥ 0.1.5-rc.1（peer 声明），实测 0.1.7-rc.1 与 0.2.0-rc.2（0.2.0 需 ≥ 2.4.1，审批探测不再依赖私有 API） | 跨平台（Windows 11 实测；macOS/Linux 未实测） | `dsh plugin --profile web add dsh-plugin-computer-use` |
 | **mcp-ui** | 「设置 → MCP 服务器」配置页：增删改 stdio / streamable-http 服务器，写入 profile patch 标记块并热生效（官方暂不提供 MCP 配置界面），详见 [README](dsh-plugin-mcp-ui/README.md) | ≥ 0.1.6-alpha.1（依赖 typert 网关，旧版不可用）；**0.2.0 需 ≥ 1.0.3**——旧版 peer `^0.1.6` 不覆盖 0.2.0，会被 profile 启动直接拒载；MCP 增删路径尚未实机验证 | Win11 实测；Linux/macOS 未测 | `dsh plugin --profile web add dsh-plugin-mcp-ui` |
@@ -43,13 +43,15 @@ dsh plugin --profile web add \
   dsh-plugin-mcp-ui
 ```
 
+当前 npm 版本：`tofu-box 1.1.0` / `model-tuning 3.0.0` / `read-image-preview 1.6.0` / `shell-selector 0.1.0` / `computer-use 2.5.0` / `mcp-ui 1.0.3`。本次发布的下线插件清单、从 v2 升级的步骤与安装/卸载说明见 [docs/RELEASE-model-tuning-v3-20261017.md](docs/RELEASE-model-tuning-v3-20261017.md)。
+
 装完重启 dsh 就能用。注册配置打进包里了（`dsh.bundle.patch`），不需要动 cordis 文件。卸载把 `add` 换成 `remove`。也可以从 git 直装（未发版 / 想追 HEAD 时）：`git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git#path:dsh-plugin-<name>`，伞包同理 `#path:tofu-box`；npm 版走 semver，git 版 `update` 永远追 HEAD。首次安装 computer-use 时 pnpm 可能拦下 koffi 的构建脚本并让 dsh 报错——按提示在 profile 的 `pnpm-workspace.yaml` 写 `allowBuilds: koffi: false`（koffi 用预编译二进制，不需要构建）后重试即可。
 
 要改本仓库的代码来调试？见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)——把 profile 依赖换成指向本仓库的 `link:`，改完不用重装。要发版：`./publish.ps1 -Publish`（会先跑伞包同步校验，未入库的插件目录自动跳过）。
 
 上表的版本区间为实测范围，未标注下限的插件不保证能在更早版本上运行。本轮迁移（0.1.7-alpha.2 → 0.1.7-rc.1）改动了 model-search、model-tuning、read-image-preview 三个插件，新增 shell-selector；image-generation 与 title-model 曾并入 model-tuning（v2）；**v3 起标题生成交还官方，绘图能力保留在 model-tuning 内**（不再单独发包，升级指引见其 README）；computer-use 与 mcp-ui 不需要改动，两者都在跑着 0.1.7-rc.1 的实际 profile 里加载通过：computer-use 的 13 个 `computer_*` 工具全部注册且被持续调用（截图 + 元素树、后台 element 点击、sequence、唤醒最小化窗口），mcp-ui 只到「加载与 compose 通过」这一步——它托管的 profile patch 里没有 MCP 块、当前 0 个 server，所以增删改的读写路径至今没有实机跑过，跟 dsh 版本无关。dsh 版本更新频繁，可能影响稳定性。并且插件均由 AI 完成，肯定会有很多潜在 bug。
 
-> **v3 边界收缩（2026-10，基线 0.2.1-rc.1）**：model-tuning 3.0.0 删掉「用途（标题生成）」页，不再 `disabled` 官方 `session-title-llm` 行——需要独立标题模型就在 profile 的 `cordis.patch.yml` 覆盖该行（字段见其 README）；「模型参数」页的上下文窗口 / 最大输出 / 输入模态 / 模型发现交还官方「设置 → 模型」页；只保留官方没有的兼容开关、内置目录路由推理覆盖与绘图。官方可选组合包「随对话更新的标题」不再与本插件互斥。重叠盘点见 [docs/PLUGIN-SCOPE-dsh-0.2.1-rc.1.md](docs/PLUGIN-SCOPE-dsh-0.2.1-rc.1.md)。
+> **v3 边界收缩（2026-10，基线 0.2.1-rc.1）**：model-tuning 3.0.0 删掉「用途（标题生成）」页，不再 `disabled` 官方 `session-title-llm` 行——需要独立标题模型就在 profile 的 `cordis.patch.yml` 覆盖该行（字段见其 README）；「模型参数」页的上下文窗口 / 最大输出 / 输入模态 / 模型发现交还官方「设置 → 模型」页；只保留官方没有的兼容开关、内置目录路由推理覆盖与绘图。官方可选组合包「随对话更新的标题」不再与本插件互斥。重叠盘点见 [docs/PLUGIN-SCOPE-dsh-0.2.1-rc.1.md](docs/PLUGIN-SCOPE-dsh-0.2.1-rc.1.md)，**发布、下线插件清单与迁移/安装说明见 [docs/RELEASE-model-tuning-v3-20261017.md](docs/RELEASE-model-tuning-v3-20261017.md)**。
 
 dsh 0.2.0 这一轮（详见 [docs/UPGRADE-dsh-0.2.0-rc.2.md](docs/UPGRADE-dsh-0.2.0-rc.2.md)）：四个契约面（bundle 机制 / 注入包 / slot / 服务方法）全部未变，唯一破坏点是 **peer 版本门禁**——`^0.1.6` 这类 caret 范围在 0.x 上不覆盖 0.2.0，运行时会直接拒载对应插件行。已发布的修复版：model-tuning 2.0.1、computer-use 2.4.1、mcp-ui 1.0.3（伞包 tofu-box 1.0.2 同步）。仍在 0.1.x 的用户升级 dsh 前先把这三个包升到上述版本即可。
 
