@@ -126,14 +126,17 @@ dsh: warning: 1 entry did not activate model-tuning (dsh-plugin-model-tuning):
 Error: model-tuning: @deepseek-ai/dsh-session-title-llm 未导出 generateSessionTitleWithLlm
 ```
 
-原因：桌面 profile 的依赖范围仍是 `^2.0.2`，应用内「更新」只在 2.x 范围内解析（实际仍装 2.0.2）；2.0.x 依赖的标题 helper 在 dsh 0.2.1 已改名，所以激活失败。**这不是 3.0.0 的 bug。**
+原因：**pnpm v11 的供应链延迟策略 `minimumReleaseAge`（默认 1440 分钟 = 1 天）**。3.0.0 刚发布不到一天，pnpm 解析时会跳过它；profile 里 2.0.2 曾因安装被写进 `minimumReleaseAgeExclude`（老版本豁免），于是哪怕「卸载后重新安装」，不带版本的包名也会回落到 **2.0.2**——应用日志里能看到 `+ dsh-plugin-model-tuning 2.0.2`。而 2.0.x 依赖的标题 helper 在 dsh 0.2.1 已改名，所以激活失败。**这不是 3.0.0 的 bug。** dsh 插件管理文档也注明了：安装清单版本可能比 `inspect` 读到的旧，原因正是 `minimumReleaseAge`。
 
-处理（二选一）：
+处理（任选其一）：
 
-1. 在应用「插件」页卸载 model-tuning，再重新安装 `dsh-plugin-model-tuning@3.0.0`；
-2. 或把桌面 profile 的依赖改成 `^3.0.0` 后重新安装并重启应用。本轮已对开发机的 desktop profile 执行（依赖 `^3.0.0`、`node_modules` 为 3.0.0；改动前备份在 `~/.dsh/backups/desktop-before-mt3-20261017-174003/`），**完全退出并重开桌面端后生效**。
+1. **在应用「插件」页安装时写显式版本**：`dsh-plugin-model-tuning@3.0.0`。pnpm 对显式请求的版本会自动加入 `minimumReleaseAgeExclude`，立即装上；装完重启应用。
+2. 等发布满 24 小时后再用不带版本的包名安装。
+3. 或直接改 profile：把桌面 profile 的依赖改成 `^3.0.0` 并在 profile 目录执行 `pnpm add dsh-plugin-model-tuning@3.0.0`，然后重启应用。本轮已对开发机的 desktop profile 执行这一条（依赖 `^3.0.0`、`node_modules` 为 3.0.0、exclude 已加；改动前备份在 `~/.dsh/backups/desktop-before-mt3-20261017-174003/`），**完全退出并重开桌面端后生效**。
 
 验证：重启后在应用「插件」页确认 model-tuning 显示 3.0.0，「设置 → 模型」的 provider 卡片出现「兼容与推理」「绘图模型（generate_image）」两节。若仍失败，先在插件页禁用 model-tuning 保证应用能启动，再反馈日志。
+
+> 同一窗口期适用本轮所有新版本：**发布后 24 小时内**用不带版本的名字安装（`tofu-box` / `dsh-plugin-model-tuning` / `dsh-plugin-read-image-preview`），pnpm 都可能解析到旧版本；需立即体验新版就带上版本号（如 `tofu-box@1.1.0`）。
 
 ## 7. 相关文档
 
