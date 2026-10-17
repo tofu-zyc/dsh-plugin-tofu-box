@@ -81,11 +81,50 @@ read_image 卡片；模型参数页勾档位后看 profile）。
 - 静态检查（0.15.0 对 alpha.4）：15 个宿主模块、30 个命名导出全部存在；patch 指向的 28 个 dsh-base 行全部存在。
   运行期行为未验证。未改动该 profile、未授豁免。
 
-## 6. 待办
+## 6. 0.2.1-rc.1 复查（2026-10-17）
 
-- [ ] 发布：model-tuning 2.1.0、read-image-preview 1.5.0、tofu-box 1.1.0（`./publish.ps1 -Publish`）。
+npm `next` = 0.2.1-rc.1（10-17 03:17），`latest` 仍是 0.2.0-rc.2。alpha.4 → rc.1 共 40 个提交（中间含 alpha.5），
+只新增一篇升级指南（账户赠金通知字段放宽为可选元数据，与本仓库插件无关）。
+
+- **宿主接口**：本仓库插件触及的包在 alpha.4 与 rc.1 之间零改动：
+  - `dsh-client-ui-{tool,attachment,conversation,chat,settings,agent-preset}`
+  - `dsh-session-title(-llm)`、`dsh-llm-pi-ai`、`dsh-attachment`、`dsh-tool-{bash,pwsh}`
+
+  有改动的只有两个包：`dsh-api-remotes`（只改了账户通知 schema）和 `dsh-tools`（PTC 指令拼装）。
+  `SESSION_FORMAT_VERSION` 仍为 4。
+- **check-compat**：web 与 desktop 两个 profile 都 PASS（WARN 只有 computer-use 本地版本）。
+- **单测**：model-tuning 90/90、read-image-preview 34/34、shell-selector 30/30、codex-login 13/13、computer-use 21+1 skip。
+- **测试布局的坑**：在普通项目目录里 `npm i @deepseek-ai/dsh@0.2.1-rc.1`，npm 会把多数包嵌套到 `dsh-base/node_modules` 等处（同一版本拷多份，没有混版本）。从 `dsh/lib/bin.js` 解析不到 `dsh-session-title-llm`，model-tuning 的 title 测试整文件失败。
+  改用 `npm i -g --prefix <临时目录>` 模拟全局安装后，`dsh/node_modules/@deepseek-ai` 平铺 302 个包（与真实全局一致），helper 正常解析，测试 90/90。
+  **之后验证一律用 `-g --prefix` 布局**。
+- **启动冒烟**：全局 rc.1 下 `dsh --profile web` 启动无 `did not activate`，`/read-image-preview/state` 401。
+- **桌面端**：官方 `nightly.yml` 已发 0.2.1-rc.1 安装包（签名）。
+  - **rc.1 起 `dsh plugin --profile desktop ...` 被拒**：`profile "desktop" is managed exclusively by the Electron application`。桌面 profile 的增删只能在应用内「插件」页做。
+  - **llm-deepseek 补丁**：rc.2 的 dsh-base 也已是 `dsh-llm-deepseek-api-key`，所以桌面 patch 里旧包名那一行在 rc.2 上就已被跳过。升级后生效的模型列表不变。
+- **第三方 TUI**：0.15.0 仍把 peer 锁在 0.2.0-rc.2，在 rc.1 上同样会被拒载，没有变化。
+
+本机操作（2026-10-17，下载时清空了继承来的 `http(s)_proxy`/`all_proxy` 并 `--proxy=null`）：
+
+- 全局 CLI → `0.2.1-rc.1`。回滚：`npm i -g @deepseek-ai/dsh@0.2.1-alpha.4`（或 `@0.2.0-rc.2`）。
+- 桌面 profile 备份：`~/.dsh/backups/desktop-before-0.2.1-rc.1-20261017/`（package.json / lock / cordis.patch.yml）。
+- 桌面 model-tuning：2.0.2 的 `node_modules` 目录挪进上述备份，换成指向工作区（2.1.0）的 junction（同 `dev-link-desktop.ps1` 做法）。
+  **事故**：随后在应用「插件」页移除 model-search 时，应用触发的 pnpm 重装替换了 model-tuning 与 read-image-preview 两个 junction，
+  并**穿过 junction 删空了工作区里这两个插件目录**（07:48）。model-tuning 已提交，从 git 原样恢复。
+  read-image-preview 1.6.0 当时未提交，先用 git 恢复到 1.5.0，再按会话记录重放 1.6 的 12 次 Write/Edit、补回 package.json，34/34 通过；
+  另存了一份 `git stash`（`stash@{0}`）。
+  桌面 profile 现在装的是 npm 上的 model-tuning 2.0.2、read-image-preview 1.4.1（普通目录）。
+  **结论：不要再往应用托管的 desktop profile 里放指向工作区的 junction**，`scripts/dev-link-desktop.ps1` 不能再用。
+- 桌面 model-search：已在应用「插件」页移除。
+
+## 7. 待办
+
+- [x] model-tuning 2.1.0 **2026-10-17 提前发布**（桌面端 profile 锁 `2.0.2`，不先换 2.1.0 就不能升 0.2.1-rc.1）。
+- [ ] 发布：read-image-preview 1.6.0、tofu-box 1.1.0（`./publish.ps1 -Publish`）。
   **2026-10-16 决定：等 dsh 0.2.1 正式版发布后再跟进**——届时按本文流程对正式版重跑一遍再发。
 - [ ] npm 上给 `dsh-plugin-model-search` 打 deprecate 说明（对外操作，待确认）。
-- [ ] 桌面端升级到 alpha：官方无安装包，需本地未签名打包或等官方发布，见会话结论。
+- [x] 桌面端：应用内移除 model-search。
+- [ ] 桌面端：在应用「插件」页把 model-tuning 更新到 2.1.0（npm 已发），确认后再更新应用到 0.2.1-rc.1。
+- [ ] `scripts/dev-link-desktop.ps1` / `dev-unlink-desktop.ps1`：删除或改成复制，并在 README 说明原因。
 - [ ] `check-compat.mjs` 增加「宿主 helper 导出」检查（本轮破坏它查不到）。
-- [ ] read-image-preview 交互继续打磨。
+- [x] read-image-preview 交互打磨（1.6.0）：read_image 改为只填官方 `tool.call.images` 图库，消息图片也接同一查看器；查看器重写（无模式、标记可编辑、触控板手势、按帧写 transform 的性能修复）；截图直接框选、回车经粘贴通路进输入框。
+- [ ] read-image-preview 1.6.0 在真实页面验证消息 / read_image 行里的图库（本机无带图历史会话，未验）。
