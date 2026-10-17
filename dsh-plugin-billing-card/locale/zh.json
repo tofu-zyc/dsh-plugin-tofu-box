@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "计费卡片",
+    "description": "在输入框下方实时统计当前会话各模型的 token 用量，并按内置 DeepSeek 峰谷价格估算费用。"
+  }
+}

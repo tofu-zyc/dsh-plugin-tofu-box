@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Billing card">
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#2563EB"/>
+  <path d="M19 16.5 32 31.5 45 16.5" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M32 31.5V48" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round"/>
+  <path d="M22 35.5h20M22 43.5h20" fill="none" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round"/>
+</svg>
