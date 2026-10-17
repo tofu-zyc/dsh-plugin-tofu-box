@@ -1,0 +1,25 @@
+# dsh-plugin-billing-card
+#
+# One insert over the existing profile composition. This bundle does not
+# override, disable, or replace any shipped row: the Host half only registers
+# one client-visible Session projection unit, and the Client half only adds one
+# entry to the existing `conversation.composer.dock` slot (beside the shipped
+# activity/usage pills, not in place of them).
+#
+# Tunables live in the row config and survive upgrades; see README.md for the
+# `currency`, `pricing`, and `peak` fields. Override the whole config of this
+# row from the profile's cordis.patch.yml:
+#
+#   - id: billing-card
+#     config:
+#       currency: CNY
+#       pricing:
+#         - model: deepseek-flash
+#           inputPerM: 1
+#           cacheReadPerM: 0.02
+#           outputPerM: 4
+#
+# The row below starts with no config so the built-in DeepSeek defaults apply.
+- insert:
+    - id: billing-card
+      name: dsh-plugin-billing-card

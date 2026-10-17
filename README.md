@@ -16,7 +16,7 @@
 dsh plugin --profile web add tofu-box
 ```
 
-`tofu-box` 是伞包：不含代码，以依赖拉入下面五个子包并用一个 patch 层注册全部插件行（dsh-base 同款 bundle 模式）。装伞包**或**逐个装子包，二选一，不要混装；伞包装完后在插件管理页是一个整体条目，不能单独禁用其中某一个。
+`tofu-box` 是伞包：不含代码，以依赖拉入下面六个子包并用一个 patch 层注册全部插件行（dsh-base 同款 bundle 模式）。装伞包**或**逐个装子包，二选一，不要混装；伞包装完后在插件管理页是一个整体条目，不能单独禁用其中某一个。
 
 | 插件 | 说明 | 支持的 dsh 版本 | 平台 | 安装 |
 | --- | --- | --- | --- | --- |
@@ -25,9 +25,9 @@ dsh plugin --profile web add tofu-box
 | **shell-selector** | 「设置 → Shell」里选 AI 执行命令用哪个 shell：PowerShell 7 / Windows PowerShell 5.1 / 自定义路径。只写宿主 `pwsh-sandbox` 条目本来就支持的 `pwshPath`，保存后下一条命令即生效，不重启、不替换执行器，沙箱 / 审批 / 超时 / 退出码全部沿用内置；选中 5.1 时额外注册一条方言上下文告知模型 `&&`、`??` 不可用；Git Bash 因受限执行未验证而置灰并写明原因，详见 [README](dsh-plugin-shell-selector/README.md) | ≥ 0.1.7-alpha.2，实测 0.1.7-rc.1；0.2.0-rc.2 单测通过 | Win11 实测；Linux/macOS 未测 | `dsh plugin --profile web add dsh-plugin-shell-selector` |
 | **computer-use** | 13 个 `computer_*` 工具：截图/元素树、鼠标、键盘、开应用，写操作有审批弹窗；v2 基于 Cua Driver 进程内 SDK（无守护/MCP/PowerShell），v2.3 起「打开应用」先在窗口表里复用已有窗口（含唤醒最小化），**绝不重复启动**已登录的应用，详见 [README](dsh-plugin-computer-use/README.md) | ≥ 0.1.5-rc.1（peer 声明），实测 0.1.7-rc.1 与 0.2.0-rc.2（0.2.0 需 ≥ 2.4.1，审批探测不再依赖私有 API） | 跨平台（Windows 11 实测；macOS/Linux 未实测） | `dsh plugin --profile web add dsh-plugin-computer-use` |
 | **mcp-ui** | 「设置 → MCP 服务器」配置页：增删改 stdio / streamable-http 服务器，写入 profile patch 标记块并热生效（官方暂不提供 MCP 配置界面），详见 [README](dsh-plugin-mcp-ui/README.md) | ≥ 0.1.6-alpha.1（依赖 typert 网关，旧版不可用）；**0.2.0 需 ≥ 1.0.3**——旧版 peer `^0.1.6` 不覆盖 0.2.0，会被 profile 启动直接拒载；MCP 增删路径尚未实机验证 | Win11 实测；Linux/macOS 未测 | `dsh plugin --profile web add dsh-plugin-mcp-ui` |
-| **billing-card** | 输入框下方实时显示当前会话的 token 用量与估算费用（DeepSeek 优先）：Host 注册 `billingUsage` 会话投影，按模型折叠模型上报的 usage（重试尝试也计入），默认内置 DeepSeek 官方**峰谷分时价**（CNY/USD，含 v4-flash 旧名映射）；Client 是输入框下方药丸 + 点开的分模型明细卡片。价格表、峰谷窗口、节假日都可在插件 Config 里改，规则支持精确/通配 provider+model，便于扩展到其他厂商。详见 [README](dsh-plugin-billing-card/README.md) | 基线 **0.2.1-rc.1** 实测；渲染在 0.2.1-rc.2 desktop 上也确认过；依赖 base 自带的 `ctx.sessionProjections` | Win11 实测（Web 渲染）；Linux/macOS 未测 | 0.1.0 尚未发布 npm：`dsh plugin --profile <p> add <本仓库路径>/dsh-plugin-billing-card` |
+| **billing-card** | 输入框下方实时显示当前会话的 token 用量与估算费用（DeepSeek 优先）：Host 注册 `billingUsage` 会话投影，按模型折叠模型上报的 usage（重试尝试也计入），默认内置 DeepSeek 官方**峰谷分时价**（CNY/USD，含 v4-flash 旧名映射）；Client 是输入框下方药丸 + 点开的分模型明细卡片。价格表、峰谷窗口、节假日都可在插件 Config 里改，规则支持精确/通配 provider+model，便于扩展到其他厂商。详见 [README](dsh-plugin-billing-card/README.md) | 基线 **0.2.1-rc.1** 实测；渲染在 0.2.1-rc.2 desktop 上也确认过；依赖 base 自带的 `ctx.sessionProjections` | Win11 实测（Web 渲染）；Linux/macOS 未测 | `dsh plugin --profile web add dsh-plugin-billing-card` |
 
-> `billing-card` 是新增独立插件，暂未加入 `tofu-box` 伞包（加到伞包里需要同步 umbrella 补丁层+版本；要加入再说）。发布单包：`./publish.ps1 -Publish dsh-plugin-billing-card`（需先 `npm login`）。
+> `billing-card` 已加入 `tofu-box` 伞包（1.2.0 起），也可单独安装。本次发布会先发子包 `dsh-plugin-billing-card@0.1.0` 再发伞包 `tofu-box@1.2.0`（`./publish.ps1 -Publish dsh-plugin-billing-card tofu-box`）。
 
 computer-use **v2.5 起自动开启原生 Wayland**，并内置 Ubuntu/GNOME 的 WinRects 扩展安装与诊断入口。GNOME 用户须安装扩展并注销登录一次；键鼠操作还需系统 portal 授权。安装步骤和实测范围见 [computer-use README](dsh-plugin-computer-use/README.md#v25ubuntu-2604--gnome-wayland)。
 
@@ -43,10 +43,11 @@ dsh plugin --profile web add \
   dsh-plugin-read-image-preview \
   dsh-plugin-shell-selector \
   dsh-plugin-computer-use \
-  dsh-plugin-mcp-ui
+  dsh-plugin-mcp-ui \
+  dsh-plugin-billing-card
 ```
 
-当前 npm 版本：`tofu-box 1.1.0` / `model-tuning 3.0.0` / `read-image-preview 1.6.0` / `shell-selector 0.1.0` / `computer-use 2.5.0` / `mcp-ui 1.0.3`；新增 `billing-card 0.1.0`（已就绪，尚未发布 npm）。本次发布的下线插件清单、从 v2 升级的步骤与安装/卸载说明见 [docs/RELEASE-model-tuning-v3-20261017.md](docs/RELEASE-model-tuning-v3-20261017.md)。
+当前 npm 版本：`tofu-box 1.2.0` / `model-tuning 3.0.0` / `read-image-preview 1.6.0` / `shell-selector 0.1.0` / `computer-use 2.5.0` / `mcp-ui 1.0.3` / `billing-card 0.1.0`。本次发布的下线插件清单、从 v2 升级的步骤与安装/卸载说明见 [docs/RELEASE-model-tuning-v3-20261017.md](docs/RELEASE-model-tuning-v3-20261017.md)；billing-card 0.1.0 / tofu-box 1.2.0 的发布说明见 [docs/RELEASE-billing-card-20261017.md](docs/RELEASE-billing-card-20261017.md)。
 
 装完重启 dsh 就能用。注册配置打进包里了（`dsh.bundle.patch`），不需要动 cordis 文件。卸载把 `add` 换成 `remove`。也可以从 git 直装（未发版 / 想追 HEAD 时）：`git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git#path:dsh-plugin-<name>`，伞包同理 `#path:tofu-box`；npm 版走 semver，git 版 `update` 永远追 HEAD。首次安装 computer-use 时 pnpm 可能拦下 koffi 的构建脚本并让 dsh 报错——按提示在 profile 的 `pnpm-workspace.yaml` 写 `allowBuilds: koffi: false`（koffi 用预编译二进制，不需要构建）后重试即可。
 
@@ -80,7 +81,7 @@ A few [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin
 dsh plugin --profile web add tofu-box
 ```
 
-`tofu-box` is an umbrella package: no code of its own, it pulls the five plugins below as dependencies and registers all their rows in one patch layer (the same bundle pattern dsh-base uses). Install the umbrella **or** pick individual plugins — not both; after the umbrella is installed it shows up as a single entry in the plugin manager and individual pieces can't be disabled from the GUI.
+`tofu-box` is an umbrella package: no code of its own, it pulls the six plugins below as dependencies and registers all their rows in one patch layer (the same bundle pattern dsh-base uses). Install the umbrella **or** pick individual plugins — not both; after the umbrella is installed it shows up as a single entry in the plugin manager and individual pieces can't be disabled from the GUI.
 
 | Plugin | What it does | dsh versions | Platform | Install |
 | --- | --- | --- | --- | --- |
@@ -89,9 +90,9 @@ dsh plugin --profile web add tofu-box
 | **shell-selector** | A "Settings → Shell" page for picking which shell the AI runs commands in: PowerShell 7 / Windows PowerShell 5.1 / a custom path. It only writes the `pwshPath` field the host's own `pwsh-sandbox` entry already supports, so the next command uses your choice — no restart, no swapped executor, and sandboxing, approval, timeouts and exit codes stay exactly as shipped; when 5.1 is active it also registers a dialect note so the model knows `&&` and `??` don't exist; Git Bash stays greyed out with the reason shown, because confined execution is unverified ([README](dsh-plugin-shell-selector/README.md)) | ≥ 0.1.7-alpha.2, tested on 0.1.7-rc.1; unit tests pass on 0.2.0-rc.2 | Tested on Win11; Linux/macOS untested | `dsh plugin --profile web add dsh-plugin-shell-selector` |
 | **computer-use** | 13 `computer_*` tools: window screenshots + accessibility tree, mouse, keyboard, launching apps; input actions require approval; v2 runs on the in-process Cua Driver SDK (no daemon/MCP/PowerShell); since v2.3 "open app" reuses an existing window (restoring it when minimized) and **never starts a second instance** of an app that is already running ([README](dsh-plugin-computer-use/README.md)) | ≥ 0.1.5-rc.1 (peer dep), tested on 0.1.7-rc.1 and 0.2.0-rc.2 (0.2.0 needs ≥ 2.4.1: approval probing no longer touches private APIs) | Cross-platform (tested on Windows 11; macOS/Linux untested) | `dsh plugin --profile web add dsh-plugin-computer-use` |
 | **mcp-ui** | "Settings → MCP Servers" page: add/edit/remove stdio & streamable-http servers; writes them into the profile patch and hot-applies (the official build ships no MCP UI yet) ([README](dsh-plugin-mcp-ui/README.md)) | ≥ 0.1.6-alpha.1 (needs the typert gateway; won't work on older dsh); **0.2.0 needs ≥ 1.0.3** — the old `^0.1.6` peer doesn't cover 0.2.0 and profile startup rejects the plugin outright; add/remove-server path not exercised yet | Tested on Win11; Linux/macOS untested | `dsh plugin --profile web add dsh-plugin-mcp-ui` |
-| **billing-card** | Real-time per-model token usage and estimated cost for the current session, right under the composer (DeepSeek first): the Host registers a `billingUsage` session projection that folds model-reported usage per route (retried attempts included) and ships DeepSeek's official **peak/off-peak prices** (CNY/USD, legacy v4-flash names mapped); the Client is a pill plus a click-open per-model breakdown card. Prices, peak windows and holidays are configurable, and rules match exact or wildcard provider+model pairs, so other vendors are a config change. See [README](dsh-plugin-billing-card/README.md) | baseline **0.2.1-rc.1** (tested); rendering also confirmed on 0.2.1-rc.2 desktop; needs the base `ctx.sessionProjections` | Tested on Win11 (Web rendering); Linux/macOS untested | Not on npm yet (0.1.0): `dsh plugin --profile <p> add <this checkout>/dsh-plugin-billing-card` |
+| **billing-card** | Real-time per-model token usage and estimated cost for the current session, right under the composer (DeepSeek first): the Host registers a `billingUsage` session projection that folds model-reported usage per route (retried attempts included) and ships DeepSeek's official **peak/off-peak prices** (CNY/USD, legacy v4-flash names mapped); the Client is a pill plus a click-open per-model breakdown card. Prices, peak windows and holidays are configurable, and rules match exact or wildcard provider+model pairs, so other vendors are a config change. See [README](dsh-plugin-billing-card/README.md) | baseline **0.2.1-rc.1** (tested); rendering also confirmed on 0.2.1-rc.2 desktop; needs the base `ctx.sessionProjections` | Tested on Win11 (Web rendering); Linux/macOS untested | `dsh plugin --profile web add dsh-plugin-billing-card` |
 
-> `billing-card` is a new standalone plugin and is not part of the `tofu-box` umbrella yet (adding it needs the umbrella patch layer and version bump). Publish the single package with `./publish.ps1 -Publish dsh-plugin-billing-card` after `npm login`.
+> `billing-card` is now part of the `tofu-box` umbrella (since 1.2.0) and can still be installed on its own. This release publishes the child package `dsh-plugin-billing-card@0.1.0` first, then the umbrella `tofu-box@1.2.0` (`./publish.ps1 -Publish dsh-plugin-billing-card tofu-box`).
 
 computer-use **v2.5 automatically enables native Wayland** and includes a WinRects installer and diagnostics for Ubuntu/GNOME. Install the extension, log out and back in once, and allow the system portal prompt for input. See the [computer-use setup guide](dsh-plugin-computer-use/README.md).
 
@@ -109,7 +110,8 @@ dsh plugin --profile web add \
   dsh-plugin-read-image-preview \
   dsh-plugin-shell-selector \
   dsh-plugin-computer-use \
-  dsh-plugin-mcp-ui
+  dsh-plugin-mcp-ui \
+  dsh-plugin-billing-card
 ```
 
 Restart dsh after installing. Registration is bundled in each package (`dsh.bundle.patch`), nothing to wire up. To remove: `dsh plugin --profile web remove <name>`. Git installs still work (`git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git#path:dsh-plugin-<name>`, or `#path:tofu-box` for the umbrella) when you want unreleased changes; npm installs update via semver, git installs always track HEAD. First-time computer-use installs may fail on koffi's blocked build script — follow dsh's hint and add `allowBuilds: koffi: false` to the profile's `pnpm-workspace.yaml` (koffi ships prebuilt binaries), then retry.

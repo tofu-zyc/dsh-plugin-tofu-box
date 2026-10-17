@@ -2,7 +2,7 @@
 
 一条命令装齐 [TOFU BOX](https://github.com/tofu-zyc/dsh-plugin-tofu-box) 的全套
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) 插件。
-桌面端 / Web 端的插件管理页一次只能装一个包，本包把「五个一起装」压成一次。
+桌面端 / Web 端的插件管理页一次只能装一个包，本包把「六个一起装」压成一次。
 
 ```sh
 dsh plugin --profile <你的profile> add tofu-box
@@ -19,6 +19,7 @@ dsh plugin --profile <你的profile> add tofu-box
 | dsh-plugin-shell-selector | 「设置 → Shell」选择 AI 用的 shell |
 | dsh-plugin-computer-use | 13 个 `computer_*` 桌面操作工具 |
 | dsh-plugin-mcp-ui | 「设置 → MCP 服务器」管理页 |
+| dsh-plugin-billing-card | 输入框下方的实时 token 用量与费用卡片（DeepSeek 官方峰谷价，可配置扩展） |
 
 各功能的说明、已知限制与兼容性见仓库
 [README](https://github.com/tofu-zyc/dsh-plugin-tofu-box#中文)。
@@ -26,9 +27,9 @@ dsh plugin --profile <你的profile> add tofu-box
 ## 机制
 
 本包不含任何代码，是 dsh 官方 `dsh-base` 同款的 bundle 模式：
-`dependencies` 拉入五个子包（作为传递依赖，不会各自注册成独立层），
-`dsh.bundle.patch` 用五个 patch 副本（`patches/`，与子包源文件逐字节一致，
-`tools/check-umbrella-sync.mjs` 防漂移）在一个层里插入全部五条插件行。
+`dependencies` 拉入六个子包（作为传递依赖，不会各自注册成独立层），
+`dsh.bundle.patch` 用六个 patch 副本（`patches/`，与子包源文件逐字节一致，
+`tools/check-umbrella-sync.mjs` 防漂移）在一个层里插入全部六条插件行。
 Host 侧按闭包解析行，浏览器侧按行读各子包自己的 `dsh.client` 声明——
 两条路径都是 dsh 的正式机制，无需 fork。
 
