@@ -117,7 +117,25 @@ v2 的 `models` / `defaultModel` 配置键与命名空间不变，升级后原�
 - 真实页面（web 开发 profile）：官方 Models 页的「兼容与推理」「绘图模型（generate_image）」两节、绘图页的单选/手动端点/直绘折叠均人工确认。
 - 未做：真实模型请求级回归（标题生成、`generate_image` 实际出图）——升级后按需用真实 Key 验一次即可。
 
-## 6. 相关文档
+## 6. 故障排查：桌面端更新后报 `未导出 generateSessionTitleWithLlm`
+
+症状：桌面端启用 model-tuning 后弹：
+
+```
+dsh: warning: 1 entry did not activate model-tuning (dsh-plugin-model-tuning):
+Error: model-tuning: @deepseek-ai/dsh-session-title-llm 未导出 generateSessionTitleWithLlm
+```
+
+原因：桌面 profile 的依赖范围仍是 `^2.0.2`，应用内「更新」只在 2.x 范围内解析（实际仍装 2.0.2）；2.0.x 依赖的标题 helper 在 dsh 0.2.1 已改名，所以激活失败。**这不是 3.0.0 的 bug。**
+
+处理（二选一）：
+
+1. 在应用「插件」页卸载 model-tuning，再重新安装 `dsh-plugin-model-tuning@3.0.0`；
+2. 或把桌面 profile 的依赖改成 `^3.0.0` 后重新安装并重启应用。本轮已对开发机的 desktop profile 执行（依赖 `^3.0.0`、`node_modules` 为 3.0.0；改动前备份在 `~/.dsh/backups/desktop-before-mt3-20261017-174003/`），**完全退出并重开桌面端后生效**。
+
+验证：重启后在应用「插件」页确认 model-tuning 显示 3.0.0，「设置 → 模型」的 provider 卡片出现「兼容与推理」「绘图模型（generate_image）」两节。若仍失败，先在插件页禁用 model-tuning 保证应用能启动，再反馈日志。
+
+## 7. 相关文档
 
 - [插件与官方功能重叠盘点（dsh 0.2.1-rc.1）](PLUGIN-SCOPE-dsh-0.2.1-rc.1.md)
 - [开发：隔离测试 profile](DEVELOPMENT.md#隔离测试-profile不要动桌面端的-profile)
