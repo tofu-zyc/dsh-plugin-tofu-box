@@ -4,6 +4,9 @@
 默认内置 DeepSeek 官方价格（含**峰谷分时计价**），并保留完整的扩展能力：价格表、峰谷规则、
 其他模型/提供商都可以在插件配置里追加，不需要改代码。
 
+> npm：[`dsh-plugin-billing-card@0.1.0`](https://www.npmjs.com/package/dsh-plugin-billing-card)
+> · `tofu-box@1.2.0` 起包含本插件。
+
 - **Host 半**：注册一个客户端可见的 Session 投影单元 `billingUsage`，在提交事件时折叠
   `assistant/message` / `assistant/attempt` 中模型上报的 `usage`，按 `request/header` 归属模型路由，
   纯函数、可重放、不产生任何模型调用。
@@ -27,25 +30,23 @@
 
 ## 安装
 
-推荐先在一个**独立的开发 profile** 里安装与验证，不要装进你日常使用的 `desktop` profile：
+已发布 npm：`dsh-plugin-billing-card@0.1.0`，同时也是 `tofu-box` 伞包（1.2.0 起）的成员。插件行 id 为
+`billing-card`，Client 半是手写浏览器模块，无需构建步骤。
 
 ```bash
-# 1. 从官方 web 模板新建一个独立 profile（只在不存在时创建；不会打开浏览器）
-dsh --profile billing-dev --from-default-profile web --dump-config
+# 1) 单装（npm）
+dsh plugin --profile <你的profile> add dsh-plugin-billing-card
 
-# 2. 安装本插件（本地目录，link 方式；无需构建步骤）
-dsh plugin --profile billing-dev add D:\program\dsh-plugins\dsh-plugin-billing-card
+# 2) 或装整套伞包（自动包含本插件）
+dsh plugin --profile <你的profile> add tofu-box
 
-# 3. 启动 web profile（--no-open 不会抢占浏览器/桌面焦点；端口按需修改）
-dsh --profile billing-dev --no-open --port 58121
-```
-
-启动日志会打印带一次性 `?token=` 的地址，用浏览器打开即可；插件行 id 为 `billing-card`，
-包名为 `dsh-plugin-billing-card`。验证完成后，也可以把它装进你自己的正式 profile：
-
-```bash
+# 3) 开发/未发版：从本仓库本地目录安装（link 方式，改代码不用重装）
 dsh plugin --profile <你的profile> add D:\program\dsh-plugins\dsh-plugin-billing-card
 ```
+
+> 建议先在一个**独立 profile** 里验证，不要装进你日常使用的 `desktop` profile：用官方 web 模板新建
+> `dsh --profile billing-dev --from-default-profile web --dump-config`，装好后
+> `dsh --profile billing-dev --no-open --port 58121` 启动（日志会打印带一次性 `?token=` 的地址）。
 
 > 新装的 Client 模块需要页面刷新一次才会加载；旧会话的投影基线也在刷新/重连后才会带上
 > `billingUsage`，刷新后输入框下方就会出现计费药丸。
