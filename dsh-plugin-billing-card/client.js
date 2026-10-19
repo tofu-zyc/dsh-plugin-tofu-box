@@ -43,10 +43,20 @@ window.__ModuleLoader__.load({
       'routes.unknownModel': '未知模型',
       'unpriced.badge': '未配置价格',
       'unpriced.hint': '仅统计 token',
+      'search.title': '联网搜索',
+      'search.calls': '网页搜索',
+      'search.callsValue': '{calls} 次（{requests} 个请求）',
+      'search.billable': '预计计费',
+      'search.billableValue': '{count} 次',
+      'search.cost': '搜索费用',
+      'search.freeValue': '免费期内（11/1 起 {cost}）',
+      'search.freeNote': '服务端搜索调用免费至 2026-11-01 00:00，之后按官方每 1000 次价格估算。',
+      'search.fetch': '网页抓取',
+      'search.fetchValue': '{count} 次 · {cost}',
+      'search.fetchNote': '网页抓取为直连 DeepSeek Fetch API，按次计费。',
       'footer.estimate': '费用为按配置价格表估算的预估值，非实际账单。',
       'footer.config': '价格与峰谷时段可在插件配置中调整。',
-      'pill.aria': '预估费用 {cost}，{tokens}，缓存命中率 {percent}%',
-      'pill.ariaNoCache': '预估费用 {cost}，{tokens}',
+      'pill.aria': '预估费用 {cost}',
     }
 
     const ENGLISH = {
@@ -63,10 +73,20 @@ window.__ModuleLoader__.load({
       'routes.unknownModel': 'Unknown model',
       'unpriced.badge': 'Unpriced',
       'unpriced.hint': 'Tokens only',
+      'search.title': 'Web search',
+      'search.calls': 'Search',
+      'search.callsValue': '{calls} calls ({requests} provider requests)',
+      'search.billable': 'Estimated billable',
+      'search.billableValue': '{count} requests',
+      'search.cost': 'Search cost',
+      'search.freeValue': 'Free until Nov 1 (then {cost})',
+      'search.freeNote': 'Server-side search calls are free until 2026-11-01 00:00 Beijing; afterward priced at the official per-1,000-request rate.',
+      'search.fetch': 'Web fetch',
+      'search.fetchValue': '{count} requests · {cost}',
+      'search.fetchNote': 'Web fetch calls the DeepSeek Fetch API directly and is billed per request.',
       'footer.estimate': 'Costs are estimates from the configured price table, not an actual bill.',
       'footer.config': 'Pricing and peak windows are configurable in the plugin config.',
-      'pill.aria': 'Estimated cost {cost}, {tokens}, cache hit {percent}%',
-      'pill.ariaNoCache': 'Estimated cost {cost}, {tokens}',
+      'pill.aria': 'Estimated cost {cost}',
     }
 
     /** Locale ids the browser client ships; `bind`'s fallback chain anchors on them. */
@@ -182,7 +202,7 @@ window.__ModuleLoader__.load({
      * missing projection, a future version, or a fresh Session leaves the
      * slot empty instead of throwing.
      * @param view - `useProjection('billingUsage')` result.
-     * @returns `{ currency, routes, totals }` or null.
+     * @returns `{ currency, routes, totals, search }` or null.
      */
     function renderableView(view) {
       if (view === null || typeof view !== 'object') return null
@@ -190,10 +210,12 @@ window.__ModuleLoader__.load({
       const totals = view.totals
       if (totals === null || typeof totals !== 'object') return null
       if (!(finite(totals.total) > 0)) return null
+      const search = view.search !== null && typeof view.search === 'object' ? view.search : null
       return {
         currency: view.currency,
         routes: Array.isArray(view.routes) ? view.routes : [],
         totals,
+        search,
       }
     }
 
@@ -302,14 +324,13 @@ window.__ModuleLoader__.load({
 
       if (!visible) return null
 
-      const { currency, routes, totals } = data
+      const { currency, routes, totals, search } = data
       const percent = cacheHitPercent(totals)
       const costText = formatCost(totals.cost, currency)
       const tokenCount = value => t('tokens.count', { count: formatCount(value) })
-      const totalTokensText = tokenCount(totals.total)
-      const ariaLabel = percent === null
-        ? t('pill.ariaNoCache', { cost: costText, tokens: totalTokensText })
-        : t('pill.aria', { cost: costText, tokens: totalTokensText, percent })
+      // The dock row already shows the Session's official token count, so the
+      // pill carries only the thing that row cannot: the estimated cost.
+      const ariaLabel = t('pill.aria', { cost: costText })
 
       const panelStyle = position === null
         ? { visibility: 'hidden' }
@@ -362,8 +383,44 @@ window.__ModuleLoader__.load({
             priced ? null : h('span', { className: 'bc-route-hint' }, t('unpriced.hint')))))
       }
 
-      const panel = open ? ReactDOM.createPortal(
-        h('div', {
+      // Search / fetch section: the DeepSeek per-request API spend the token
+      // fold cannot see. Hidden until this Session actually searched or fetched.
+      const searchCalls = search === null ? 0 : finite(search.calls)
+      const fetchCalls = search === null ? 0 : finite(search.fetchCalls)
+      const showSearch = search !== null
+        && search.enabled === true
+        && (searchCalls > 0 || fetchCalls > 0)
+      const searchRows = []
+      const searchNotes = []
+      if (showSearch) {
+        const freeUntil = typeof search.searchFreeUntil === 'number' ? search.searchFreeUntil : null
+        const freePeriod = freeUntil !== null && Date.now() < freeUntil
+        const pushSearchRow = (key, label, value) => {
+          searchRows.push(h('dt', { key: `search-${key}-label`, className: 'bc-row-label' }, label))
+          searchRows.push(h('dd', { key: `search-${key}-value`, className: 'bc-row-value' }, value))
+        }
+        pushSearchRow('calls', t('search.calls'), t('search.callsValue', {
+          calls: formatCount(searchCalls),
+          requests: formatCount(finite(search.requests)),
+        }))
+        pushSearchRow('billable', t('search.billable'), t('search.billableValue', {
+          count: formatCount(finite(search.billable)),
+        }))
+        const searchCostText = formatCost(finite(search.searchCost), currency)
+        pushSearchRow('cost', t('search.cost'), freePeriod
+          ? t('search.freeValue', { cost: searchCostText })
+          : searchCostText)
+        if (fetchCalls > 0) {
+          pushSearchRow('fetch', t('search.fetch'), t('search.fetchValue', {
+            count: formatCount(finite(search.fetchBillable)),
+            cost: formatCost(finite(search.fetchCost), currency),
+          }))
+        }
+        if (freePeriod) searchNotes.push(t('search.freeNote'))
+        if (fetchCalls > 0) searchNotes.push(t('search.fetchNote'))
+      }
+
+      const panel = open ? ReactDOM.createPortal(        h('div', {
           ref: panelRef,
           className: 'bc-panel',
           role: 'dialog',
@@ -384,6 +441,15 @@ window.__ModuleLoader__.load({
               h('div', { className: 'bc-section-title' }, t('routes.title')),
               routeRows)
             : null,
+          showSearch
+            ? h('div', { className: 'bc-search' },
+              h('div', { className: 'bc-section-title' }, t('search.title')),
+              h('dl', { className: 'bc-rows' }, searchRows),
+              searchNotes.map((note, index) => h('p', {
+                key: `search-note-${index}`,
+                className: 'bc-note bc-search-note',
+              }, note)))
+            : null,
           h('div', { className: 'bc-footer' },
             h('p', { className: 'bc-note' }, t('footer.estimate')),
             h('p', { className: 'bc-note' }, t('footer.config')))),
@@ -402,9 +468,7 @@ window.__ModuleLoader__.load({
           onClick: toggle,
         },
           billingIcon(),
-          h('span', { className: 'bc-pill-cost' }, costText),
-          h('span', { className: 'bc-pill-sep', 'aria-hidden': 'true' }, '·'),
-          h('span', { className: 'bc-pill-tokens' }, totalTokensText)),
+          h('span', { className: 'bc-pill-cost' }, costText)),
         panel)
     }
 
@@ -415,8 +479,6 @@ window.__ModuleLoader__.load({
 .bc-pill:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
 .bc-icon{width:14px;height:14px;flex:none}
 .bc-pill-cost{color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums}
-.bc-pill-sep{margin:0 6px;color:var(--dsw-alias-separator-primary)}
-.bc-pill-tokens{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .bc-panel{position:fixed;z-index:1100;box-sizing:border-box;width:300px;max-width:calc(100vw - 16px);max-height:min(70vh,520px);overflow:auto;overscroll-behavior:contain;padding:14px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-overlay);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12px;line-height:18px;text-align:left;cursor:default}
 .bc-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
 .bc-title{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}
@@ -427,6 +489,8 @@ window.__ModuleLoader__.load({
 .bc-row-label{min-width:0;margin:0;color:var(--dsw-alias-label-secondary)}
 .bc-row-value{min-width:0;margin:0;color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums;text-align:right;overflow-wrap:anywhere}
 .bc-routes{margin-top:12px}
+.bc-search{margin-top:12px}
+.bc-search-note{margin:6px 0 0}
 .bc-section-title{margin-bottom:2px;color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px;letter-spacing:.02em}
 .bc-route{padding:6px 0 2px;border-top:1px solid var(--dsw-alias-border-l1)}
 .bc-route-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;min-width:0}

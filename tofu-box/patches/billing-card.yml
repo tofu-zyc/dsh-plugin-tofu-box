@@ -7,8 +7,8 @@
 # activity/usage pills, not in place of them).
 #
 # Tunables live in the row config and survive upgrades; see README.md for the
-# `currency`, `pricing`, and `peak` fields. Override the whole config of this
-# row from the profile's cordis.patch.yml:
+# `currency`, `pricing`, `peak`, and `search` fields. Override the whole config
+# of this row from the profile's cordis.patch.yml:
 #
 #   - id: billing-card
 #     config:
@@ -18,6 +18,10 @@
 #           inputPerM: 1
 #           cacheReadPerM: 0.02
 #           outputPerM: 4
+#       search:
+#         perRequest: 0.005            # CNY per successful Search / Fetch request
+#         searchFreeUntil: 2026-10-31T16:00:00.000Z   # or null when billed already
+#         trackFetch: true             # count direct Fetch API calls too
 #
 # The row below starts with no config so the built-in DeepSeek defaults apply.
 - insert:

@@ -45,7 +45,34 @@ const PRICE_RULE_FIELDS = Object.freeze([
 ])
 
 /** Recognized top-level config fields; anything else is a typo. */
-const CONFIG_FIELDS = Object.freeze(['currency', 'pricing', 'peak'])
+const CONFIG_FIELDS = Object.freeze(['currency', 'pricing', 'peak', 'search'])
+
+/** Recognized `search` policy fields. */
+const SEARCH_FIELDS = Object.freeze(['enabled', 'perRequest', 'searchFreeUntil', 'trackFetch'])
+
+/**
+ * Official DeepSeek Search / Fetch per-request prices, in the configured
+ * currency: 5 CNY per 1,000 successful requests, $0.75 per 1,000.
+ */
+const DEFAULT_SEARCH_PER_REQUEST = Object.freeze({ CNY: 0.005, USD: 0.00075 })
+
+/**
+ * DeepSeek keeps server-side Search / Fetch calls free through Beijing
+ * 2026-11-01 00:00 (2026-10-31T16:00:00Z); direct API requests are billed from
+ * launch. Only the server-side search window is configurable here.
+ */
+const DEFAULT_SEARCH_FREE_UNTIL = '2026-10-31T16:00:00.000Z'
+
+/** The all-zero search counters of a fresh fold state. */
+const ZERO_SEARCH_COUNTERS = Object.freeze({
+  calls: 0,
+  requests: 0,
+  billable: 0,
+  emptyCalls: 0,
+  failedCalls: 0,
+  fetchCalls: 0,
+  fetchBillable: 0,
+})
 
 /** Recognized `peak` policy fields. */
 const PEAK_FIELDS = Object.freeze([
@@ -194,6 +221,65 @@ function nonEmptyString(value, path) {
 function resolveCurrency(value, path) {
   if (!CURRENCIES.includes(/** @type {string} */ (value))) failConfig(`${path} must be 'CNY' or 'USD'`)
   return /** @type {'CNY'|'USD'} */ (value)
+}
+
+/**
+ * Resolve one optional boolean flag.
+ * @param {unknown} value - configured flag or `undefined`.
+ * @param {string} path - config path of the flag.
+ * @param {boolean} fallback - value used when the flag is absent.
+ * @returns {boolean} the effective flag.
+ */
+function resolveBoolean(value, path, fallback) {
+  if (value === undefined) return fallback
+  if (typeof value !== 'boolean') failConfig(`${path} must be a boolean`)
+  return value
+}
+
+/**
+ * Resolve one optional ISO-8601 timestamp, where `null` disables the window.
+ * @param {unknown} value - configured timestamp, `null`, or `undefined`.
+ * @param {string} path - config path of the value.
+ * @param {string} fallback - ISO-8601 timestamp used when the value is absent.
+ * @returns {number|null} epoch milliseconds, or `null` when the window is disabled.
+ */
+function resolveTimestamp(value, path, fallback) {
+  if (value === undefined) return Date.parse(fallback)
+  if (value === null) return null
+  if (typeof value !== 'string' || value.length === 0) failConfig(`${path} must be an ISO-8601 timestamp or null`)
+  const parsed = Date.parse(value)
+  if (!Number.isFinite(parsed)) failConfig(`${path} must be an ISO-8601 timestamp or null`)
+  return parsed
+}
+
+/**
+ * Validate the optional `search` policy and apply every default. The policy
+ * covers DeepSeek's per-request Search / Fetch billing: one price for both
+ * APIs, a free window for server-side search calls only, and a switch for the
+ * direct Fetch API path used by the runtime's web fetch tool.
+ * @param {unknown} rawSearch - raw `config.search` value.
+ * @param {'CNY'|'USD'} currency - configured billing currency.
+ * @returns {{ enabled: boolean, perRequest: number, searchFreeUntil: number|null, trackFetch: boolean }} resolved policy.
+ */
+function resolveSearchConfig(rawSearch, currency) {
+  if (rawSearch === undefined) {
+    return {
+      enabled: true,
+      perRequest: DEFAULT_SEARCH_PER_REQUEST[currency],
+      searchFreeUntil: Date.parse(DEFAULT_SEARCH_FREE_UNTIL),
+      trackFetch: true,
+    }
+  }
+  if (!isPlainObject(rawSearch)) failConfig('config.search must be a plain object')
+  rejectUnknownKeys(rawSearch, SEARCH_FIELDS, 'config.search')
+  return {
+    enabled: resolveBoolean(rawSearch.enabled, 'config.search.enabled', true),
+    perRequest: rawSearch.perRequest === undefined
+      ? DEFAULT_SEARCH_PER_REQUEST[currency]
+      : finiteNonNegative(rawSearch.perRequest, 'config.search.perRequest'),
+    searchFreeUntil: resolveTimestamp(rawSearch.searchFreeUntil, 'config.search.searchFreeUntil', DEFAULT_SEARCH_FREE_UNTIL),
+    trackFetch: resolveBoolean(rawSearch.trackFetch, 'config.search.trackFetch', true),
+  }
 }
 
 /**
@@ -411,7 +497,7 @@ function buildBuiltinRules(peakMultiplier) {
  * negative prices, bad currencies, `HH:MM` times, weekdays, or holiday dates
  * throw an `Error` whose message names the config path.
  * @param {unknown} [rawConfig] - raw row config from the profile composition.
- * @returns {{ currency: 'CNY'|'USD', rules: Array<Record<string, number|string>>, builtinRules: Array<Record<string, number|string>>, peak: { enabled: boolean, utcOffsetMinutes: number, weekdays: number[], windows: Array<[string, string]>, holidays: string[], multiplier: number } }} resolved config.
+ * @returns {{ currency: 'CNY'|'USD', rules: Array<Record<string, number|string>>, builtinRules: Array<Record<string, number|string>>, peak: { enabled: boolean, utcOffsetMinutes: number, weekdays: number[], windows: Array<[string, string]>, holidays: string[], multiplier: number }, search: { enabled: boolean, perRequest: number, searchFreeUntil: number|null, trackFetch: boolean } }} resolved config.
  */
 export function resolveBillingConfig(rawConfig = {}) {
   if (!isPlainObject(rawConfig)) failConfig('config must be a plain object')
@@ -420,9 +506,10 @@ export function resolveBillingConfig(rawConfig = {}) {
     ? DEFAULT_CURRENCY
     : resolveCurrency(rawConfig.currency, 'config.currency')
   const peak = resolvePeakPolicy(rawConfig.peak)
+  const search = resolveSearchConfig(rawConfig.search, currency)
   const rules = resolvePriceRules(rawConfig.pricing, currency, peak.multiplier)
   const builtinRules = buildBuiltinRules(peak.multiplier)
-  return { currency, rules, builtinRules, peak }
+  return { currency, rules, builtinRules, peak, search }
 }
 
 // --------------------------------------------------------------------------
@@ -661,6 +748,139 @@ function addBuckets(routes, routeKey, provider, model, tier, buckets) {
 }
 
 // --------------------------------------------------------------------------
+// Search / fetch fold
+// --------------------------------------------------------------------------
+
+/**
+ * Count the distinct non-blank queries of one `web_search` tool call. The tool
+ * collapses exact duplicate queries before dispatching one provider request per
+ * distinct query, so this count is that call's provider-request count.
+ * @param {unknown} argumentsValue - raw `arguments` JSON string or parsed object.
+ * @returns {number|null} distinct query count, or `null` when the payload is not a valid search call.
+ */
+function searchQueriesOf(argumentsValue) {
+  let args = argumentsValue
+  if (typeof args === 'string') {
+    try {
+      args = JSON.parse(args)
+    } catch {
+      return null
+    }
+  }
+  if (!isPlainObject(args) || !Array.isArray(args.queries)) return null
+  const queries = new Set()
+  for (const query of args.queries) {
+    if (typeof query === 'string' && query.trim().length > 0) queries.add(query)
+  }
+  return queries.size === 0 ? null : queries.size
+}
+
+/**
+ * Read the tool call id off one persisted `tool/result` message.
+ * @param {Record<string, any>} message - the tool message.
+ * @returns {string|undefined} the call id, when the message carries one.
+ */
+function resultCallId(message) {
+  if (typeof message.toolCallId === 'string' && message.toolCallId.length > 0) return message.toolCallId
+  const source = message.source
+  if (isPlainObject(source) && typeof source.callId === 'string' && source.callId.length > 0) return source.callId
+  return undefined
+}
+
+/**
+ * Fold one `tool/call` event into the search / fetch counters. A search call
+ * records one provider request per distinct query (the tool dispatches one per
+ * query, and the current runtime logs no separate request event) under the call
+ * id until the result arrives; a fetch call only records its call id (its
+ * result meta carries the status).
+ * @param {{ search: Record<string, any> }} state - current state.
+ * @param {{ data?: any }} event - committed `tool/call` event.
+ * @param {{ trackFetch: boolean }} searchPolicy - resolved search policy.
+ * @returns {typeof state} the next state, or the same reference for other tools.
+ */
+function applySearchToolCall(state, event, searchPolicy) {
+  const data = event.data
+  if (!isPlainObject(data)) return state
+  if (typeof data.callId !== 'string' || data.callId.length === 0) return state
+  const search = state.search
+  if (data.name === 'web_search') {
+    const queries = searchQueriesOf(data.arguments)
+    if (queries === null) return state
+    return {
+      ...state,
+      search: {
+        ...search,
+        calls: search.calls + 1,
+        requests: search.requests + queries,
+        pending: { ...search.pending, [data.callId]: queries },
+      },
+    }
+  }
+  if (data.name === 'web_fetch' && searchPolicy.trackFetch === true) {
+    return {
+      ...state,
+      search: {
+        ...search,
+        fetchCalls: search.fetchCalls + 1,
+        pendingFetch: { ...search.pendingFetch, [data.callId]: 1 },
+      },
+    }
+  }
+  return state
+}
+
+/**
+ * Fold one `tool/result` event that completes a tracked search or fetch call.
+ *
+ * A search result is billable only when the call succeeded with a non-empty
+ * merged source list: the provider returns sources only when the Search API
+ * returned results, and an empty source list is the tool's "No results found"
+ * success. A fetch result is billable only with HTTP 200 and no tool error.
+ * The pending entry is removed on the first result, so a compaction-pruner
+ * replacement result for the same call is ignored.
+ * @param {{ search: Record<string, any> }} state - current state.
+ * @param {{ data?: any }} event - committed `tool/result` event.
+ * @param {{ trackFetch: boolean }} searchPolicy - resolved search policy.
+ * @returns {typeof state} the next state, or the same reference for other calls.
+ */
+function applySearchToolResult(state, event, searchPolicy) {
+  const data = event.data
+  if (!isPlainObject(data) || !isPlainObject(data.message)) return state
+  const message = data.message
+  const callId = resultCallId(message)
+  if (callId === undefined) return state
+  const search = state.search
+  if (Object.hasOwn(search.pending, callId)) {
+    const queries = search.pending[callId]
+    const pending = { ...search.pending }
+    delete pending[callId]
+    const next = { ...search, pending }
+    if (message.isError === true) {
+      return { ...state, search: { ...next, failedCalls: next.failedCalls + 1 } }
+    }
+    const sources = isPlainObject(data.meta) && Array.isArray(data.meta.sources) ? data.meta.sources : null
+    if (sources === null) return { ...state, search: { ...next, failedCalls: next.failedCalls + 1 } }
+    if (sources.length === 0) return { ...state, search: { ...next, emptyCalls: next.emptyCalls + 1 } }
+    return { ...state, search: { ...next, billable: next.billable + queries } }
+  }
+  if (searchPolicy.trackFetch === true && Object.hasOwn(search.pendingFetch, callId)) {
+    const pendingFetch = { ...search.pendingFetch }
+    delete pendingFetch[callId]
+    const meta = isPlainObject(data.meta) ? data.meta : null
+    const billable = message.isError !== true && meta !== null && meta.statusCode === 200
+    return {
+      ...state,
+      search: {
+        ...search,
+        pendingFetch,
+        fetchBillable: search.fetchBillable + (billable ? 1 : 0),
+      },
+    }
+  }
+  return state
+}
+
+// --------------------------------------------------------------------------
 // Fold transitions
 // --------------------------------------------------------------------------
 
@@ -742,22 +962,28 @@ function applyUsage(state, event, peakPolicy) {
     routes,
     current: state.current,
     last: { turn: data.turn, step: data.step, routeKey, tier, buckets },
+    search: state.search,
   }
 }
 
 /**
  * The projection fold: the one transition from committed event to state.
- * @param {{ routes: Record<string, any>, current: { provider: string, model: string }|null, last: any }} state - state covering all prior events.
+ * @param {{ routes: Record<string, any>, current: { provider: string, model: string }|null, last: any, search: Record<string, any> }} state - state covering all prior events.
  * @param {any} event - the next committed Session event.
- * @param {{ enabled: boolean, utcOffsetMinutes: number, weekdays: number[], windows: Array<[string, string]>, holidays: string[], multiplier: number }} peakPolicy - resolved peak policy.
+ * @param {ReturnType<typeof resolveBillingConfig>} resolvedConfig - resolved config.
  * @returns {typeof state} the next state; the same reference when the event is not this unit's.
  */
-function applyEvent(state, event, peakPolicy) {
+function applyEvent(state, event, resolvedConfig) {
   if (!isPlainObject(event) || typeof event.type !== 'string') return state
   if (event.type === 'request/header') return applyRequestHeader(state, event)
   if (event.type === 'llm/retry-started') return applyRetryStarted(state, event)
+  const searchPolicy = resolvedConfig.search
+  if (searchPolicy !== undefined && searchPolicy.enabled === true) {
+    if (event.type === 'tool/call') return applySearchToolCall(state, event, searchPolicy)
+    if (event.type === 'tool/result') return applySearchToolResult(state, event, searchPolicy)
+  }
   if (event.type !== 'assistant/message' && event.type !== 'assistant/attempt') return state
-  return applyUsage(state, event, peakPolicy)
+  return applyUsage(state, event, resolvedConfig.peak)
 }
 
 // --------------------------------------------------------------------------
@@ -844,15 +1070,63 @@ function viewRoute(entry, resolvedConfig) {
 }
 
 /**
+ * Coerce one persisted search counter into a non-negative integer. Missing,
+ * non-finite, and negative values count as 0.
+ * @param {unknown} value - raw counter.
+ * @returns {number} the counter value.
+ */
+function counterValue(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0
+}
+
+/**
+ * Build the wire view of the search / fetch cost section. Counts are always
+ * present; costs are estimates from the resolved per-request price. The search
+ * cost is the post-free-window estimate (the client decides how to label it
+ * while `searchFreeUntil` is still in the future), while the fetch cost is the
+ * direct Fetch API spend, which is billable from launch.
+ * @param {{ search?: Record<string, any> }} state - fold state.
+ * @param {ReturnType<typeof resolveBillingConfig>} resolvedConfig - resolved config.
+ * @returns {Record<string, any>} the `search` wire section.
+ */
+function searchView(state, resolvedConfig) {
+  const policy = resolvedConfig.search
+  const search = isPlainObject(state) && isPlainObject(state.search) ? state.search : {}
+  const trackFetch = policy.trackFetch === true
+  const calls = counterValue(search.calls)
+  const requests = counterValue(search.requests)
+  const billable = counterValue(search.billable)
+  const fetchCalls = trackFetch ? counterValue(search.fetchCalls) : 0
+  const fetchBillable = trackFetch ? counterValue(search.fetchBillable) : 0
+  const searchCost = billable * policy.perRequest
+  const fetchCost = fetchBillable * policy.perRequest
+  return {
+    enabled: policy.enabled === true,
+    perRequest: policy.perRequest,
+    searchFreeUntil: policy.searchFreeUntil,
+    calls,
+    requests,
+    billable,
+    emptyCalls: counterValue(search.emptyCalls),
+    failedCalls: counterValue(search.failedCalls),
+    fetchCalls,
+    fetchBillable,
+    searchCost,
+    fetchCost,
+    totalCost: searchCost + fetchCost,
+  }
+}
+
+/**
  * Project one fold state to the client wire view.
  *
  * Pure: it reads the state and the resolved config and returns a fresh plain
  * object. Only routes with at least one token are listed; unpriced routes keep
  * their tokens in `totals` but carry `priced: false`, `pricing: null`, and zero
  * cost fields. Costs are raw floats in the configured currency.
- * @param {{ routes: Record<string, { provider: string, model: string, peak: Record<string, number>, offPeak: Record<string, number> }> }} state - fold state.
+ * @param {{ routes: Record<string, { provider: string, model: string, peak: Record<string, number>, offPeak: Record<string, number> }>, search?: Record<string, any> }} state - fold state.
  * @param {ReturnType<typeof resolveBillingConfig>} resolvedConfig - resolved config.
- * @returns {{ version: 1, currency: string, routes: Array<Record<string, any>>, totals: Record<string, number> }} the wire view.
+ * @returns {{ version: 1, currency: string, routes: Array<Record<string, any>>, totals: Record<string, number>, search: Record<string, any> }} the wire view.
  */
 export function billingView(state, resolvedConfig) {
   const currency = isPlainObject(resolvedConfig) ? resolvedConfig.currency : DEFAULT_CURRENCY
@@ -891,7 +1165,7 @@ export function billingView(state, resolvedConfig) {
     if (route.priced) totals.pricedRoutes += 1
     else totals.unpricedRoutes += 1
   }
-  return { version: 1, currency, routes, totals }
+  return { version: 1, currency, routes, totals, search: searchView(state, resolvedConfig) }
 }
 
 // --------------------------------------------------------------------------
@@ -1011,6 +1285,50 @@ function lastSampleIssue(value) {
 }
 
 /**
+ * Describe why a value is not a valid `state.search` pending map.
+ * @param {unknown} value - candidate pending map.
+ * @param {string} path - field path for the issue description.
+ * @returns {string|null} the issue, if any.
+ */
+function searchPendingIssue(value, path) {
+  if (!isPlainObject(value)) return `${path} must be a plain object`
+  for (const [callId, entry] of Object.entries(value)) {
+    if (callId.length === 0) return `${path} keys must be non-empty call ids`
+    const issue = integerIssue(entry, `${path}[${JSON.stringify(callId)}]`)
+    if (issue !== null) return issue
+  }
+  return null
+}
+
+/**
+ * Describe why a value is not a valid `state.search` counter block.
+ * @param {unknown} value - candidate search state.
+ * @returns {string|null} the issue, if any.
+ */
+function searchStateIssue(value) {
+  if (!isPlainObject(value)) return 'state.search must be a plain object'
+  const fields = [
+    'calls',
+    'requests',
+    'billable',
+    'emptyCalls',
+    'failedCalls',
+    'fetchCalls',
+    'fetchBillable',
+    'pending',
+    'pendingFetch',
+  ]
+  if (!hasExactKeys(value, fields)) return `state.search must carry exactly ${fields.join(', ')}`
+  for (const field of fields) {
+    if (field === 'pending' || field === 'pendingFetch') continue
+    const issue = integerIssue(value[field], `state.search.${field}`)
+    if (issue !== null) return issue
+  }
+  return searchPendingIssue(value.pending, 'state.search.pending')
+    ?? searchPendingIssue(value.pendingFetch, 'state.search.pendingFetch')
+}
+
+/**
  * Describe why a value is not a valid `billingUsage` fold state. Used by
  * `stateSchema` before a persisted checkpoint seeds a fold.
  * @param {unknown} value - candidate state.
@@ -1018,13 +1336,13 @@ function lastSampleIssue(value) {
  */
 function stateIssue(value) {
   if (!isPlainObject(value)) return 'state must be a plain object'
-  if (!hasExactKeys(value, ['routes', 'current', 'last'])) return 'state must carry exactly routes, current, and last'
+  if (!hasExactKeys(value, ['routes', 'current', 'last', 'search'])) return 'state must carry exactly routes, current, last, and search'
   if (!isPlainObject(value.routes)) return 'state.routes must be a plain object'
   for (const [routeKey, route] of Object.entries(value.routes)) {
     const issue = stateRouteIssue(route, `state.routes[${JSON.stringify(routeKey)}]`)
     if (issue !== null) return issue
   }
-  return currentRouteIssue(value.current) ?? lastSampleIssue(value.last)
+  return currentRouteIssue(value.current) ?? lastSampleIssue(value.last) ?? searchStateIssue(value.search)
 }
 
 /**
@@ -1115,14 +1433,55 @@ function totalsIssue(value, path) {
 }
 
 /**
+ * Describe why a value is not a valid `search` section of the wire view.
+ * @param {unknown} value - candidate search section.
+ * @returns {string|null} the issue, if any.
+ */
+function searchViewIssue(value) {
+  if (!isPlainObject(value)) return 'view.search must be a plain object'
+  const fields = [
+    'enabled',
+    'perRequest',
+    'searchFreeUntil',
+    'calls',
+    'requests',
+    'billable',
+    'emptyCalls',
+    'failedCalls',
+    'fetchCalls',
+    'fetchBillable',
+    'searchCost',
+    'fetchCost',
+    'totalCost',
+  ]
+  if (!hasExactKeys(value, fields)) return `view.search must carry exactly ${fields.join(', ')}`
+  if (typeof value.enabled !== 'boolean') return 'view.search.enabled must be a boolean'
+  const perRequestIssue = numberIssue(value.perRequest, 'view.search.perRequest')
+  if (perRequestIssue !== null) return perRequestIssue
+  if (value.searchFreeUntil !== null) {
+    const issue = numberIssue(value.searchFreeUntil, 'view.search.searchFreeUntil')
+    if (issue !== null) return issue
+  }
+  for (const field of ['calls', 'requests', 'billable', 'emptyCalls', 'failedCalls', 'fetchCalls', 'fetchBillable']) {
+    const issue = integerIssue(value[field], `view.search.${field}`)
+    if (issue !== null) return issue
+  }
+  for (const field of ['searchCost', 'fetchCost', 'totalCost']) {
+    const issue = numberIssue(value[field], `view.search.${field}`)
+    if (issue !== null) return issue
+  }
+  return null
+}
+
+/**
  * Describe why a value is not a valid wire view for this projection.
  * @param {unknown} value - candidate view.
  * @returns {string|null} the issue, if any.
  */
 function viewIssue(value) {
   if (!isPlainObject(value)) return 'view must be a plain object'
-  if (!hasExactKeys(value, ['version', 'currency', 'routes', 'totals'])) {
-    return 'view must carry exactly version, currency, routes, and totals'
+  if (!hasExactKeys(value, ['version', 'currency', 'routes', 'totals', 'search'])) {
+    return 'view must carry exactly version, currency, routes, totals, and search'
   }
   if (value.version !== 1) return 'view.version must be 1'
   if (!CURRENCIES.includes(/** @type {string} */ (value.currency))) return "view.currency must be 'CNY' or 'USD'"
@@ -1131,7 +1490,7 @@ function viewIssue(value) {
     const issue = viewRouteIssue(value.routes[index], `view.routes[${index}]`)
     if (issue !== null) return issue
   }
-  return totalsIssue(value.totals, 'view.totals')
+  return totalsIssue(value.totals, 'view.totals') ?? searchViewIssue(value.search)
 }
 
 /** Validates one persisted `billingUsage` fold state. */
@@ -1156,7 +1515,6 @@ const viewSchema = structuralSchema('billingUsage view', viewIssue)
  * @returns {{ key: string, stateVersion: number, stateSchema: { parse: Function, safeParse: Function }, init: () => object, apply: (state: object, event: unknown) => object, wire: { viewSchema: { parse: Function, safeParse: Function }, view: (state: object) => object } }} the projection definition.
  */
 export function createBillingProjection(resolvedConfig) {
-  const peakPolicy = resolvedConfig.peak
   let cachedState
   let cachedView
   const view = (state) => {
@@ -1167,10 +1525,15 @@ export function createBillingProjection(resolvedConfig) {
   }
   return {
     key: BILLING_PROJECTION_KEY,
-    stateVersion: 1,
+    stateVersion: 2,
     stateSchema,
-    init: () => ({ routes: {}, current: null, last: null }),
-    apply: (state, event) => applyEvent(state, event, peakPolicy),
+    init: () => ({
+      routes: {},
+      current: null,
+      last: null,
+      search: { ...ZERO_SEARCH_COUNTERS, pending: {}, pendingFetch: {} },
+    }),
+    apply: (state, event) => applyEvent(state, event, resolvedConfig),
     wire: { viewSchema, view },
   }
 }

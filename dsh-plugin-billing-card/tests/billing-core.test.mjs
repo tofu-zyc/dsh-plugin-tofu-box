@@ -130,6 +130,42 @@ function retryStartedEvent(turn, step, time = OFF_PEAK_TIME) {
 }
 
 /**
+ * Build one `tool/call` event.
+ * @param {string} name - tool name.
+ * @param {unknown} args - parsed arguments object (the log stores JSON text).
+ * @param {string} callId - tool call id.
+ * @param {number} [time] - event time.
+ * @returns {object} the event envelope.
+ */
+function toolCallEvent(name, args, callId, time = OFF_PEAK_TIME) {
+  return event('tool/call', { turn: 1, step: 1, callId, name, arguments: JSON.stringify(args) }, time)
+}
+
+/**
+ * Build one `tool/result` event.
+ * @param {string} callId - tool call id.
+ * @param {boolean} isError - whether the tool failed.
+ * @param {unknown} [meta] - persisted result metadata.
+ * @param {number} [time] - event time.
+ * @returns {object} the event envelope.
+ */
+function toolResultEvent(callId, isError = false, meta, time = OFF_PEAK_TIME) {
+  const data = {
+    turn: 1,
+    step: 1,
+    message: {
+      role: 'tool',
+      source: { kind: 'tool', callId },
+      toolCallId: callId,
+      content: [],
+      isError,
+    },
+  }
+  if (meta !== undefined) data.meta = meta
+  return event('tool/result', data, time)
+}
+
+/**
  * Fold events through one projection.
  * @param {object} projection - projection definition.
  * @param {Array<object>} events - committed events.
@@ -584,8 +620,23 @@ describe('billingUsage projection', () => {
     const initial = projection.init()
     assert.equal(BILLING_PROJECTION_KEY, 'billingUsage')
     assert.equal(projection.key, 'billingUsage')
-    assert.equal(projection.stateVersion, 1)
-    assert.deepEqual(initial, { routes: {}, current: null, last: null })
+    assert.equal(projection.stateVersion, 2)
+    assert.deepEqual(initial, {
+      routes: {},
+      current: null,
+      last: null,
+      search: {
+        calls: 0,
+        requests: 0,
+        billable: 0,
+        emptyCalls: 0,
+        failedCalls: 0,
+        fetchCalls: 0,
+        fetchBillable: 0,
+        pending: {},
+        pendingFetch: {},
+      },
+    })
     assert.notEqual(projection.init(), initial)
 
     assert.equal(projection.apply(initial, event('step/start', { turn: 1, step: 1 }, OFF_PEAK_TIME)), initial)
@@ -634,6 +685,21 @@ describe('billingUsage projection', () => {
         costOffPeak: 0,
         pricedRoutes: 0,
         unpricedRoutes: 0,
+      },
+      search: {
+        enabled: true,
+        perRequest: 0.005,
+        searchFreeUntil: Date.parse('2026-10-31T16:00:00.000Z'),
+        calls: 0,
+        requests: 0,
+        billable: 0,
+        emptyCalls: 0,
+        failedCalls: 0,
+        fetchCalls: 0,
+        fetchBillable: 0,
+        searchCost: 0,
+        fetchCost: 0,
+        totalCost: 0,
       },
     })
     assert.equal(projection.wire.view(initial), view)
@@ -1017,6 +1083,123 @@ describe('billingUsage projection', () => {
 })
 
 // --------------------------------------------------------------------------
+// Search / fetch billing
+// --------------------------------------------------------------------------
+
+describe('search billing', () => {
+  it('defaults to the official per-request prices and the server-side free window', () => {
+    assert.deepEqual(resolveBillingConfig().search, {
+      enabled: true,
+      perRequest: 0.005,
+      searchFreeUntil: Date.parse('2026-10-31T16:00:00.000Z'),
+      trackFetch: true,
+    })
+    assert.equal(resolveBillingConfig({ currency: 'USD' }).search.perRequest, 0.00075)
+  })
+
+  it('accepts search overrides and rejects malformed options with the config path', () => {
+    assert.deepEqual(resolveBillingConfig({
+      search: { enabled: false, perRequest: 0.01, searchFreeUntil: null, trackFetch: false },
+    }).search, { enabled: false, perRequest: 0.01, searchFreeUntil: null, trackFetch: false })
+    for (const [raw, pattern] of [
+      [{ search: [] }, /config\.search/],
+      [{ search: { enabled: 'yes' } }, /config\.search\.enabled/],
+      [{ search: { trackFetch: 1 } }, /config\.search\.trackFetch/],
+      [{ search: { perRequest: -1 } }, /config\.search\.perRequest/],
+      [{ search: { searchFreeUntil: 'tomorrow' } }, /config\.search\.searchFreeUntil/],
+      [{ search: { unknown: true } }, /config\.search\.unknown/],
+    ]) {
+      assert.throws(() => resolveBillingConfig(raw), pattern)
+    }
+  })
+
+  it('bills a successful multi-query search call per distinct query', () => {
+    const projection = createBillingProjection(resolveBillingConfig())
+    const state = fold(projection, [
+      toolCallEvent('web_search', { queries: ['a', 'b', 'a'] }, 'call-1'),
+      toolResultEvent('call-1', false, { sources: [{ url: 'https://a.test' }], truncated: false }),
+    ])
+    const view = projection.wire.view(state)
+    assert.equal(view.search.calls, 1)
+    assert.equal(view.search.requests, 2)
+    assert.equal(view.search.billable, 2)
+    assert.equal(view.search.searchCost, 0.01)
+    assert.equal(view.search.totalCost, 0.01)
+    assert.equal(projection.wire.viewSchema.parse(view), view)
+    // The search counter block survives a JSON checkpoint round-trip.
+    assert.equal(projection.stateSchema.parse(JSON.parse(JSON.stringify(state))).search.billable, 2)
+  })
+
+  it('does not bill a failed or empty-result search call', () => {
+    const projection = createBillingProjection(resolveBillingConfig())
+    const failed = fold(projection, [
+      toolCallEvent('web_search', { queries: ['a'] }, 'call-fail'),
+      toolResultEvent('call-fail', true),
+    ])
+    assert.equal(failed.search.failedCalls, 1)
+    assert.equal(failed.search.billable, 0)
+    const empty = fold(projection, [
+      toolCallEvent('web_search', { queries: ['a', 'b'] }, 'call-empty'),
+      toolResultEvent('call-empty', false, { sources: [], truncated: false }),
+    ])
+    assert.equal(empty.search.emptyCalls, 1)
+    assert.equal(empty.search.billable, 0)
+    assert.equal(projection.wire.view(empty).search.searchCost, 0)
+  })
+
+  it('counts direct Fetch API calls only on HTTP 200', () => {
+    const projection = createBillingProjection(resolveBillingConfig())
+    const state = fold(projection, [
+      toolCallEvent('web_fetch', { url: 'https://a.test' }, 'fetch-1'),
+      toolResultEvent('fetch-1', false, { url: 'https://a.test', statusCode: 200, truncated: false }),
+      toolCallEvent('web_fetch', { url: 'https://b.test' }, 'fetch-2'),
+      toolResultEvent('fetch-2', true, { url: 'https://b.test', statusCode: 404, truncated: false }),
+    ])
+    const view = projection.wire.view(state)
+    assert.equal(view.search.fetchCalls, 2)
+    assert.equal(view.search.fetchBillable, 1)
+    assert.equal(view.search.fetchCost, 0.005)
+    assert.equal(view.search.totalCost, 0.005)
+  })
+
+  it('ignores a duplicate replacement result for the same call', () => {
+    const projection = createBillingProjection(resolveBillingConfig())
+    const state = fold(projection, [
+      toolCallEvent('web_search', { queries: ['a', 'b'] }, 'call-1'),
+      toolResultEvent('call-1', false, { sources: [{ url: 'https://a.test' }], truncated: false }),
+      toolResultEvent('call-1', false, { sources: [{ url: 'https://a.test' }], truncated: false }),
+      toolCallEvent('web_fetch', { url: 'https://a.test' }, 'fetch-1'),
+      toolResultEvent('fetch-1', false, { url: 'https://a.test', statusCode: 200, truncated: false }),
+      toolResultEvent('fetch-1', false, { url: 'https://a.test', statusCode: 200, truncated: false }),
+    ])
+    assert.equal(state.search.billable, 2)
+    assert.equal(state.search.fetchBillable, 1)
+  })
+
+  it('counts nothing when search tracking is disabled or fetch tracking is off', () => {
+    const disabled = createBillingProjection(resolveBillingConfig({ search: { enabled: false } }))
+    const idle = fold(disabled, [
+      toolCallEvent('web_search', { queries: ['a'] }, 'call-1'),
+      toolResultEvent('call-1', false, { sources: [{ url: 'https://a.test' }], truncated: false }),
+      toolCallEvent('web_fetch', { url: 'https://a.test' }, 'fetch-1'),
+      toolResultEvent('fetch-1', false, { url: 'https://a.test', statusCode: 200, truncated: false }),
+    ])
+    assert.equal(idle.search.calls, 0)
+    assert.equal(idle.search.requests, 0)
+    assert.equal(disabled.wire.view(idle).search.enabled, false)
+    assert.equal(disabled.wire.view(idle).search.totalCost, 0)
+
+    const noFetch = createBillingProjection(resolveBillingConfig({ search: { trackFetch: false } }))
+    const fetchState = fold(noFetch, [
+      toolCallEvent('web_fetch', { url: 'https://a.test' }, 'fetch-1'),
+      toolResultEvent('fetch-1', false, { url: 'https://a.test', statusCode: 200, truncated: false }),
+    ])
+    assert.equal(fetchState.search.fetchCalls, 0)
+    assert.equal(fetchState.search.fetchBillable, 0)
+  })
+})
+
+// --------------------------------------------------------------------------
 // Structural schemas
 // --------------------------------------------------------------------------
 
@@ -1024,7 +1207,7 @@ describe('projection schemas', () => {
   it('exposes the registry registration contract', () => {
     const projection = createBillingProjection(resolveBillingConfig())
     assert.equal(projection.key, 'billingUsage')
-    assert.equal(projection.stateVersion, 1)
+    assert.equal(projection.stateVersion, 2)
     assert.equal(typeof projection.init, 'function')
     assert.equal(typeof projection.apply, 'function')
     assert.equal(typeof projection.stateSchema.parse, 'function')
@@ -1141,7 +1324,7 @@ describe('index plugin', () => {
     pluginModule.apply(ctx, { currency: 'USD' })
     assert.equal(registered.length, 1)
     assert.equal(registered[0].key, 'billingUsage')
-    assert.equal(registered[0].stateVersion, 1)
+    assert.equal(registered[0].stateVersion, 2)
     assert.equal(registered[0].wire.view(registered[0].init()).currency, 'USD')
   })
 

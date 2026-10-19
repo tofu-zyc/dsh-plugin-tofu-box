@@ -1,13 +1,13 @@
 {
   "name": "dsh-plugin-billing-card",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
   "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "billing", "token", "usage", "cost", "deepseek"],
   "publishConfig": { "registry": "https://registry.npmjs.org" },
   "repository": { "type": "git", "url": "git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git", "directory": "dsh-plugin-billing-card" },
   "bugs": { "url": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/issues" },
   "homepage": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/tree/main/dsh-plugin-billing-card",
-  "description": "计费卡片：在输入框下方实时统计当前会话各模型的 token 用量，并按可配置的价格表（默认 DeepSeek 官方峰谷价，CNY/USD）估算费用。Host 端注册 billingUsage 会话投影（纯函数、可重放），Client 端是输入框下方的药丸与分模型明细卡片；价格表和峰谷规则可通过插件配置扩展以支持其他模型/提供商。",
+  "description": "计费卡片：在输入框下方实时统计当前会话各模型的 token 用量，并按可配置的价格表（默认 DeepSeek 官方峰谷价，CNY/USD）估算费用；同时统计 DeepSeek 官方网页搜索 / 抓取 API 的调用次数与按次费用（Search 服务端调用免费至 2026-11-01 00:00，之后按每 1000 次 5 元估算）。Host 端注册 billingUsage 会话投影（纯函数、可重放），Client 端是输入框下方的药丸与明细卡片；价格表、峰谷规则和搜索计价可通过插件配置扩展以支持其他模型/提供商。",
   "type": "module",
   "main": "index.js",
   "exports": {
