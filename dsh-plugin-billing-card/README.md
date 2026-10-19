@@ -2,22 +2,27 @@
 
 在 DeepSeek Harness 的输入框下方实时显示**当前会话**的 token 用量与估算费用，按模型分项统计，
 默认内置 DeepSeek 官方价格（含**峰谷分时计价**），并保留完整的扩展能力：价格表、峰谷规则、
-其他模型/提供商都可以在插件配置里追加，不需要改代码。
+其他模型/提供商都可以在插件配置里追加，不需要改代码。0.2.0 起同时统计 **DeepSeek 官方网页搜索 /
+抓取 API** 的调用次数与按次费用（Search 服务端调用免费至 2026-11-01 00:00，之后按每 1000 次
+5 元估算）。
 
-> npm：[`dsh-plugin-billing-card@0.1.0`](https://www.npmjs.com/package/dsh-plugin-billing-card)
-> · `tofu-box@1.2.0` 起包含本插件。
+> npm：[`dsh-plugin-billing-card@0.2.0`](https://www.npmjs.com/package/dsh-plugin-billing-card)
+> · `tofu-box@1.2.1` 起包含本版本（伞包 1.2.0 含 0.1.0）。
 
 - **Host 半**：注册一个客户端可见的 Session 投影单元 `billingUsage`，在提交事件时折叠
-  `assistant/message` / `assistant/attempt` 中模型上报的 `usage`，按 `request/header` 归属模型路由，
+  `assistant/message` / `assistant/attempt` 中模型上报的 `usage`（按 `request/header` 归属模型路由），
+  并折叠 `tool/call` / `tool/result` 里的 `web_search` / `web_fetch` 调用来估算按次费用；
   纯函数、可重放、不产生任何模型调用。
 - **Client 半**：在 `conversation.composer.dock`（输入框下方的环境条目区）新增一个
-  `billing-card` 条目；平时是一枚小药丸（金额 + token 数），点开后是分模型明细卡片。
+  `billing-card` 条目；平时是一枚只显示估算费用的小药丸（token 总量已由 DSH 自带用量药丸显示，
+  这里不重复），点开后是明细卡片。
 
-> 显示的是**按 token 数与价格表计算的估算值**，不是官方账单。实际扣费以 DeepSeek 账单为准。
+> 显示的是**按 token 数、按次价格与价格表计算的估算值**，不是官方账单。实际扣费以 DeepSeek 账单为准。
 
 ## 显示内容
 
-药丸（收起态）：`¥0.0123 · 15.2K tok`，鼠标悬停/读屏可读到完整摘要（金额、token、缓存命中率）。
+药丸（收起态）：`¥0.0123`。只显示估算费用——会话 token 总量与缓存命中率已由 DSH 自带的用量药丸
+显示，不重复占位。鼠标悬停/读屏可读到「预估费用 ¥…」。
 
 卡片（展开态）：
 
@@ -25,13 +30,15 @@
 - token 汇总：缓存未命中输入、缓存命中输入（及命中率）、输出、合计。
 - 按模型分项：模型名、token 数、估算费用；没有配置价格的模型显示「未配置价格」，
   token 仍计入合计，但不计入费用。
+- 联网搜索小节（本会话有搜索/抓取调用时出现）：搜索调用次数、provider 请求数、预计计费请求数、
+  搜索费用；直连 Fetch API 的抓取次数与费用。搜索仍处免费期时显示「免费期内（11/1 起 …）」。
 
 会话还没有任何已结算的 token 用量时，卡片不显示（不会占位、不会报错）。
 
 ## 安装
 
-已发布 npm：`dsh-plugin-billing-card@0.1.0`，同时也是 `tofu-box` 伞包（1.2.0 起）的成员。插件行 id 为
-`billing-card`，Client 半是手写浏览器模块，无需构建步骤。
+已发布 npm：`dsh-plugin-billing-card@0.2.0`，同时也是 `tofu-box` 伞包（1.2.1 起）的成员。
+插件行 id 为 `billing-card`，Client 半是手写浏览器模块，无需构建步骤。
 
 ```bash
 # 1) 单装（npm）
@@ -96,6 +103,34 @@ plugin_manager install_bundle target = D:\program\dsh-plugins\dsh-plugin-billing
 > 价格来源：DeepSeek 官方「模型 & 价格」页（中文 / 英文），核对时间 2026-10-17。
 > 官方保留调价权利，请以官网与你的实际结算为准；调价后覆盖本插件配置即可。
 
+## 联网搜索 / 抓取计费（0.2.0）
+
+官方口径（Search / Fetch API，2026-10-17 上线）：
+
+- 按**成功请求次数**计费：每 1,000 次成功请求 **5 元 / $0.75**；失败、空结果、超时不计费，
+  `count` 只控制返回条数、不影响单价。
+- 在 DeepSeek Harness / Claude Code / Codex 中由**服务端工具调用**触发的 Search / Fetch 目前免费，
+  **北京时间 2026-11-01 00:00 起**按次收费。DSH 的 `web_search` 走服务端 `web_search` 工具；
+  而 `web_fetch` 是直连 `POST https://api.deepseek.com/v1/tools/fetch` 的普通 API 请求，
+  不属于服务端工具调用，按官方规则自上线起计费。
+- 本插件从会话日志统计（不额外发请求）：
+  - `web_search`：每次工具调用按**去重后的 query 数**计为 provider 请求数（工具本身就是每个
+    query 发一个请求）；一次调用成功且结果源非空时，这些 query 计为「预计计费请求」。
+  - `web_fetch`：按 HTTP 200 的成功抓取计为 Fetch API 计费请求。
+- 费用 = 预计计费请求数 × `search.perRequest`（默认 0.005 元/次，美元 0.00075/次）。
+- 搜索仍在免费期时，卡片显示「免费期内（11/1 起 ¥…）」；抓取费用始终按已计费估算显示。
+
+已知限制（估算口径）：
+
+- 服务端一次 provider 请求内部可能触发 1 次以上 Search（`max_uses`，默认 5），日志不记录实际
+  次数，因此「预计计费」是**下限估算**。
+- 多 query 批量搜索失败时，已成功的那部分可能已被官方计费，但这里整单失败、不计费；
+  空结果的成功调用不计费（与官方一致）。
+- 服务端搜索附带的辅助模型 token 费用不写入会话日志，本卡片不统计。
+- 统计假设 `web_search` / `web_fetch` 由 DeepSeek 官方 provider 提供（出厂 profile 即如此）。
+  若你改配了 Exa / Perplexity 搜索或本地 HTTP 抓取，请把 `search.enabled` 设为 `false`，
+  否则按次费用会误计。
+
 ## 配置
 
 配置写在插件行 `billing-card` 的 `config` 里（profile 的 `cordis.patch.yml` 对整行 `config`
@@ -125,6 +160,13 @@ plugin_manager install_bundle target = D:\program\dsh-plugins\dsh-plugin-billing
       windows: [['09:00', '12:00'], ['14:00', '18:00']]
       holidays: []                 # 例：['2026-10-01', '2026-10-02']；列出的当地日期全天按空闲计价
       multiplier: 2
+
+    # 联网搜索 / 抓取按次计价（0.2.0 起，默认即下方值）
+    search:
+      enabled: true                # false = 完全关闭搜索/抓取统计
+      perRequest: 0.005            # 每次成功请求的价格（当前币种）；默认 CNY 0.005 / USD 0.00075
+      searchFreeUntil: 2026-10-31T16:00:00.000Z  # 搜索服务端调用的免费截止（北京时间 11/1 00:00）；null = 已计费
+      trackFetch: true             # 是否统计直连 DeepSeek Fetch API 的 web_fetch 调用
 ```
 
 ### 支持其他提供商 / 模型
@@ -167,7 +209,7 @@ plugin_manager install_bundle target = D:\program\dsh-plugins\dsh-plugin-billing
 - **法定节假日不会自动识别**：官方规则里中国法定节假日按空闲计价，插件无法内置年年变化的
   节假日表，请在 `peak.holidays` 里按需填写；不填写时只按「周一至周五 + 时间窗口」判断。
 - 金额为估算值，浮点计算后仅用于展示（保留 2–4 位小数）；并发上限、搜索/抓取等按次计费的
-  接口不在统计范围。
+  接口按上面的口径估算，不是账单金额。
 
 ## 结构
 

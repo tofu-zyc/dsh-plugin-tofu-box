@@ -32,6 +32,17 @@ no network. Relevant events (from `@deepseek-ai/dsh-session` types):
 - `request/header` — `{ header: EpochHeader, reason, startsSeries? }`; `header.config` is
   `{ provider, model, ... }`.
 - `llm/retry-started` — `{ retryId, turn, step, retry }`.
+- `tool/call` — `{ turn, step, callId, name, arguments }`; `arguments` is the raw model JSON string
+  (`web_search` → `{"queries":[...]}`, `web_fetch` → `{"url":"..."}`).
+- `tool/result` — `{ turn, step, message, meta? }`; `message.toolCallId` / `message.source.callId`
+  identify the call, `message.isError` marks failure. `meta` for `web_search` is
+  `{ sources: [{ url, title?, snippet?, publishedAt? }], truncated, answer? }`; for `web_fetch` it is
+  `{ url, statusCode, truncated }`. Error results carry no `meta`. The compaction tool-result pruner
+  may append a second replacement result for the same call id, so consume the first result per call.
+
+The current runtime logs **no** dedicated search-request event: `web_search` request counts must be
+derived from the tool call's distinct queries (one provider request per query), and `web_fetch`
+requests from the tool result's HTTP status.
 
 `TokenUsage` = `{ inputTokens, outputTokens, totalTokens?, cacheReadTokens?, cacheWriteTokens?, reasoningTokens? }`.
 `inputTokens` is **uncached (cache-miss) input**; the three prompt buckets are disjoint:
@@ -63,6 +74,16 @@ Default `currency` = `CNY` (Chinese platform account). Every default rule matche
 `'*'` + an exact model id. Unknown models are **unpriced**, never guessed: their tokens are
 counted but excluded from cost and the route is flagged `priced: false`.
 
+## Search / fetch pricing defaults (official DeepSeek docs, pinned 2026-10-17)
+
+DeepSeek's standalone Search and Fetch APIs are billed **per successful request**, not per token:
+5 CNY or $0.75 per 1,000 successful requests (`0.005` / `0.00075` per request). Failed requests,
+empty search results, and timeouts are free. Server-side Search / Fetch calls made through
+DeepSeek Harness / Claude Code / Codex are free until **2026-11-01 00:00 Beijing time**
+(`2026-10-31T16:00:00.000Z`); direct API calls (the runtime's `web_fetch` → `POST /v1/tools/fetch`)
+are billed from launch. The fold estimates billable requests from the Session log and multiplies
+by `search.perRequest`; the Client labels the search cost as free-period until `searchFreeUntil`.
+
 ## Config (raw object, validated by our own code — no schemastery/zod dependency)
 
 ```js
@@ -87,13 +108,20 @@ counted but excluded from cost and the route is flagged `priced: false`.
     windows: [['HH:MM', 'HH:MM'], ...],    // default [['09:00','12:00'], ['14:00','18:00']]
     holidays: string[],                    // 'YYYY-MM-DD' Beijing dates treated as off-peak; default []
     multiplier: number                     // default 2
+  },
+  search: {                                // optional DeepSeek per-request policy
+    enabled: boolean,                      // default true; false = count and bill nothing
+    perRequest: number,                    // default 0.005 (CNY) / 0.00075 (USD) per successful request
+    searchFreeUntil: string | null,        // ISO-8601; default '2026-10-31T16:00:00.000Z' (Beijing 11/1 00:00); null = billed already
+    trackFetch: boolean                    // default true; count direct Fetch API web_fetch calls
   }
 }
 ```
 
 Validation is strict and loud: unknown top-level keys, wrong types, non-finite/negative numbers,
 invalid currency, invalid `HH:MM`, weekday outside 1..7, duplicate weekdays, invalid holiday
-date — all throw an `Error` whose message names the config path, e.g.
+date, non-boolean flags, or an unparseable `searchFreeUntil` — all throw an `Error` whose message
+names the config path, e.g.
 `billing-card: config.pricing[0].inputPerM must be a finite non-negative number`.
 Do not silently ignore user typo keys.
 
@@ -106,9 +134,10 @@ Exports (named, ESM):
 - `BILLING_PROJECTION_KEY = 'billingUsage'`
 - `DEFAULT_CURRENCY = 'CNY'`
 - `resolveBillingConfig(rawConfig = {})` → resolved config
-  `{ currency, rules: PriceRule[], builtinRules: PriceRule[], peak: PeakPolicy }`
+  `{ currency, rules: PriceRule[], builtinRules: PriceRule[], peak: PeakPolicy, search: SearchPolicy }`
   where every rule is normalized (`provider`, `model`, `currency`, `inputPerM`, `cacheReadPerM`,
-  `cacheWritePerM`, `outputPerM`, `peakMultiplier`).
+  `cacheWritePerM`, `outputPerM`, `peakMultiplier`) and `SearchPolicy` is
+  `{ enabled, perRequest, searchFreeUntil: number|null, trackFetch }`.
 - `classifyPeak(eventTimeMs, peakPolicy)` → `true` when the timestamp falls in a peak window.
   Deterministic: local time = `eventTimeMs + utcOffsetMinutes * 60_000`, weekday from that local
   date (Mon=1..Sun=7), local `YYYY-MM-DD` in `holidays` → off-peak, otherwise weekday must be in
@@ -126,9 +155,9 @@ Projection definition:
 ```js
 {
   key: 'billingUsage',
-  stateVersion: 1,
+  stateVersion: 2,
   stateSchema,     // structural schema object (see below), validates state
-  init: () => ({ routes: {}, current: null, last: null }),
+  init: () => ({ routes: {}, current: null, last: null, search: emptySearchState }),
   apply(state, event) { ... returns the SAME reference for ignored events ... },
   wire: {
     viewSchema,    // structural schema object, validates the view
@@ -151,6 +180,12 @@ State (plain JSON, checkpoint-safe):
   },
   current: { provider, model } | null,   // latest request/header route
   last: { turn, step, routeKey, tier: 'peak' | 'offPeak', buckets } | null,
+  search: {
+    calls, requests, billable, emptyCalls, failedCalls,  // web_search counters
+    fetchCalls, fetchBillable,                          // web_fetch counters
+    pending: { [callId]: number },                      // in-flight web_search call -> distinct queries
+    pendingFetch: { [callId]: 1 },                      // in-flight web_fetch calls
+  },
 }
 ```
 
@@ -179,7 +214,20 @@ State (plain JSON, checkpoint-safe):
      final assistant-message sample replace an in-attempt streaming sample exactly once, while
      `llm/retry-started` starts a fresh billed attempt.
    - Zero-token routes may stay in state; the view filters them out.
-4. Every other event type returns the same state reference.
+4. Search/fetch counters (only while `search.enabled`):
+   - `tool/call` with `name === 'web_search'`: parse `event.data.arguments`, count **distinct**
+     non-blank queries; `calls += 1`, `requests += queries`, `pending[callId] = queries`.
+   - `tool/call` with `name === 'web_fetch'` while `search.trackFetch`: `fetchCalls += 1`,
+     `pendingFetch[callId] = 1`.
+   - `tool/result` with a call id in `pending` (search): remove the pending entry; on
+     `message.isError` or absent `meta.sources` → `failedCalls += 1`; on an empty `sources` array →
+     `emptyCalls += 1`; otherwise `billable += pending[callId]` (billed only on a 200-with-results
+     search, matching the official rule).
+   - `tool/result` with a call id in `pendingFetch`: remove it; `fetchBillable += 1` only when
+     `message.isError !== true` and `meta.statusCode === 200` (Fetch is billable only with page
+     content). The first result per call wins, so a pruner replacement result is ignored.
+   - Any event without a tracked call id returns the same state reference.
+5. Every other event type returns the same state reference.
 
 The fold must never throw for a well-formed Session event. Keep it O(1) in events (no scans of
 prior events) and O(routes) in state.
@@ -206,8 +254,22 @@ Wire view (`view(state)`; stable reference while the state reference is unchange
     cost, costPeak, costOffPeak,
     pricedRoutes, unpricedRoutes,
   },
+  search: {
+    enabled: boolean,
+    perRequest: number,
+    searchFreeUntil: number | null,        // epoch ms; null = no free window
+    calls, requests, billable, emptyCalls, failedCalls,
+    fetchCalls, fetchBillable,
+    searchCost, fetchCost, totalCost,      // count × perRequest (raw floats)
+  },
 }
 ```
+
+`searchCost`/`fetchCost` are estimates in the configured currency; the Client labels
+`searchCost` as a free-period value while `Date.now() < searchFreeUntil`. Fetch cost is always
+shown as billed because the direct Fetch API path is billed from launch. Both costs are kept
+**outside** `totals.cost` (token cost): the pill and the token totals still show only token spend,
+and the search section is a separate line in the expanded card.
 
 Cost math per route: `offPeakCost = (offPeak.input * inputPerM + offPeak.cacheRead * cacheReadPerM
 + offPeak.cacheWrite * cacheWritePerM + offPeak.output * outputPerM) / 1_000_000`;
@@ -280,6 +342,14 @@ on every export and non-obvious helper; comments state contracts, not narration.
     rejects malformed view.
 13. route ids with `/` in model (e.g. `GLM/glm-5.3`) and a provider containing odd characters.
 14. cacheWrite: default 0 cost, custom rule prices it.
+15. search defaults: CNY 0.005 / USD 0.00075 per request, free-until `2026-10-31T16:00:00.000Z`,
+    `trackFetch: true`.
+16. search config: overrides (`enabled`, `perRequest`, `searchFreeUntil: null`, `trackFetch`), and
+    strict rejection with config paths.
+17. search fold: distinct queries of a successful call are billable; failed/empty results are not;
+    duplicate replacement results are ignored; fetch counts only HTTP 200 results.
+18. search disabled / `trackFetch: false`: no counters, no cost.
+19. search state and view survive the structural schemas; checkpoint JSON round-trip.
 
 Use small helper builders for events. Tests must be deterministic (fixed epoch ms; no `Date.now()`).
 
@@ -338,9 +408,10 @@ card must simply stay absent, never crash the slot.
 Collapsed pill (always, when usage exists) — an inline pill matching the shipped stats pills:
 
 - icon: small inline SVG (blocky receipt/coin/¥ glyph, `currentColor`), 12–14 px.
-- text: `formatCost(totals.cost, view.currency)` · `formatCount(totals.total)` tokens.
-- `aria-haspopup="dialog"`, `aria-expanded`, `aria-label` = full localized summary
-  (cost + tokens + cache-hit percent).
+- text: only `formatCost(totals.cost, view.currency)`. The session's token total is already shown by
+  the shipped usage pill in the same dock row, so the billing pill must not repeat it.
+- `aria-haspopup="dialog"`, `aria-expanded`, `aria-label` = localized cost summary
+  (`预估费用 {cost}` / `Estimated cost {cost}`).
 - class names prefixed `bc-` (never generic names).
 
 Expanded card — click toggles; render through `ReactDOM.createPortal(..., document.body)` with
@@ -354,6 +425,9 @@ Escape and outside pointer-down; restore nothing else. Panel content:
 - per-route rows (from `view.routes`): model name (show `provider` as secondary text only when it
   helps disambiguate), tokens `input+cacheRead → output`, cost, and a localized "未配置价格"
   badge plus "仅统计 token" hint when `priced === false`.
+- search section (from `view.search`, when `enabled` and the session has search/fetch calls):
+  search calls + provider requests, estimated billable requests, search cost (free-period label
+  while `Date.now() < searchFreeUntil`), fetch requests + cost, and the free-period/fetch notes.
 - footer notes: estimate disclaimer and the config hint (pricing/peak are configurable).
 
 Formatting helpers:

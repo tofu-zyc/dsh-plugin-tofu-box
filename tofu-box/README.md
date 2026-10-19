@@ -19,7 +19,7 @@ dsh plugin --profile <你的profile> add tofu-box
 | dsh-plugin-shell-selector | 「设置 → Shell」选择 AI 用的 shell |
 | dsh-plugin-computer-use | 13 个 `computer_*` 桌面操作工具 |
 | dsh-plugin-mcp-ui | 「设置 → MCP 服务器」管理页 |
-| dsh-plugin-billing-card | 输入框下方的实时 token 用量与费用卡片（DeepSeek 官方峰谷价，可配置扩展） |
+| dsh-plugin-billing-card | 输入框下方的实时费用卡片（DeepSeek 官方峰谷价 + 搜索/抓取按次计费，可配置扩展） |
 
 各功能的说明、已知限制与兼容性见仓库
 [README](https://github.com/tofu-zyc/dsh-plugin-tofu-box#中文)。
