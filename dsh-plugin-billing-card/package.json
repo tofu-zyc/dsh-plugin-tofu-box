@@ -1,6 +1,7 @@
 {
   "name": "dsh-plugin-billing-card",
-  "version": "0.2.0",
+  "version": "0.3.0",
+  "engines": { "dsh": ">=0.2.0-rc.2 <0.3.0-0" },
   "license": "MIT",
   "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "billing", "token", "usage", "cost", "deepseek"],
   "publishConfig": { "registry": "https://registry.npmjs.org" },

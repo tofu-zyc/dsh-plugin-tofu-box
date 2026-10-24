@@ -4,10 +4,14 @@
 默认内置 DeepSeek 官方价格（含**峰谷分时计价**），并保留完整的扩展能力：价格表、峰谷规则、
 其他模型/提供商都可以在插件配置里追加，不需要改代码。0.2.0 起同时统计 **DeepSeek 官方网页搜索 /
 抓取 API** 的调用次数与按次费用（Search 服务端调用免费至 2026-11-01 00:00，之后按每 1000 次
-5 元估算）。
+5 元估算）；0.3.0 起卡片按当前**实际生效的 provider** 标注——服务端搜索（`deepseek-official`）、
+直连 Search / Fetch API（`deepseek-search-api` / `deepseek-fetch-api`）、本地 HTTP 抓取（`http`）
+各按自己的计费口径显示，不会再把本地免费抓取或直连 API 标成「免费期内」。
 
-> npm：[`dsh-plugin-billing-card@0.2.0`](https://www.npmjs.com/package/dsh-plugin-billing-card)
-> · `tofu-box@1.2.1` 起包含本版本（伞包 1.2.0 含 0.1.0）。
+> npm：[`dsh-plugin-billing-card@0.3.0`](https://www.npmjs.com/package/dsh-plugin-billing-card)
+> · `tofu-box@1.2.2` 起包含本版本。
+>
+> 兼容性：`engines.dsh` 声明为 `>=0.2.0-rc.2 <0.3.0-0`，已实测运行于 dsh **0.2.1-rc.3**。
 
 - **Host 半**：注册一个客户端可见的 Session 投影单元 `billingUsage`，在提交事件时折叠
   `assistant/message` / `assistant/attempt` 中模型上报的 `usage`（按 `request/header` 归属模型路由），
@@ -31,13 +35,14 @@
 - 按模型分项：模型名、token 数、估算费用；没有配置价格的模型显示「未配置价格」，
   token 仍计入合计，但不计入费用。
 - 联网搜索小节（本会话有搜索/抓取调用时出现）：搜索调用次数、provider 请求数、预计计费请求数、
-  搜索费用；直连 Fetch API 的抓取次数与费用。搜索仍处免费期时显示「免费期内（11/1 起 …）」。
+  搜索费用、抓取次数；标注随当前 provider 变化——服务端搜索免费期内显示「免费期内（11/1 起 …）」，
+  直连 API 直接显示按次费用，本地 HTTP 抓取显示「免费」。
 
 会话还没有任何已结算的 token 用量时，卡片不显示（不会占位、不会报错）。
 
 ## 安装
 
-已发布 npm：`dsh-plugin-billing-card@0.2.0`，同时也是 `tofu-box` 伞包（1.2.1 起）的成员。
+已发布 npm：`dsh-plugin-billing-card@0.3.0`，同时也是 `tofu-box` 伞包（1.2.2 起）的成员。
 插件行 id 为 `billing-card`，Client 半是手写浏览器模块，无需构建步骤。
 
 ```bash
@@ -103,22 +108,31 @@ plugin_manager install_bundle target = D:\program\dsh-plugins\dsh-plugin-billing
 > 价格来源：DeepSeek 官方「模型 & 价格」页（中文 / 英文），核对时间 2026-10-17。
 > 官方保留调价权利，请以官网与你的实际结算为准；调价后覆盖本插件配置即可。
 
-## 联网搜索 / 抓取计费（0.2.0）
+## 联网搜索 / 抓取计费（0.3.0）
 
 官方口径（Search / Fetch API，2026-10-17 上线）：
 
 - 按**成功请求次数**计费：每 1,000 次成功请求 **5 元 / $0.75**；失败、空结果、超时不计费，
   `count` 只控制返回条数、不影响单价。
 - 在 DeepSeek Harness / Claude Code / Codex 中由**服务端工具调用**触发的 Search / Fetch 目前免费，
-  **北京时间 2026-11-01 00:00 起**按次收费。DSH 的 `web_search` 走服务端 `web_search` 工具；
-  而 `web_fetch` 是直连 `POST https://api.deepseek.com/v1/tools/fetch` 的普通 API 请求，
-  不属于服务端工具调用，按官方规则自上线起计费。
+  **北京时间 2026-11-01 00:00 起**按次收费；而直连 API（`web.searchProvider: deepseek-search-api` /
+  `web.fetchProvider: deepseek-fetch-api`）自上线起就按次计费，没有免费期。
 - 本插件从会话日志统计（不额外发请求）：
   - `web_search`：每次工具调用按**去重后的 query 数**计为 provider 请求数（工具本身就是每个
     query 发一个请求）；一次调用成功且结果源非空时，这些 query 计为「预计计费请求」。
-  - `web_fetch`：按 HTTP 200 的成功抓取计为 Fetch API 计费请求。
+  - `web_fetch`：按 HTTP 200 的成功抓取计为一次抓取请求。
 - 费用 = 预计计费请求数 × `search.perRequest`（默认 0.005 元/次，美元 0.00075/次）。
-- 搜索仍在免费期时，卡片显示「免费期内（11/1 起 ¥…）」；抓取费用始终按已计费估算显示。
+- 卡片读取当前 `web` 行的 `searchProvider` / `fetchProvider`（「设置 → 插件 → Web 搜索」里的
+  「启用新版 Web 搜索 API」开关写的就是这两个字段），据此标注：
+
+  | 生效 provider | 搜索费用标签 | 抓取费用标签 |
+  |---|---|---|
+  | 服务端 Messages 搜索 `deepseek-official` | 免费期内显示「免费期内（11/1 起 ¥…）」 | —（默认抓取是 `http`） |
+  | 直连 Search / Fetch API | 直接显示按次费用，并注明没有服务端免费期 | 显示 `次数 · 费用` |
+  | 本地 HTTP 抓取 `http` | — | 显示 `次数 · 免费`，并注明不计费 |
+  | 其他 provider（Exa / Perplexity 等） | 只显示按次估算，不声称免费期 | 同上 |
+
+  读不到设置时按出厂默认（`deepseek-official` + `http`）标注，不会因此隐藏卡片。
 
 已知限制（估算口径）：
 
@@ -127,9 +141,9 @@ plugin_manager install_bundle target = D:\program\dsh-plugins\dsh-plugin-billing
 - 多 query 批量搜索失败时，已成功的那部分可能已被官方计费，但这里整单失败、不计费；
   空结果的成功调用不计费（与官方一致）。
 - 服务端搜索附带的辅助模型 token 费用不写入会话日志，本卡片不统计。
-- 统计假设 `web_search` / `web_fetch` 由 DeepSeek 官方 provider 提供（出厂 profile 即如此）。
-  若你改配了 Exa / Perplexity 搜索或本地 HTTP 抓取，请把 `search.enabled` 设为 `false`，
-  否则按次费用会误计。
+- 计数只按工具名（`web_search` / `web_fetch`），不区分 provider；换用 Exa / Perplexity 等
+  第三方 provider 时次数仍会累计，卡片只会显示按 `search.perRequest` 的估算而不声称官方口径。
+  这类部署若不想看到按次费用，把 `search.enabled` 设为 `false`。
 
 ## 配置
 

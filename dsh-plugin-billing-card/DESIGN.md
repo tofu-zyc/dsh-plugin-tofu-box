@@ -82,7 +82,12 @@ empty search results, and timeouts are free. Server-side Search / Fetch calls ma
 DeepSeek Harness / Claude Code / Codex are free until **2026-11-01 00:00 Beijing time**
 (`2026-10-31T16:00:00.000Z`); direct API calls (the runtime's `web_fetch` → `POST /v1/tools/fetch`)
 are billed from launch. The fold estimates billable requests from the Session log and multiplies
-by `search.perRequest`; the Client labels the search cost as free-period until `searchFreeUntil`.
+by `search.perRequest`; which per-request rate applies is a deployment fact the fold does not hold,
+so the Client reads the `web` row's `searchProvider` / `fetchProvider` through `ctx.configForms`
+and labels accordingly: `deepseek-official` keeps the free-period label until `searchFreeUntil`,
+`deepseek-search-api` / `deepseek-fetch-api` show the per-request cost with no free window, `http`
+fetch shows no cost, and any other provider id shows the estimate without claiming a DeepSeek rate.
+The persisted projection therefore stays replayable while its wording follows the live selection.
 
 ## Config (raw object, validated by our own code — no schemastery/zod dependency)
 

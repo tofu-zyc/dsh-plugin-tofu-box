@@ -2,6 +2,8 @@
 
 让模型**看见窗口和桌面并操作鼠标键盘**——v2 起整个后端换装 [Cua Driver](https://cua.ai) 的**进程内 SDK**（`@trycua/cua-driver`，Rust 原生运行时随 npm 包按平台分发，直接加载进 dsh 宿主进程）：**无守护进程、无 MCP、无 PowerShell**，装上即用，跨 Windows / macOS / Linux。
 
+> 兼容性：`engines.dsh` = `>=0.2.0-rc.2 <0.3.0-0`，已在 dsh 0.2.1-rc.3 上实测运行。
+
 ## v2.5：Ubuntu 26.04 / GNOME Wayland
 
 旧版没有开启驱动的原生 Wayland 开关，即使 `DISPLAY=:0` 存在，它也可能只是 XWayland，无法代表整个桌面。v2.5 在加载原生库前检测 `XDG_SESSION_TYPE` / `WAYLAND_DISPLAY`，自动设置 `CUA_DRIVER_RS_ENABLE_WAYLAND=1`；驱动依赖最低升到 npm 已发布的 0.28.3。环境中显式设置的 `0` / `false` 会保留，行配置 `wayland: on` / `off` 可覆盖。
@@ -11,13 +13,13 @@ GNOME/Mutter 还需要 **WinRects Shell 扩展**提供窗口几何、截图和�
 **从 npm 安装/更新**（在 Ubuntu 的图形桌面终端运行，替换自己的 profile）：
 
 ```sh
-dsh plugin --profile web add dsh-plugin-computer-use@2.5.0
-npx --yes --package=dsh-plugin-computer-use@2.5.0 dsh-computer-use-wayland install
+dsh plugin --profile web add dsh-plugin-computer-use@2.5.1
+npx --yes --package=dsh-plugin-computer-use@2.5.1 dsh-computer-use-wayland install
 # 注销并重新登录一次后：
-npx --yes --package=dsh-plugin-computer-use@2.5.0 dsh-computer-use-wayland status
+npx --yes --package=dsh-plugin-computer-use@2.5.1 dsh-computer-use-wayland status
 ```
 
-如果已经使用 `tofu-box`，通过 `dsh plugin --profile web update tofu-box` 更新依赖，再执行上面的扩展安装/检查命令。伞包现有 `^2.4.1` 范围覆盖 2.5.0；无需另外添加单独的 computer-use 插件行。更新与安装扩展后重启 dsh。
+如果已经使用 `tofu-box`，通过 `dsh plugin --profile web update tofu-box` 更新依赖，再执行上面的扩展安装/检查命令。伞包现有 `^2.5.1` 范围覆盖 2.5.1；无需另外添加单独的 computer-use 插件行。更新与安装扩展后重启 dsh。
 
 **从本仓库试用：在 Ubuntu 的图形桌面终端运行**（把路径和 profile 换成自己的）：
 
@@ -36,13 +38,13 @@ dsh plugin --profile web add "link:$(pwd)/dsh-plugin-computer-use"
 
 重启 dsh，然后先试 `computer_windows` 和 `computer_screenshot`。第一次需要前台输入时，允许系统弹出的远程桌面/键鼠控制授权。此授权属于驱动运行时，重启后可能再次询问。插件安装不会自动授予它。
 
-**用本地 tgz 安装**：下载/复制 `dsh-plugin-computer-use-2.5.0.tgz` 到 Ubuntu 后运行：
+**用本地 tgz 安装**：下载/复制 `dsh-plugin-computer-use-2.5.1.tgz` 到 Ubuntu 后运行：
 
 ```sh
-dsh plugin --profile web add ./dsh-plugin-computer-use-2.5.0.tgz
-npx --yes --package=./dsh-plugin-computer-use-2.5.0.tgz dsh-computer-use-wayland install
+dsh plugin --profile web add ./dsh-plugin-computer-use-2.5.1.tgz
+npx --yes --package=./dsh-plugin-computer-use-2.5.1.tgz dsh-computer-use-wayland install
 # 注销并重新登录后：
-npx --yes --package=./dsh-plugin-computer-use-2.5.0.tgz dsh-computer-use-wayland status
+npx --yes --package=./dsh-plugin-computer-use-2.5.1.tgz dsh-computer-use-wayland status
 ```
 
 如果通过 `tofu-box` 安装，应更新伞包中的依赖；不要叠装单独的 computer-use 行。也可直接对该 profile 下已安装包的 `scripts/wayland.mjs` 运行 `install` / `status`。

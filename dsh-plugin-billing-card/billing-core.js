@@ -1081,10 +1081,11 @@ function counterValue(value) {
 
 /**
  * Build the wire view of the search / fetch cost section. Counts are always
- * present; costs are estimates from the resolved per-request price. The search
- * cost is the post-free-window estimate (the client decides how to label it
- * while `searchFreeUntil` is still in the future), while the fetch cost is the
- * direct Fetch API spend, which is billable from launch.
+ * present; costs are estimates from the resolved per-request price. Both costs
+ * assume the DeepSeek APIs charge per request, so the search cost is the
+ * post-free-window estimate and the fetch cost the direct-API estimate; the
+ * client decides how to label each one from the `web` row's provider selection,
+ * which this replayable fold deliberately does not read.
  * @param {{ search?: Record<string, any> }} state - fold state.
  * @param {ReturnType<typeof resolveBillingConfig>} resolvedConfig - resolved config.
  * @returns {Record<string, any>} the `search` wire section.

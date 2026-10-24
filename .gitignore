@@ -25,6 +25,9 @@ dist/
 /.dsh-017-prod/
 # Isolated dsh home + rc test profile for plugin development; never the live desktop profile.
 /.dsh-rc-test/
+# Isolated npm prefix holding one dsh rc build for upgrade compat verification.
+/.rc3-deploy/
+/.rc3-home/
 /deepseek-harness/
 /.workbuddy/
 /.chrome-new-instance/

@@ -1,6 +1,7 @@
 {
   "name": "dsh-plugin-model-tuning",
-  "version": "3.0.0",
+  "version": "3.0.1",
+  "engines": { "dsh": ">=0.2.0-rc.2 <0.3.0-0" },
   "license": "MIT",
   "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "model", "settings", "reasoning", "compat", "image-generation"],
   "publishConfig": { "registry": "https://registry.npmjs.org" },

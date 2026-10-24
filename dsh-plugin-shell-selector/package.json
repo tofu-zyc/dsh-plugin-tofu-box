@@ -1,6 +1,7 @@
 {
   "name": "dsh-plugin-shell-selector",
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "engines": { "dsh": ">=0.2.0-rc.2 <0.3.0-0" },
   "description": "在 设置 → Shell 页面选择 AI 命令执行所用的 shell（自动 / PowerShell 7 / Windows PowerShell 5.1 / Git Bash），带真实可用性检测。",
   "license": "MIT",
   "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "shell", "powershell"],

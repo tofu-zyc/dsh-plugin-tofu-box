@@ -7,6 +7,8 @@
 
 > **v3 边界收缩（2026-10，基线 dsh 0.2.1-rc.1）**：v2 合并进来的「标题生成路由」交还官方 `session-title-llm` 行，「模型参数」页交还官方 Models 页。官方已经能做的，本插件不再复制；官方没有的，见下面两节。重叠盘点记录见 [docs/PLUGIN-SCOPE-dsh-0.2.1-rc.1.md](../docs/PLUGIN-SCOPE-dsh-0.2.1-rc.1.md)。
 
+> 兼容性：`engines.dsh` = `>=0.2.0-rc.2 <0.3.0-0`，已在 dsh 0.2.1-rc.3 上实测运行。
+
 ## 1. 兼容与推理（官方 Models 页扩展）
 
 通过官方为仓库外插件留的 `settings.models.provider-card` 席位，在每张 pi-ai provider 卡片里追加一节「兼容与推理（插件补充）」。**这些控件官方 Models 页没有**：

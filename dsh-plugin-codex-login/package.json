@@ -1,6 +1,7 @@
 {
   "name": "dsh-plugin-codex-login",
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "engines": { "dsh": ">=0.2.0-rc.2 <0.3.0-0" },
   "type": "module",
   "private": true,
   "description": "Codex ChatGPT OAuth sign-in control for DSH Web model settings",

@@ -2,6 +2,8 @@
 
 在 DSH Desktop 或 Web 的「设置 → 模型」中给 `openai-codex` 提供商增加 ChatGPT OAuth 登录、进度、验证码输入、取消和本地退出。插件调用宿主已经注册的 `llm-pi-ai` 授权流程；OAuth 端点、令牌存储与刷新由 DSH 和模型适配器负责。它不是 OpenAI API Key 登录，也不会复制令牌到浏览器。
 
+> 兼容性：`engines.dsh` = `>=0.2.0-rc.2 <0.3.0-0`，已在 dsh 0.2.1-rc.3 上实测运行。
+
 ## 前提与安装
 
 需要提供 `authorization`、`credentials`、`llm-pi-ai` 的 DSH Desktop 或 Web profile，以及支持 `settings.models.provider-card` 的模型设置页。插件 Host 使用 Typert Remote，界面通过已有的鉴权 `/api` 连接调用；不开放额外 HTTP 路由。与发行版使用兼容的 DSH 版本（参见 `package.json` 中的 peer dependencies）。

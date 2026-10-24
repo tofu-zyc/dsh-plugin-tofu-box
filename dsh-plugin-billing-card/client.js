@@ -51,9 +51,12 @@ window.__ModuleLoader__.load({
       'search.cost': '搜索费用',
       'search.freeValue': '免费期内（11/1 起 {cost}）',
       'search.freeNote': '服务端搜索调用免费至 2026-11-01 00:00，之后按官方每 1000 次价格估算。',
+      'search.directNote': '当前使用直连 DeepSeek Search API，按次计费，没有服务端免费期。',
       'search.fetch': '网页抓取',
       'search.fetchValue': '{count} 次 · {cost}',
+      'search.fetchLocalValue': '{count} 次 · 免费',
       'search.fetchNote': '网页抓取为直连 DeepSeek Fetch API，按次计费。',
+      'search.fetchLocalNote': '网页抓取走本地 HTTP，不产生按次费用。',
       'footer.estimate': '费用为按配置价格表估算的预估值，非实际账单。',
       'footer.config': '价格与峰谷时段可在插件配置中调整。',
       'pill.aria': '预估费用 {cost}',
@@ -81,9 +84,12 @@ window.__ModuleLoader__.load({
       'search.cost': 'Search cost',
       'search.freeValue': 'Free until Nov 1 (then {cost})',
       'search.freeNote': 'Server-side search calls are free until 2026-11-01 00:00 Beijing; afterward priced at the official per-1,000-request rate.',
+      'search.directNote': 'The direct DeepSeek Search API is billed per request with no server-side free window.',
       'search.fetch': 'Web fetch',
       'search.fetchValue': '{count} requests · {cost}',
+      'search.fetchLocalValue': '{count} requests · free',
       'search.fetchNote': 'Web fetch calls the DeepSeek Fetch API directly and is billed per request.',
+      'search.fetchLocalNote': 'Web fetch uses local HTTP and incurs no per-request charge.',
       'footer.estimate': 'Costs are estimates from the configured price table, not an actual bill.',
       'footer.config': 'Pricing and peak windows are configurable in the plugin config.',
       'pill.aria': 'Estimated cost {cost}',
@@ -197,6 +203,94 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Provider ids the `web` row selects. Both its fields are volatile, so the
+     * card follows the live selection instead of the composition's startup value.
+     */
+    const DIRECT_SEARCH_PROVIDER = 'deepseek-search-api'
+    const DIRECT_FETCH_PROVIDER = 'deepseek-fetch-api'
+    /** The shipped `web` selection; also the fallback when settings are unreadable. */
+    const MESSAGES_SEARCH_PROVIDER = 'deepseek-official'
+    const HTTP_FETCH_PROVIDER = 'http'
+
+    /**
+     * Classify the selected web providers into the per-request billing each one
+     * carries. Only these two DeepSeek deployments are known: server-side search
+     * has the free window, the direct Search and Fetch APIs bill from launch, and
+     * the local HTTP fetch bills nothing. Any other provider id stays `other`, so
+     * the card reports the resolved cost without claiming a DeepSeek rate.
+     * @param webValue - the `web` settings namespace value, or `null` when unread.
+     * @returns `{ search, fetch }` modes: `side`/`direct`/`other`, `local`/`api`/`other`.
+     */
+    function searchBilling(webValue) {
+      const value = webValue !== null && typeof webValue === 'object' ? webValue : null
+      const providerOf = (field, fallback) => {
+        const id = value === null ? undefined : value[field]
+        return typeof id === 'string' && id !== '' ? id : fallback
+      }
+      const searchProvider = providerOf('searchProvider', MESSAGES_SEARCH_PROVIDER)
+      const fetchProvider = providerOf('fetchProvider', HTTP_FETCH_PROVIDER)
+      return {
+        search: searchProvider === DIRECT_SEARCH_PROVIDER
+          ? 'direct'
+          : searchProvider === MESSAGES_SEARCH_PROVIDER ? 'side' : 'other',
+        fetch: fetchProvider === DIRECT_FETCH_PROVIDER
+          ? 'api'
+          : fetchProvider === HTTP_FETCH_PROVIDER ? 'local' : 'other',
+      }
+    }
+
+    /** Modes of the shipped selection, used until (or unless) settings resolve. */
+    const SHIPPED_SEARCH_BILLING = Object.freeze(searchBilling(null))
+
+    /**
+     * Bare observable over the `web` row's provider selection for the
+     * registration's `hooks` compartment.
+     *
+     * The settings form is resolved lazily because the settings service may
+     * activate after this plugin, and an absent service must not remove the
+     * card: the shipped selection is the answer until one resolves. The
+     * snapshot keeps one identity until the form itself changes, because the
+     * renderer compares snapshots by reference.
+     * @param ctx - the plugin's client context.
+     * @returns `{ getSnapshot, subscribe }`.
+     */
+    function webSearchBillingSource(ctx) {
+      let form
+      /** The `web` form, or `undefined` while the settings service is absent. */
+      const formOf = () => {
+        if (form !== undefined) return form
+        const forms = typeof ctx.get === 'function' ? ctx.get('configForms') : undefined
+        if (forms === undefined || forms === null || typeof forms.get !== 'function') return undefined
+        try {
+          form = forms.get('web')
+        } catch {
+          return undefined
+        }
+        return form
+      }
+      let cachedSnapshot
+      let cachedModes = SHIPPED_SEARCH_BILLING
+      return {
+        getSnapshot() {
+          const current = formOf()
+          if (current === undefined || typeof current.getSnapshot !== 'function') return SHIPPED_SEARCH_BILLING
+          const snapshot = current.getSnapshot()
+          if (snapshot !== cachedSnapshot) {
+            cachedSnapshot = snapshot
+            cachedModes = Object.freeze(searchBilling(snapshot !== null && typeof snapshot === 'object' ? snapshot.value : null))
+          }
+          return cachedModes
+        },
+        subscribe(listener) {
+          const current = formOf()
+          return current === undefined || typeof current.subscribe !== 'function'
+            ? () => {}
+            : current.subscribe(listener)
+        },
+      }
+    }
+
+    /**
      * Validate and normalize the Host wire view. Any value that does not match
      * the version-1 shape with a positive token total yields null, so a
      * missing projection, a future version, or a fresh Session leaves the
@@ -251,11 +345,18 @@ window.__ModuleLoader__.load({
     /**
      * The dock entry. Renders the collapsed pill always (when usage exists)
      * and portals the expanded card above it while open.
-     * @param props - framework standard props plus the plugin's `locale` service.
+     * @param props - framework standard props, the plugin's `locale` service,
+     *   and the provider-mode hook bound from the registration's inject face.
      */
-    function BillingCard({ useProjection, locale }) {
+    function BillingCard({ useProjection, useWebSearchBilling, locale }) {
       const t = useTranslate(locale)
       const data = renderableView(useProjection(PROJECTION_KEY))
+      // A registration always supplies the hook; the shipped selection keeps a
+      // hand-mounted component rendering instead of throwing. The renderer's
+      // selector hook requires a selector, so pass identity.
+      const billing = typeof useWebSearchBilling === 'function'
+        ? useWebSearchBilling(value => value)
+        : SHIPPED_SEARCH_BILLING
       const visible = data !== null
       const [open, setOpen] = React.useState(false)
       const [position, setPosition] = React.useState(null)
@@ -393,8 +494,11 @@ window.__ModuleLoader__.load({
       const searchRows = []
       const searchNotes = []
       if (showSearch) {
+        // The free window is a DeepSeek server-side fact: it holds only while the
+        // deployment still searches through Messages. The direct Search API has
+        // none, and an unknown provider is not claimed to have one.
         const freeUntil = typeof search.searchFreeUntil === 'number' ? search.searchFreeUntil : null
-        const freePeriod = freeUntil !== null && Date.now() < freeUntil
+        const freePeriod = billing.search === 'side' && freeUntil !== null && Date.now() < freeUntil
         const pushSearchRow = (key, label, value) => {
           searchRows.push(h('dt', { key: `search-${key}-label`, className: 'bc-row-label' }, label))
           searchRows.push(h('dd', { key: `search-${key}-value`, className: 'bc-row-value' }, value))
@@ -411,13 +515,19 @@ window.__ModuleLoader__.load({
           ? t('search.freeValue', { cost: searchCostText })
           : searchCostText)
         if (fetchCalls > 0) {
-          pushSearchRow('fetch', t('search.fetch'), t('search.fetchValue', {
-            count: formatCount(finite(search.fetchBillable)),
-            cost: formatCost(finite(search.fetchCost), currency),
-          }))
+          const fetchCount = formatCount(finite(search.fetchBillable))
+          // The projection counts every answered fetch; only the direct Fetch API
+          // charges for one, so the local HTTP provider reports no cost.
+          pushSearchRow('fetch', t('search.fetch'), billing.fetch === 'local'
+            ? t('search.fetchLocalValue', { count: fetchCount })
+            : t('search.fetchValue', { count: fetchCount, cost: formatCost(finite(search.fetchCost), currency) }))
         }
         if (freePeriod) searchNotes.push(t('search.freeNote'))
-        if (fetchCalls > 0) searchNotes.push(t('search.fetchNote'))
+        if (billing.search === 'direct') searchNotes.push(t('search.directNote'))
+        if (fetchCalls > 0) {
+          if (billing.fetch === 'api') searchNotes.push(t('search.fetchNote'))
+          else if (billing.fetch === 'local') searchNotes.push(t('search.fetchLocalNote'))
+        }
       }
 
       const panel = open ? ReactDOM.createPortal(        h('div', {
@@ -519,8 +629,18 @@ window.__ModuleLoader__.load({
 
         ctx.effect(() => registerDictionaries(ctx.locale))
 
+        // The `web` row's provider selection decides which Search / Fetch
+        // deployment this card is labelling; it is read from the settings
+        // domain rather than the projection so the fold stays replayable.
+        const webSearchBilling = webSearchBillingSource(ctx)
+
         ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register(
-          { name: 'conversation.composer.dock', id: 'billing-card', order: 2 },
+          {
+            name: 'conversation.composer.dock',
+            id: 'billing-card',
+            order: 2,
+            inject: () => ({ hooks: { webSearchBilling } }),
+          },
           props => h(BillingCard, { ...props, locale: ctx.locale })))
       },
     }
