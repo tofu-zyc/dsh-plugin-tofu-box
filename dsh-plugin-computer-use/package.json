@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-computer-use",
-  "version": "2.5.1",
+  "version": "2.5.2",
   "engines": { "dsh": ">=0.2.0-rc.2 <0.3.0-0" },
   "license": "MIT",
   "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "computer-use", "desktop", "automation", "screenshot", "input"],

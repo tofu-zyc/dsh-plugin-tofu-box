@@ -5,10 +5,18 @@
 桌面端 / Web 端的插件管理页一次只能装一个包，本包把「六个一起装」压成一次。
 
 ```sh
-dsh plugin --profile <你的profile> add tofu-box
+dsh plugin --profile <你的profile> add tofu-box --ignore-scripts
 ```
 
 桌面端：插件管理页的安装框里直接粘贴 `tofu-box` 即可。装完重启。
+
+> **`--ignore-scripts` 不是可选项**：本包会拉入 `dsh-plugin-computer-use`，它依赖的原生模块 `koffi`
+> 带一个 postinstall 脚本，pnpm 10/11 默认不执行并直接报
+> `[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: koffi`，安装随之中断。
+> `koffi` 走预编译二进制（`@koromix/koffi-<平台>`），跳过脚本不影响功能。
+> 用桌面端插件管理页安装并遇到该错误时，把该 profile 的 `pnpm-workspace.yaml` 里
+> `allowBuilds.koffi` 改成 `false` 再重试；细节见
+> [`dsh-plugin-computer-use`](https://www.npmjs.com/package/dsh-plugin-computer-use) 的同一小节。
 
 ## 装到的是什么
 

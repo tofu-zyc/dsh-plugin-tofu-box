@@ -13,13 +13,48 @@ GNOME/Mutter 还需要 **WinRects Shell 扩展**提供窗口几何、截图和�
 **从 npm 安装/更新**（在 Ubuntu 的图形桌面终端运行，替换自己的 profile）：
 
 ```sh
-dsh plugin --profile web add dsh-plugin-computer-use@2.5.1
-npx --yes --package=dsh-plugin-computer-use@2.5.1 dsh-computer-use-wayland install
+dsh plugin --profile web add dsh-plugin-computer-use@2.5.2 --ignore-scripts
+npx --yes --package=dsh-plugin-computer-use@2.5.2 dsh-computer-use-wayland install
 # 注销并重新登录一次后：
-npx --yes --package=dsh-plugin-computer-use@2.5.1 dsh-computer-use-wayland status
+npx --yes --package=dsh-plugin-computer-use@2.5.2 dsh-computer-use-wayland status
 ```
 
-如果已经使用 `tofu-box`，通过 `dsh plugin --profile web update tofu-box` 更新依赖，再执行上面的扩展安装/检查命令。伞包现有 `^2.5.1` 范围覆盖 2.5.1；无需另外添加单独的 computer-use 插件行。更新与安装扩展后重启 dsh。
+> `--ignore-scripts` 见下方「安装报 `ERR_PNPM_IGNORED_BUILDS`」，本插件依赖树里没有别的包需要跑构建脚本。
+
+如果已经使用 `tofu-box`，通过 `dsh plugin --profile web update tofu-box` 更新依赖，再执行上面的扩展安装/检查命令。伞包现有 `^2.5.2` 范围覆盖 2.5.2；无需另外添加单独的 computer-use 插件行。更新与安装扩展后重启 dsh。
+
+### 安装报 `ERR_PNPM_IGNORED_BUILDS` 时
+
+pnpm 10/11 默认不执行依赖的 postinstall 脚本，而本插件依赖的 `koffi` 带一个 `install` 脚本，
+于是首次安装可能直接中断：
+
+```
+[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: koffi@3.3.3
+Run "pnpm approve-builds" to pick which dependencies should be allowed to run scripts.
+```
+
+`koffi` 的原生二进制由**预编译包** `@koromix/koffi-<平台>` 提供（win32 / darwin / linux 的 x64、
+arm64 等常见平台都有），不需要本地编译器，所以下面三种做法都能装好，任选其一：
+
+```sh
+# 1) 最简单：这次安装跳过全部 postinstall，koffi 直接用预编译二进制（推荐）
+dsh plugin --profile web add dsh-plugin-computer-use@2.5.2 --ignore-scripts
+
+# 2) 只批准 koffi 这一个脚本：会执行 cnoke --prebuild，需要网络或本地编译环境
+dsh plugin --profile web add dsh-plugin-computer-use@2.5.2 --allow-build=koffi
+```
+
+```yaml
+# 3) 把这个决定写进该 profile 的 pnpm-workspace.yaml（持久，之后重跑原命令即可）
+allowBuilds:
+  koffi: false          # false = 不跑脚本，用预编译二进制；true = 允许执行构建脚本
+```
+
+桌面端插件管理页的安装框没有附加参数的入口；在那里遇到该错误时，按第 3 条改一次 profile 的
+`pnpm-workspace.yaml`，再点安装。
+
+`koffi` 只用于 **Windows 的 Per-Monitor-V2 DPI 感知**；即使它最终不可用，插件其余功能照常，
+只是高 DPI 屏上的截图与坐标可能按缩放前处理（插件的状态输出会标注 DPI 情况）。
 
 **从本仓库试用：在 Ubuntu 的图形桌面终端运行**（把路径和 profile 换成自己的）：
 
@@ -38,13 +73,13 @@ dsh plugin --profile web add "link:$(pwd)/dsh-plugin-computer-use"
 
 重启 dsh，然后先试 `computer_windows` 和 `computer_screenshot`。第一次需要前台输入时，允许系统弹出的远程桌面/键鼠控制授权。此授权属于驱动运行时，重启后可能再次询问。插件安装不会自动授予它。
 
-**用本地 tgz 安装**：下载/复制 `dsh-plugin-computer-use-2.5.1.tgz` 到 Ubuntu 后运行：
+**用本地 tgz 安装**：下载/复制 `dsh-plugin-computer-use-2.5.2.tgz` 到 Ubuntu 后运行：
 
 ```sh
-dsh plugin --profile web add ./dsh-plugin-computer-use-2.5.1.tgz
-npx --yes --package=./dsh-plugin-computer-use-2.5.1.tgz dsh-computer-use-wayland install
+dsh plugin --profile web add ./dsh-plugin-computer-use-2.5.2.tgz --ignore-scripts
+npx --yes --package=./dsh-plugin-computer-use-2.5.2.tgz dsh-computer-use-wayland install
 # 注销并重新登录后：
-npx --yes --package=./dsh-plugin-computer-use-2.5.1.tgz dsh-computer-use-wayland status
+npx --yes --package=./dsh-plugin-computer-use-2.5.2.tgz dsh-computer-use-wayland status
 ```
 
 如果通过 `tofu-box` 安装，应更新伞包中的依赖；不要叠装单独的 computer-use 行。也可直接对该 profile 下已安装包的 `scripts/wayland.mjs` 运行 `install` / `status`。
