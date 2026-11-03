@@ -1151,6 +1151,8 @@ export function billingView(state, resolvedConfig) {
     cost: 0,
     costPeak: 0,
     costOffPeak: 0,
+    costToken: 0,
+    costNetwork: 0,
     pricedRoutes: 0,
     unpricedRoutes: 0,
   }
@@ -1166,7 +1168,16 @@ export function billingView(state, resolvedConfig) {
     if (route.priced) totals.pricedRoutes += 1
     else totals.unpricedRoutes += 1
   }
-  return { version: 1, currency, routes, totals, search: searchView(state, resolvedConfig) }
+  const search = searchView(state, resolvedConfig)
+  // The published total is the number the pill and the card header show, so it
+  // carries every cost this fold already knows. A search or fetch fee that
+  // stayed out of `cost` made the header read `¥0.00` while the detail listed a
+  // real charge. `costPeak`/`costOffPeak` stay token-only: they split the token
+  // tiers, not the bill.
+  totals.costToken = totals.cost
+  totals.costNetwork = search.totalCost
+  totals.cost += search.totalCost
+  return { version: 1, currency, routes, totals, search }
 }
 
 // --------------------------------------------------------------------------
@@ -1420,11 +1431,13 @@ function totalsIssue(value, path) {
     'cost',
     'costPeak',
     'costOffPeak',
+    'costToken',
+    'costNetwork',
     'pricedRoutes',
     'unpricedRoutes',
   ]
   if (!hasExactKeys(value, fields)) return `${path} must carry exactly ${fields.join(', ')}`
-  for (const field of ['input', 'cacheRead', 'cacheWrite', 'output', 'total', 'cost', 'costPeak', 'costOffPeak']) {
+  for (const field of ['input', 'cacheRead', 'cacheWrite', 'output', 'total', 'cost', 'costPeak', 'costOffPeak', 'costToken', 'costNetwork']) {
     const issue = numberIssue(value[field], `${path}.${field}`)
     if (issue !== null) return issue
   }

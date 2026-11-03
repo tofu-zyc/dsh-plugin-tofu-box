@@ -30,7 +30,8 @@
 
 卡片（展开态）：
 
-- 本会话估算总费用；若包含高峰时段计价的 token，会标注「含高峰计价」。
+- 本会话估算总费用，**含联网搜索 / 抓取的按次费用**（0.3.1 起；此前总计只累加 token）；
+  若包含高峰时段计价的 token，会标注「含高峰计价」。
 - token 汇总：缓存未命中输入、缓存命中输入（及命中率）、输出、合计。
 - 按模型分项：模型名、token 数、估算费用；没有配置价格的模型显示「未配置价格」，
   token 仍计入合计，但不计入费用。
@@ -122,6 +123,10 @@ plugin_manager install_bundle target = D:\program\dsh-plugins\dsh-plugin-billing
     query 发一个请求）；一次调用成功且结果源非空时，这些 query 计为「预计计费请求」。
   - `web_fetch`：按 HTTP 200 的成功抓取计为一次抓取请求。
 - 费用 = 预计计费请求数 × `search.perRequest`（默认 0.005 元/次，美元 0.00075/次）。
+- 这笔费用**会计入卡片头部的估算总费用**（0.3.1 起）。总计因此不等于 token 费用：
+  `totals.cost` = `costToken` + `costNetwork`，而 `costPeak` / `costOffPeak` 仍只描述 token 部分。
+  没有配置价格的模型按 0 计，所以此时总计可能只显示联网费用——模型行上的「未配置价格」角标
+  就是这条的提示。
 - 卡片读取当前 `web` 行的 `searchProvider` / `fetchProvider`（「设置 → 插件 → Web 搜索」里的
   「启用新版 Web 搜索 API」开关写的就是这两个字段），据此标注：
 

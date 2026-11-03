@@ -683,6 +683,8 @@ describe('billingUsage projection', () => {
         cost: 0,
         costPeak: 0,
         costOffPeak: 0,
+        costToken: 0,
+        costNetwork: 0,
         pricedRoutes: 0,
         unpricedRoutes: 0,
       },
@@ -752,6 +754,8 @@ describe('billingUsage projection', () => {
       cost: expectedCost,
       costPeak: 0,
       costOffPeak: expectedCost,
+      costToken: expectedCost,
+      costNetwork: 0,
       pricedRoutes: 1,
       unpricedRoutes: 0,
     })
@@ -1125,6 +1129,11 @@ describe('search billing', () => {
     assert.equal(view.search.billable, 2)
     assert.equal(view.search.searchCost, 0.01)
     assert.equal(view.search.totalCost, 0.01)
+    // The published total carries the network fee: an unpriced token route keeps
+    // `cost` at 0, so a total that dropped the search fee would read free.
+    assert.equal(view.totals.costToken, 0)
+    assert.equal(view.totals.costNetwork, 0.01)
+    assert.equal(view.totals.cost, 0.01)
     assert.equal(projection.wire.viewSchema.parse(view), view)
     // The search counter block survives a JSON checkpoint round-trip.
     assert.equal(projection.stateSchema.parse(JSON.parse(JSON.stringify(state))).search.billable, 2)
