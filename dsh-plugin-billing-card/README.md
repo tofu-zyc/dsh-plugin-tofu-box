@@ -43,7 +43,7 @@
 
 ## 安装
 
-已发布 npm：`dsh-plugin-billing-card@0.3.0`，同时也是 `tofu-box` 伞包（1.2.2 起）的成员。
+已发布 npm：`dsh-plugin-billing-card@0.3.1`，同时也是 `tofu-box` 伞包（1.2.2 起）的成员。
 插件行 id 为 `billing-card`，Client 半是手写浏览器模块，无需构建步骤。
 
 ```bash
