@@ -34,6 +34,8 @@ computer-use **v2.5 起自动开启原生 Wayland**，并内置 Ubuntu/GNOME 的
 > `model-search`（模型菜单搜索框）已在 2026-10 移除：官方模型菜单自 0.2.0-rc.2 起自带搜索，而本插件以 priority -1 整块替换官方菜单，会挡住官方后续加到菜单里的功能（如 0.2.1-alpha.4 的推理档位）。已装的用户 `dsh plugin --profile <p> remove dsh-plugin-model-search` 即可回到官方菜单；伞包 tofu-box 1.1.0 起不再包含它。
 >
 > `team-task-route`（把某一次团队会话的 teammate 钉死在指定模型上）已在 2026-09 移除：它把 session id 写死在 `index.js` 里，只对一次性的调试会话有意义。需要时可在 git 历史里找回。
+>
+> `codex-login`（Codex ChatGPT OAuth 登录 UI 的在制品，从未发布、`private: true`）已于 2026-11-04 从仓库删除：一直缺真实账号可验证，官方后续也大概率自带登录入口。需要时可在 git 历史里找回（`git checkout b04fa07 -- dsh-plugin-codex-login`）。
 
 全部插件一次装完（npm 短名；`tofu-box` 伞包等价于此命令，见上）：
 
@@ -51,7 +53,7 @@ dsh plugin --profile web add \
 
 装完重启 dsh 就能用。注册配置打进包里了（`dsh.bundle.patch`），不需要动 cordis 文件。卸载把 `add` 换成 `remove`。也可以从 git 直装（未发版 / 想追 HEAD 时）：`git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git#path:dsh-plugin-<name>`，伞包同理 `#path:tofu-box`；npm 版走 semver，git 版 `update` 永远追 HEAD。首次安装 computer-use 时 pnpm 可能拦下 koffi 的构建脚本并让 dsh 报错——按提示在 profile 的 `pnpm-workspace.yaml` 写 `allowBuilds: koffi: false`（koffi 用预编译二进制，不需要构建）后重试即可。
 
-要改本仓库的代码来调试？见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)——把 profile 依赖换成指向本仓库的 `link:`，改完不用重装。要发版：`./publish.ps1 -Publish`（会先跑伞包同步校验，未入库的插件目录自动跳过）。
+要改本仓库的代码来调试？见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)——把 profile 依赖换成指向本仓库的 `link:`，改完不用重装。插件测试固定在这两个 profile 上做：`rc-dev`（dsh rc 通道）与 `alpha-dev`（dsh alpha 通道），**每次测试前先把它们更新到该通道最新版**——`pwsh -File tools\dev-dsh.ps1 <profile> -Update`，细则见 [docs/TESTING-PROFILES.md](docs/TESTING-PROFILES.md)。要发版：`./publish.ps1 -Publish`（会先跑伞包同步校验，未入库的插件目录自动跳过）。
 
 上表的版本区间为实测范围，未标注下限的插件不保证能在更早版本上运行。本轮迁移（0.1.7-alpha.2 → 0.1.7-rc.1）改动了 model-search、model-tuning、read-image-preview 三个插件，新增 shell-selector；image-generation 与 title-model 曾并入 model-tuning（v2）；**v3 起标题生成交还官方，绘图能力保留在 model-tuning 内**（不再单独发包，升级指引见其 README）；computer-use 与 mcp-ui 不需要改动，两者都在跑着 0.1.7-rc.1 的实际 profile 里加载通过：computer-use 的 13 个 `computer_*` 工具全部注册且被持续调用（截图 + 元素树、后台 element 点击、sequence、唤醒最小化窗口），mcp-ui 只到「加载与 compose 通过」这一步——它托管的 profile patch 里没有 MCP 块、当前 0 个 server，所以增删改的读写路径至今没有实机跑过，跟 dsh 版本无关。dsh 版本更新频繁，可能影响稳定性。并且插件均由 AI 完成，肯定会有很多潜在 bug。
 
@@ -116,7 +118,7 @@ dsh plugin --profile web add \
 
 Restart dsh after installing. Registration is bundled in each package (`dsh.bundle.patch`), nothing to wire up. To remove: `dsh plugin --profile web remove <name>`. Git installs still work (`git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git#path:dsh-plugin-<name>`, or `#path:tofu-box` for the umbrella) when you want unreleased changes; npm installs update via semver, git installs always track HEAD. First-time computer-use installs may fail on koffi's blocked build script — follow dsh's hint and add `allowBuilds: koffi: false` to the profile's `pnpm-workspace.yaml` (koffi ships prebuilt binaries), then retry.
 
-Hacking on this repo? See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — point the profile at your checkout with `link:` and you stop reinstalling after every edit. Publishing: `./publish.ps1 -Publish` (runs the umbrella sync check first and skips plugin directories that aren't committed).
+Hacking on this repo? See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — point the profile at your checkout with `link:` and you stop reinstalling after every edit. Plugin testing always runs on two dedicated profiles — `rc-dev` (dsh rc channel) and `alpha-dev` (dsh alpha channel) — and both must be updated to the channel's latest build before each test: `pwsh -File tools\dev-dsh.ps1 <profile> -Update` (see [docs/TESTING-PROFILES.md](docs/TESTING-PROFILES.md)). Publishing: `./publish.ps1 -Publish` (runs the umbrella sync check first and skips plugin directories that aren't committed).
 
 The version ranges above are what has actually been tested; plugins without a stated lower bound aren't guaranteed to work on older dsh. This migration round (0.1.7-alpha.2 → 0.1.7-rc.1) touched model-search, model-tuning and read-image-preview and added shell-selector; image-generation and title-model were merged into model-tuning in v2, and **since v3 the title route is back on the shipped row while only the drawing capability (plus the official gaps listed above) stays in model-tuning** — none of them are published separately anymore (its README has the migration steps); computer-use and mcp-ui needed no changes and both load in a live 0.1.7-rc.1 profile — all 13 `computer_*` tools register and are in continuous use (screenshots with accessibility trees, background element clicks, sequences, restoring minimized windows), while mcp-ui is only verified as far as loading and composing: its managed patch block is absent and 0 servers are configured, so its add/edit/remove path has never been exercised, on any dsh version. dsh updates frequently, which may affect stability. All the plugins are completed by AI, so there will certainly be many potential bugs.
 

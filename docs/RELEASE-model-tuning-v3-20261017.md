@@ -24,7 +24,7 @@
 | `dsh-plugin-team-task-route` | **2026-09 下线** | 把某一次团队会话的 teammate 写死模型；session id 硬编码，只对一次性调试有用 |
 | `dsh-plugin-title-model` | **2026-10 下线**（先并入 model-tuning v2，v3 起彻底删除） | 官方 `session-title-llm` 行本来就有 provider/model 路由与预算配置；插件不应再用「替换官方行」的方式抢标题 provider。**替代：见 §4.1 profile 覆盖** |
 | `dsh-plugin-image-generation` | **2026-10 下线**（能力并入 model-tuning，不再单独发包） | 绘图模型、`generate_image` / `list_image_models` 工具现在都在 model-tuning 里，配置键不变 |
-| `dsh-plugin-codex-login` | 从未发布（`private: true`） | 在制品：Codex OAuth 登录 UI，等真实账号验证 |
+| `dsh-plugin-codex-login` | **2026-11-04 删除**（从未发布，`private: true`） | 曾是 Codex ChatGPT OAuth 登录 UI 的在制品，长期没有真实账号可验证；用户 2026-11-04 决定移除仓库目录 |
 
 已装旧包时先卸载（`dsh plugin --profile <p> remove <包名>`，桌面端在插件页移除），再装新包；**不要和新包混装**。`title-model` / `image-generation` 的绘图配置可以直接沿用（键名与命名空间未变）。
 
@@ -112,7 +112,7 @@ v2 的 `models` / `defaultModel` 配置键与命名空间不变，升级后原�
 ## 5. 验证记录（本轮）
 
 - 隔离开发 profile（`docs/DEVELOPMENT.md`）里：五个插件 `link:` 安装、`--dump-config` 组合正确、启动无 `did not activate`；官方 `session-title-llm` 行恢复启用。
-- 单测：model-tuning 40 pass / 2 skip（skip 为需要部署目录的 pi-ai 耦合守卫）；read-image-preview、shell-selector、codex-login、computer-use 之前一轮均通过。
+- 单测：model-tuning 40 pass / 2 skip（skip 为需要部署目录的 pi-ai 耦合守卫）；read-image-preview、shell-selector、codex-login、computer-use 之前一轮均通过。（`codex-login` 已于 2026-11-04 连目录一起删除，此处只作当时的记录。）
 - v2 旧配置（含已删除的标题字段 + 旧绘图配置）启动兼容：实测通过。
 - 真实页面（web 开发 profile）：官方 Models 页的「兼容与推理」「绘图模型（generate_image）」两节、绘图页的单选/手动端点/直绘折叠均人工确认。
 - 未做：真实模型请求级回归（标题生成、`generate_image` 实际出图）——升级后按需用真实 Key 验一次即可。

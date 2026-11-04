@@ -15,7 +15,7 @@
 | shell-selector | 低。官方终端卡片只管超时/输出上限；`pwshPath` 有配置字段但无 UI | 保留（壳选择 + 方言提示） |
 | mcp-ui | 无。官方 mcp-client 只能手写 patch，没有任何 MCP 配置 UI | 保留 |
 | computer-use | 低。官方只有 experimental 提供方包：无 bundle、不能从插件页安装、无审批闸门 | 保留，跟踪上游产品化 |
-| codex-login | 低。官方有 OAuth 授权 seam 与 provider-card 席位，但没有登录 UI | 保留，实验性 |
+| codex-login | 低。官方有 OAuth 授权 seam 与 provider-card 席位，但没有登录 UI | **已删除（2026-11-04）**；原判定「保留，实验性」，因长期没有真实账号验证而下线 |
 
 ## 1. 判定口径
 
@@ -124,11 +124,13 @@
 
 判定：**C（官方未产品化）**。保留；不迁移到官方 seam（官方提供方不解决审批与窗口语义）。跟踪上游产品化，如果官方产品化则评估退场。
 
-### 2.6 codex-login（未发布，`private: true`）
+### 2.6 codex-login（未发布，`private: true`；**2026-11-04 已删除，本节仅存档**）
 
 官方：`llm/llm-pi-ai` 已有授权 seam 与 OpenAI Codex 的 OAuth 登录方法；Models 页声明了 `settings.models.provider-card`（外部插件扩展位）与 `settings.models.sign-in`（账号引导位）；但仓库里没有任何 provider 登录 UI。
 
 判定：**B（仅缺 UI）**。保留为纯 UI 适配，不复制 OAuth 逻辑。风险：属于未发布在制品，验证依赖真实 ChatGPT 账号。
+
+> **2026-11-04 已删除**：这个风险始终没消除——没有真实账号做验证，官方也迟早自带登录入口，用户决定直接从仓库移除（目录与历史仍可从 `git log -- dsh-plugin-codex-login` 找回）。以下盘点保留作决策记录。
 
 ## 3. 官方未实现的功能清单（插件只该保留这些）
 
@@ -166,7 +168,7 @@ model-tuning 3.0.0 的最终边界：
 | shell-selector | 不改功能；页面文案明确与官方「终端」卡片的分工 |
 | mcp-ui | 补实机验证：隔离 profile 里加/改/删一个 MCP server，确认热生效与卸载后仍可加载 |
 | computer-use | 不改；只做激活冒烟（避免操作用户桌面） |
-| codex-login | 不改；保持 private，等真实账号验证 |
+| codex-login | **2026-11-04 已删除**（原定：不改、保持 private，等真实账号验证） |
 
 ## 6. 实施进度
 

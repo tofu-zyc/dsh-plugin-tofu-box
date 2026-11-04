@@ -31,7 +31,7 @@
 | computer-use | 官方 `dsh-computer-use` 注册服务 + 实验性 Cua Driver native/MCP 提供方 + macOS CUA；均不在默认组合与可选目录 | 不冲突（我们不调 `ctx.computerUse.register`，工具名不同）；两边同装会出现两套桌面工具 |
 | shell-selector | 官方新增「插件 → Shell」卡片，只有超时与输出上限；`pwshPath` 仍在 | 不冲突 |
 | mcp-ui | 官方仍无 MCP 配置界面 | 无重合 |
-| codex-login | — | `private: true`，不发布（publish.ps1 / 伞包校验都跳过），后续考虑删除 |
+| codex-login | — | `private: true`，不发布（publish.ps1 / 伞包校验都跳过）；**2026-11-04 已删除** |
 
 ## 3. model-tuning 的修复
 
@@ -48,7 +48,7 @@
 | model-tuning 2.1.0 | 90/90 | 90/90（prepared-request 用例按宿主跳过 1 个） |
 | read-image-preview 1.5.0 | 24/24（纯前端 + host 单测，与宿主无关） | 同左 |
 | shell-selector | 30/30 | — |
-| codex-login | 13/13 | — |
+| codex-login（2026-11-04 已删除） | 13/13 | — |
 | computer-use | 18/19，`plugin-wayland.test.mjs` 需 `--experimental-test-module-mocks`，rc.2 同样失败，与 dsh 无关 | 同左 |
 
 `node tools/check-umbrella-sync.mjs`：5 子包 / 5 patch / 5 依赖，通过。
@@ -93,7 +93,7 @@ npm `next` = 0.2.1-rc.1（10-17 03:17），`latest` 仍是 0.2.0-rc.2。alpha.4 
   有改动的只有两个包：`dsh-api-remotes`（只改了账户通知 schema）和 `dsh-tools`（PTC 指令拼装）。
   `SESSION_FORMAT_VERSION` 仍为 4。
 - **check-compat**：web 与 desktop 两个 profile 都 PASS（WARN 只有 computer-use 本地版本）。
-- **单测**：model-tuning 90/90、read-image-preview 34/34、shell-selector 30/30、codex-login 13/13、computer-use 21+1 skip。
+- **单测**：model-tuning 90/90、read-image-preview 34/34、shell-selector 30/30、codex-login 13/13、computer-use 21+1 skip。`codex-login` 已于 2026-11-04 连目录一起删除，这条只作当时的记录。
 - **测试布局的坑**：在普通项目目录里 `npm i @deepseek-ai/dsh@0.2.1-rc.1`，npm 会把多数包嵌套到 `dsh-base/node_modules` 等处（同一版本拷多份，没有混版本）。从 `dsh/lib/bin.js` 解析不到 `dsh-session-title-llm`，model-tuning 的 title 测试整文件失败。
   改用 `npm i -g --prefix <临时目录>` 模拟全局安装后，`dsh/node_modules/@deepseek-ai` 平铺 302 个包（与真实全局一致），helper 正常解析，测试 90/90。
   **之后验证一律用 `-g --prefix` 布局**。

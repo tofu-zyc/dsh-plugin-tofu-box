@@ -57,13 +57,13 @@ tofu-box 伞包依赖连带 `^1.0.3`，`check-umbrella-sync` 通过。
 | shell-selector | 0.1.0 | 无需改动，30 单测全绿 |
 | computer-use | 2.4.1 | `d53b7a8` 审批探测公理化（`effectivePolicy` → `overrideOf(session)` → `config.policy`，全失效保守放行）；本会话（danger-full-access）实测 13 工具未自锁 |
 | mcp-ui | **1.0.3（本轮）** | peer 放宽 + 9 项 selftest 在 0.2.0-rc.2 部署全过 |
-| codex-login | 0.1.0（private，未发布） | 13 单测全绿；`dsh-client-ui-settings-models` 注入包存在 |
+| codex-login | 0.1.0（private，未发布；**2026-11-04 已删除**） | 13 单测全绿；`dsh-client-ui-settings-models` 注入包存在 |
 
 ## 5. 验证记录
 
 - `node check-compat.mjs --profile desktop` / `--profile web`：全绿（web 之前 2 WARN 漂移已消除）。
 - 单测（`DSH_TEST_DEPLOY_ROOT` 指向 0.2.0-rc.2 全局部署）：model-tuning 77、shell-selector 30、
-  codex-login 13、read-image-preview 5 全部通过；mcp-ui selftest 9 项通过。
+  codex-login 13、read-image-preview 5 全部通过；mcp-ui selftest 9 项通过。`codex-login` 已于 2026-11-04 删除，这条只作当时的记录。
 - `dsh plugin --profile web ls`：mcp-ui/model-tuning/computer-use 均为 `file:D:/program/dsh-plugins/…`
   直链，零 incompatible 警告。
 - `dsh --profile web --dump-config`：正常，快照已更新为 `compat-before.yml`。
