@@ -28,6 +28,9 @@ dist/
 # Isolated npm prefix holding one dsh rc build for upgrade compat verification.
 /.rc3-deploy/
 /.rc3-home/
+# 插件测试用 dsh 运行时：rc/ = npm next 通道，alpha/ = npm alpha 通道（npm i -g --prefix 布局）。
+# 配套的 rc-dev / alpha-dev profile 在 ~/.dsh/profiles，见 docs/TESTING-PROFILES.md。
+/.dsh-runtime/
 /deepseek-harness/
 /.workbuddy/
 /.chrome-new-instance/

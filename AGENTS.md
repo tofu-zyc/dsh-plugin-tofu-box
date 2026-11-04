@@ -9,14 +9,26 @@
   以及正在运行的桌面端 Harness 进程（`DeepSeek Harness.exe`）。
 - 不要在 desktop profile 上执行 `plugin_manager install_bundle` / `remove_bundle`、`dsh plugin --profile desktop ...`、
   或任何会写入该目录的命令。已装进去的东西必须卸载并清理干净（依赖、bundles 列表、patch、残留 junction）。
-- 开发与验证一律使用**独立 profile**：用官方模板新建，不碰用户已有的 `web` / `dsh-tui` 等 profile。例如：
+- **插件测试只允许在 `rc-dev` 与 `alpha-dev` 这两个 profile 上做**（用户 2026-11-04 定的规矩，
+  完整说明见 [docs/TESTING-PROFILES.md](docs/TESTING-PROFILES.md)）：
+  - `rc-dev` 对应 dsh 的 **rc 通道**（npm dist-tag `next`），`alpha-dev` 对应 **alpha 通道**（dist-tag `alpha`）；
+    profile 只是 `~/.dsh/profiles` 下的配置层，**dsh 版本由运行时决定**，所以两者必须成对使用。
+  - 启动、装插件、更新一律走 `tools/dev-dsh.ps1`；**不要**用全局 `dsh --profile rc-dev`
+    （全局 CLI 不在任何测试通道上，测出来的结论无效）。
+  - **每次测试前先把它们更新到该通道最新版**（运行时 + 插件依赖，这是规定动作，不是可选项）。
 
   ```powershell
-  dsh --profile billing-dev --from-default-profile web --dump-config   # 新建/重置独立 web profile
-  dsh plugin --profile billing-dev add D:\program\dsh-plugins\<plugin>  # 安装到独立 profile
-  dsh --profile billing-dev --no-open --port 58121                      # 启动，不抢浏览器焦点
+  pwsh -File tools\dev-dsh.ps1 rc-dev -Update                        # 更新到 rc 通道最新
+  pwsh -File tools\dev-dsh.ps1 alpha-dev -Update                     # 更新到 alpha 通道最新
+  pwsh -File tools\dev-dsh.ps1 rc-dev -Plugin add <包名>@<版本>        # 装/换插件
+  pwsh -File tools\dev-dsh.ps1 rc-dev --dump-config                  # 组合检查（不启动）
+  pwsh -File tools\dev-dsh.ps1 rc-dev --no-open --port 0             # 启动冒烟，URL 交给用户
   ```
 
+  - 两个 profile 只配实验室自部署模型（provider `lab`），**不配 DeepSeek 官方 key**；
+    不要把官方凭据写进它们的 patch，也不要为了测试去登录官方账号。
+- 用户已有的 `web` profile 是日常自用环境，**不作为插件测试基线**，也不要在里面装测试中的插件；
+  测试结论一律以 rc-dev / alpha-dev 为准。
 - 需要给用户看界面时，把带 `?token=` 的地址发给用户，由用户自己打开；不要代替用户操作他的窗口。
 
 ## 不要抢占用户的桌面输入
@@ -32,10 +44,10 @@
 ## 验证手段（按优先级）
 
 1. 纯逻辑：`node --check` + `node --test`（每个插件自带 `tests/`）。
-2. Host 集成：在独立 profile 里起 web 服务，用 HTTP/RPC 验证（例如 `session/projections` 返回的投影值）；
+2. Host 集成：在 `rc-dev` / `alpha-dev` 里起 web 服务，用 HTTP/RPC 验证（例如 `session/projections` 返回的投影值）；
    不要把插件装进用户 profile 来“顺便看看”。
-3. Client/UI：先在组件测试或 VM harness 覆盖；需要真实浏览器时，起独立 profile 的 web 服务，把 URL 交给用户，
-   让用户自己打开确认。
+3. Client/UI：先在组件测试或 VM harness 覆盖；需要真实浏览器时，用 `tools/dev-dsh.ps1` 起对应通道的 web 服务，
+   把 URL 交给用户，让用户自己打开确认。
 4. 任何写进用户 profile 的临时状态，收尾时必须恢复原状并复查（`git`/文件内容对照），并在交付说明里写明。
 
 ## 交付约定

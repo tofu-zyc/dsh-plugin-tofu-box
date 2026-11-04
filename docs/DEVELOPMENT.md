@@ -26,36 +26,29 @@ dsh plugin --profile web add \
 
 桌面端（Electron）的 `desktop` profile 由应用独占管理，2026-10-17 已发生过 pnpm 重装穿过 junction 删空工作区目录的事故。**任何插件开发、冒烟、行为验证都在隔离环境里做，不碰 `~/.dsh` 与桌面端。**
 
-隔离 home 与 profile 已就绪：`D:\program\dsh-plugins\.dsh-rc-test`（gitignore）里的 `tofu-rc`，由随附 `web` 模板初始化，五个工作区插件以 `link:` 装入。
+**现行规矩（2026-11-04 起）**：插件测试只用 `rc-dev`（dsh rc 通道）与 `alpha-dev`（dsh alpha 通道）两个 profile，
+每次测试前先把它们更新到该通道最新版。命令、模型配置、重建与排错全部写在
+[TESTING-PROFILES.md](TESTING-PROFILES.md)，这里只留最短版本：
 
 ```powershell
-# 每一条命令都是一个新 shell，所以每条都要先设 DSH_HOME
-$env:DSH_HOME = 'D:\program\dsh-plugins\.dsh-rc-test'
-
-# 首次创建 / 重置 profile（web 模板的完整副本；不加 --dump-config 会直接启动）
-dsh --profile tofu-rc --from-default-profile web --dump-config
-
-# 把工作区插件按 link: 装进 profile（绝对路径；改了 package.json / dsh.bundle 后要重跑）
-dsh plugin --profile tofu-rc add `
-  "link:D:\program\dsh-plugins\dsh-plugin-model-tuning" `
-  "link:D:\program\dsh-plugins\dsh-plugin-read-image-preview" `
-  "link:D:\program\dsh-plugins\dsh-plugin-shell-selector" `
-  "link:D:\program\dsh-plugins\dsh-plugin-mcp-ui" `
-  "link:D:\program\dsh-plugins\dsh-plugin-computer-use"
-
-# 组合检查（不启动）
-dsh --profile tofu-rc --dump-config | Select-String 'dsh-plugin-'
-
-# 启动冒烟（随机端口；改代码后需重启，apply 只在进程启动时跑一次）
-dsh --profile tofu-rc --no-open --port 0
+pwsh -File tools\dev-dsh.ps1 rc-dev    -Update              # 开工：更新运行时 + 插件依赖
+pwsh -File tools\dev-dsh.ps1 rc-dev    -Plugin add "link:D:\program\dsh-plugins\dsh-plugin-computer-use"
+pwsh -File tools\dev-dsh.ps1 rc-dev    --dump-config        # 组合检查
+pwsh -File tools\dev-dsh.ps1 rc-dev    --no-open --port 0   # 启动冒烟，URL 交给用户
 ```
 
 要点：
 
-- 隔离 home 没有模型凭据：页面/组合/单测都能验证，**不覆盖**需要真实模型请求的行为（标题生成、`generate_image`）。这类验证先确认凭据来源，不要从桌面 profile 复制。
+- profile 只是配置层，dsh 版本由运行时（`.dsh-runtime\rc` / `.dsh-runtime\alpha`）决定，
+  所以必须走 `tools/dev-dsh.ps1`；全局 `dsh --profile rc-dev` 会跑在错的版本上。
+- 两个 profile 用实验室 `lab` 供应商（自部署），不需要 DeepSeek 官方 key；`LAB_API_KEY` 在
+  `~/.dsh/.credentials.yaml`，不要复制进 profile。
 - `computer-use` 的工具会操作**真实桌面**，用户正在用电脑时不要跑自测或冒烟动作，只验证工具注册。
-- 非交互 shell 里 `dsh plugin` 可能因 stdin 不关闭而挂住：用 `cmd /c 'dsh plugin ... < NUL'` 包一层。
-- 隔离 home 与 `~/.dsh` 的会话、凭据、storages 完全分离，和正在运行的桌面端互不影响。
+- 非交互 shell 里 `dsh plugin` 可能因 stdin 不关闭而挂住：脚本内部已用 `cmd /c ... < NUL` 包了一层。
+
+历史环境：`.dsh-rc-test`（隔离 home + `tofu-rc` profile，五个工作区插件 `link:` 装入）、`.rc3-home`、
+`.dsh-017*` 都是早期升级验证留下的档案，保留但不作为测试基线。
+
 
 ## 调试
 
