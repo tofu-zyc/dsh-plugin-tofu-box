@@ -14,8 +14,9 @@
  *
  * 用法：node tools/check-umbrella-sync.mjs   （在仓库根运行；exit 1 = 不同步）
  */
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, mkdtempSync, openSync, closeSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 
@@ -26,8 +27,25 @@ const umbrella = JSON.parse(readFileSync(join(umbrellaDir, 'package.json'), 'utf
 // 会员集合 = git 已跟踪且未标 private 的插件目录（与 publish.ps1 的发布纪律一致）：
 // git 跟踪排除尚未入库的在制品，private:true 排除已入库但明确不发布的在制品
 // （npm publish 本身也拒绝 private 包，双保险）。
+// git 输出用临时文件接，而不是管道：受限沙箱里子进程管道会被拒绝（EPERM），
+// 管道捕获失败时会把所有已跟踪插件误判成“未入库”，发布前校验就整段假失败。
+const gitOutput = (args) => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-umbrella-'))
+  const file = join(dir, 'out.txt')
+  const fd = openSync(file, 'w')
+  let result
+  try {
+    result = spawnSync('git', args, { stdio: ['ignore', fd, 'inherit'] })
+  } finally {
+    closeSync(fd)
+  }
+  const stdout = readFileSync(file, 'utf8')
+  rmSync(dir, { recursive: true, force: true })
+  return { status: result.status, stdout }
+}
+
 const isTracked = (dir) => {
-  const r = spawnSync('git', ['-C', root, 'ls-files', '--', `${dir}/`], { encoding: 'utf8' })
+  const r = gitOutput(['-C', root, 'ls-files', '--', `${dir}/`])
   return r.status === 0 && r.stdout.trim().length > 0
 }
 const readManifest = (dir) => JSON.parse(readFileSync(join(root, dir, 'package.json'), 'utf8'))
