@@ -2,7 +2,7 @@
 
 一条命令装齐 [TOFU BOX](https://github.com/tofu-zyc/dsh-plugin-tofu-box) 的全套
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) 插件。
-桌面端 / Web 端的插件管理页一次只能装一个包，本包把「六个一起装」压成一次。
+桌面端 / Web 端的插件管理页一次只能装一个包，本包把「七个一起装」压成一次。
 
 ```sh
 dsh plugin --profile <你的profile> add tofu-box --ignore-scripts
@@ -28,16 +28,21 @@ dsh plugin --profile <你的profile> add tofu-box --ignore-scripts
 | dsh-plugin-computer-use | 13 个 `computer_*` 桌面操作工具 |
 | dsh-plugin-mcp-ui | 「设置 → MCP 服务器」管理页 |
 | dsh-plugin-billing-card | 输入框下方的实时费用卡片（DeepSeek 官方峰谷价 + 搜索/抓取按次计费，可配置扩展） |
+| dsh-plugin-pixel-ecosystem | 侧边栏点开的像素生态缸：整块主面板的像素生态沙盒——两条生产者链（草地逐格的草 / 水下逐格的水草，外加可种植的树与灌木）养出陆地与水下两个食物网（草→兔、鹿；兔→狐狸、狼；鹿→狼；水草→小鱼→狗鱼，乌鸦专吃遗骸），遗骸腐烂回肥力闭环；动物基因可遗传、生崽带变异，世界自动存在浏览器本地 |
 
 各功能的说明、已知限制与兼容性见仓库
 [README](https://github.com/tofu-zyc/dsh-plugin-tofu-box#中文)。
 
+> **1.3.0 起加入第七个成员 `pixel-ecosystem`（像素生态缸）**，它的 0.1.0 **还没有发布到 npm**：
+> 本伞包也要等它先发布才能装。发布顺序永远是**先子包、再伞包**
+> （`./publish.ps1 -Publish dsh-plugin-pixel-ecosystem tofu-box`）。
+
 ## 机制
 
 本包不含任何代码，是 dsh 官方 `dsh-base` 同款的 bundle 模式：
-`dependencies` 拉入六个子包（作为传递依赖，不会各自注册成独立层），
-`dsh.bundle.patch` 用六个 patch 副本（`patches/`，与子包源文件逐字节一致，
-`tools/check-umbrella-sync.mjs` 防漂移）在一个层里插入全部六条插件行。
+`dependencies` 拉入七个子包（作为传递依赖，不会各自注册成独立层），
+`dsh.bundle.patch` 用七份 patch 副本（`patches/`，与子包源文件逐字节一致，
+`tools/check-umbrella-sync.mjs` 防漂移）在一个层里插入全部七条插件行。
 Host 侧按闭包解析行，浏览器侧按行读各子包自己的 `dsh.client` 声明——
 两条路径都是 dsh 的正式机制，无需 fork。
 

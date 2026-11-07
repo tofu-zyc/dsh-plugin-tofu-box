@@ -1,0 +1,17 @@
+# dsh-plugin-pixel-ecosystem
+#
+# One insert over the existing profile composition. Nothing is overridden or
+# disabled: the Host half is an empty `apply` (the game lives entirely in the
+# browser), and the Client half only adds two additive seats —
+#
+#   sidebar.panellist  id "pixel-ecosystem"  → the sidebar icon
+#   main               key "pixel-ecosystem" → the central panel body
+#
+# The two ids are the same string on purpose: the sidebar owns the button and
+# opens the main panel whose key equals the entry id.
+#
+# There is no tunable config in 0.1.0; simulation constants are code constants
+# (see DESIGN.md §2 for the balance targets they are tuned against).
+- insert:
+    - id: pixel-ecosystem
+      name: dsh-plugin-pixel-ecosystem

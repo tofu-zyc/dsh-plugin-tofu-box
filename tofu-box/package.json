@@ -1,6 +1,6 @@
 {
   "name": "tofu-box",
-  "version": "1.2.3",
+  "version": "1.3.0",
   "engines": { "dsh": ">=0.2.0-rc.2 <0.3.0-0" },
   "license": "MIT",
   "keywords": ["dsh-plugin", "deepseek-harness", "dsh", "tofu-box", "pack"],
@@ -8,7 +8,7 @@
   "repository": { "type": "git", "url": "git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git", "directory": "tofu-box" },
   "bugs": { "url": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/issues" },
   "homepage": "https://github.com/tofu-zyc/dsh-plugin-tofu-box",
-  "description": "TOFU BOX 伞包：一条命令装齐 tofu-zyc 的全套 dsh 插件（model-tuning、read-image-preview、shell-selector、computer-use、mcp-ui、billing-card）。本包不含代码，只做两件事：以 dependencies 拉入六个子包，以 patch 层注册它们的插件行——即 dsh-base 同款 bundle 模式。装本包或单装子包，二选一，不要混装。",
+  "description": "TOFU BOX 伞包：一条命令装齐 tofu-zyc 的全套 dsh 插件（model-tuning、read-image-preview、shell-selector、computer-use、mcp-ui、billing-card、pixel-ecosystem）。本包不含代码，只做两件事：以 dependencies 拉入七个子包，以 patch 层注册它们的插件行——即 dsh-base 同款 bundle 模式。装本包或单装子包，二选一，不要混装。",
   "type": "module",
   "dependencies": {
     "dsh-plugin-model-tuning": "^3.0.1",
@@ -16,7 +16,8 @@
     "dsh-plugin-shell-selector": "^0.1.1",
     "dsh-plugin-computer-use": "^2.5.2",
     "dsh-plugin-mcp-ui": "^1.0.4",
-    "dsh-plugin-billing-card": "^0.3.1"
+    "dsh-plugin-billing-card": "^0.3.1",
+    "dsh-plugin-pixel-ecosystem": "^0.1.0"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": ">=0.1.6-alpha.1",
@@ -35,7 +36,8 @@
         "./patches/shell-selector.yml",
         "./patches/computer-use.yml",
         "./patches/mcp-ui.yml",
-        "./patches/billing-card.yml"
+        "./patches/billing-card.yml",
+        "./patches/pixel-ecosystem.yml"
       ]
     }
   },

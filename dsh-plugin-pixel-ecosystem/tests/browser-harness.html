@@ -1,0 +1,65 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pixel-ecosystem harness</title>
+<style>html,body{margin:0;background:#0f1116;color:#d8dee9;font:12px/1.4 ui-monospace,Consolas,monospace}canvas{display:block} #status{padding:6px 10px}</style>
+</head><body>
+<div id="status">booting…</div>
+<canvas id="scene"></canvas>
+<script>
+  window.__failures = []
+  window.addEventListener('error', (event) => {
+    window.__failures.push(String(event.message))
+    document.getElementById('status').textContent = 'ERROR: ' + event.message
+  })
+  window.__ModuleLoader__ = { load(entry) { window.__entry = entry } }
+</script>
+<script src="../client.js"></script>
+<script>
+try {
+  const stub = {
+    createElement: (type, props, ...children) => ({ type, props, children }),
+    Component: function Component() {},
+    Fragment: 'Fragment',
+    useState: (value) => [value, () => {}],
+    useEffect() {},
+    useRef: (value) => ({ current: value }),
+    useCallback: (fn) => fn,
+    useMemo: (fn) => fn(),
+    useSyncExternalStore() {},
+  }
+  const plugin = window.__entry.factory((id) => {
+    if (id === 'react') return stub
+    throw new Error('unexpected require: ' + id)
+  })
+  const engine = plugin.__engine
+  const store = engine.createStore({ storage: null })
+  store.ensureWorld()
+  const view = { x: 250, y: 150, width: 180, height: 110, scale: 6 }
+  const canvas = document.getElementById('scene')
+  canvas.width = view.width * view.scale
+  canvas.height = view.height * view.scale
+  store.setView(view)
+  store.attach(canvas)
+  const probe = () => {
+    const snapshot = store.getSnapshot()
+    const counts = snapshot.stats.counts
+    const ctx = canvas.getContext('2d')
+    const sample = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+    let nonBlack = 0
+    for (let i = 0; i < sample.length; i += 4 * 97) if (sample[i] + sample[i + 1] + sample[i + 2] > 24) nonBlack++
+    document.getElementById('status').textContent =
+      'ready=' + snapshot.ready +
+      ' paused=' + snapshot.paused +
+      ' speed=' + snapshot.speed +
+      ' rabbit=' + counts.rabbit +
+      ' deer=' + counts.deer +
+      ' fish=' + counts.fish +
+      ' | canvas ' + canvas.width + 'x' + canvas.height +
+      ' paintedSamples=' + nonBlack +
+      ' | failures=' + JSON.stringify(window.__failures)
+  }
+  setTimeout(probe, 1200)
+} catch (error) {
+  document.getElementById('status').textContent = 'FATAL: ' + (error && error.stack ? error.stack : error)
+}
+</script>
+</body></html>
