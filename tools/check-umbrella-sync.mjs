@@ -52,7 +52,8 @@ const readManifest = (dir) => JSON.parse(readFileSync(join(root, dir, 'package.j
 const pluginDirs = readdirSync(root, { withFileTypes: true })
   .filter(e => e.isDirectory() && /^dsh-plugin-/.test(e.name))
   .map(e => e.name)
-  .filter(dir => isTracked(dir) && readManifest(dir).private !== true)
+  // 显式 opt-out：清单里写 dsh.umbrella === false 的插件不进伞包（仍可单独发布）。
+  .filter(dir => isTracked(dir) && readManifest(dir).private !== true && readManifest(dir).dsh?.umbrella !== false)
   .sort()
 
 const problems = []

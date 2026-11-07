@@ -16,7 +16,7 @@
 dsh plugin --profile web add tofu-box
 ```
 
-`tofu-box` 是伞包：不含代码，以依赖拉入下面七个子包并用一个 patch 层注册全部插件行（dsh-base 同款 bundle 模式）。装伞包**或**逐个装子包，二选一，不要混装；伞包装完后在插件管理页是一个整体条目，不能单独禁用其中某一个。
+`tofu-box` 是伞包：不含代码，以依赖拉入下面六个子包并用一个 patch 层注册全部插件行（dsh-base 同款 bundle 模式）。装伞包**或**逐个装子包，二选一，不要混装；伞包装完后在插件管理页是一个整体条目，不能单独禁用其中某一个。
 
 | 插件 | 说明 | 支持的 dsh 版本 | 平台 | 安装 |
 | --- | --- | --- | --- | --- |
@@ -26,11 +26,11 @@ dsh plugin --profile web add tofu-box
 | **computer-use** | 13 个 `computer_*` 工具：截图/元素树、鼠标、键盘、开应用，写操作有审批弹窗；v2 基于 Cua Driver 进程内 SDK（无守护/MCP/PowerShell），v2.3 起「打开应用」先在窗口表里复用已有窗口（含唤醒最小化），**绝不重复启动**已登录的应用，详见 [README](dsh-plugin-computer-use/README.md) | ≥ 0.1.5-rc.1（peer 声明），实测 0.1.7-rc.1 与 0.2.0-rc.2（0.2.0 需 ≥ 2.4.1，审批探测不再依赖私有 API） | 跨平台（Windows 11 实测；macOS/Linux 未实测） | `dsh plugin --profile web add dsh-plugin-computer-use` |
 | **mcp-ui** | 「设置 → MCP 服务器」配置页：增删改 stdio / streamable-http 服务器，写入 profile patch 标记块并热生效（官方暂不提供 MCP 配置界面），详见 [README](dsh-plugin-mcp-ui/README.md) | ≥ 0.1.6-alpha.1（依赖 typert 网关，旧版不可用）；**0.2.0 需 ≥ 1.0.3**——旧版 peer `^0.1.6` 不覆盖 0.2.0，会被 profile 启动直接拒载；MCP 增删路径尚未实机验证 | Win11 实测；Linux/macOS 未测 | `dsh plugin --profile web add dsh-plugin-mcp-ui` |
 | **billing-card** | 输入框下方实时显示当前会话的估算费用（DeepSeek 优先）：Host 注册 `billingUsage` 会话投影，按模型折叠模型上报的 usage（重试尝试也计入），默认内置 DeepSeek 官方**峰谷分时价**（CNY/USD，含 v4-flash 旧名映射）；0.2.0 起同时按会话日志统计 DeepSeek 官方**网页搜索 / 抓取 API** 的调用次数与按次费用（搜索服务端调用免费至 2026-11-01 00:00，`web_fetch` 直连 Fetch API 自上线起计费）。Client 是输入框下方只显示费用的药丸 + 点开的分模型/搜索明细卡片。价格表、峰谷窗口、节假日、搜索单价都可在插件 Config 里改，规则支持精确/通配 provider+model，便于扩展到其他厂商。详见 [README](dsh-plugin-billing-card/README.md) | 基线 **0.2.1-rc.1** 实测；渲染在 0.2.1-rc.2 desktop 上也确认过；依赖 base 自带的 `ctx.sessionProjections` | Win11 实测（Web 渲染）；Linux/macOS 未测 | `dsh plugin --profile web add dsh-plugin-billing-card` |
-| **pixel-ecosystem** | 侧边栏点开的像素生态缸：主面板整块画布上跑一缸会自己演的生态——两条生产者链（草地逐格的草 + 水下逐格的水草，外加可种植的树与灌木）养出陆地食物网（草→兔、鹿；兔→狐狸、狼；鹿→狼）与水下食物网（水草→小鱼→狗鱼），乌鸦专吃遗骸；死亡一律留遗骸、腐烂回肥力再养草，闭环。动物带六项可遗传基因（速度 / 视野 / 体型 / 代谢 / 寿命 / 繁殖率），生崽带变异，种群会自己波动；有昼夜明暗，世界自动存进浏览器 localStorage。等 AI 干活时摸鱼用；Host 半是空 `apply`，不写 Session 日志。详见 [README](dsh-plugin-pixel-ecosystem/README.md) | `engines` 声明 `>=0.2.0-rc.2 <0.3.0-0`；**rc-dev 装配与视觉确认还没做** | 只声明 `platform: web`；Win11 开发，Linux/macOS 未测 | 0.1.0 **未发布 npm**：`dsh plugin --profile web add "link:D:\program\dsh-plugins\dsh-plugin-pixel-ecosystem"` |
+| **pixel-ecosystem** | 侧边栏点开的像素生态缸：主面板整块画布上跑一缸会自己演的生态——两条生产者链（草地逐格的草 + 水下逐格的水草，外加可种植的树与灌木）养出陆地食物网（草→兔、鹿；兔→狐狸、狼；鹿→狼）与水下食物网（水草→小鱼→狗鱼），乌鸦专吃遗骸；死亡一律留遗骸、腐烂回肥力再养草，闭环。动物带六项可遗传基因（速度 / 视野 / 体型 / 代谢 / 寿命 / 繁殖率），生崽带变异，种群会自己波动；有昼夜明暗，世界自动存进浏览器 localStorage。等 AI 干活时摸鱼用；Host 半是空 `apply`，不写 Session 日志。详见 [README](dsh-plugin-pixel-ecosystem/README.md) | `engines` 声明 `>=0.2.0-rc.2 <0.3.0-0`；rc-dev 装配与真浏览器渲染验证已完成 | 只声明 `platform: web`；Win11 开发，Linux/macOS 未测 | 0.1.0：`dsh plugin --profile rc-dev add dsh-plugin-pixel-ecosystem@0.1.0` |
 
 > `billing-card` 已加入 `tofu-box` 伞包（1.2.0 起），也可单独安装。本次发布先发子包 `dsh-plugin-billing-card@0.2.0` 再发伞包 `tofu-box@1.2.1`（`./publish.ps1 -Publish dsh-plugin-billing-card tofu-box`）。
 
-> `pixel-ecosystem` 已加入 `tofu-box` 伞包（1.3.0 起），但它的 `0.1.0` **还没有发布到 npm**：现在只能用上面的 `link:` 从本仓库装、或 git 直装（`git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git#path:dsh-plugin-pixel-ecosystem`）。等到发版时**先发子包 `dsh-plugin-pixel-ecosystem`，再发伞包 `tofu-box`**（`./publish.ps1 -Publish dsh-plugin-pixel-ecosystem tofu-box`），顺序反了伞包会依赖到一个不存在的版本。
+> `pixel-ecosystem` 是**独立插件，不并入 `tofu-box` 伞包**（清单里标了 `dsh.umbrella: false`，伞包同步校验会跳过它）。它按自己的版本单独发布：`./publish.ps1 -Publish dsh-plugin-pixel-ecosystem`。
 
 computer-use **v2.5 起自动开启原生 Wayland**，并内置 Ubuntu/GNOME 的 WinRects 扩展安装与诊断入口。GNOME 用户须安装扩展并注销登录一次；键鼠操作还需系统 portal 授权。安装步骤和实测范围见 [computer-use README](dsh-plugin-computer-use/README.md#v25ubuntu-2604--gnome-wayland)。
 
@@ -49,11 +49,10 @@ dsh plugin --profile web add \
   dsh-plugin-shell-selector \
   dsh-plugin-computer-use \
   dsh-plugin-mcp-ui \
-  dsh-plugin-billing-card \
-  dsh-plugin-pixel-ecosystem
+  dsh-plugin-billing-card
 ```
 
-当前 npm 版本：`tofu-box 1.2.1` / `model-tuning 3.0.0` / `read-image-preview 1.6.0` / `shell-selector 0.1.0` / `computer-use 2.5.0` / `mcp-ui 1.0.3` / `billing-card 0.2.0`。**`pixel-ecosystem 0.1.0` 与 `tofu-box 1.3.0` 都还没有发布到 npm**——pixel-ecosystem 现在只能 `link:`/git 装，伞包 1.3.0 要等它先发布。本次发布的下线插件清单、从 v2 升级的步骤与安装/卸载说明见 [docs/RELEASE-model-tuning-v3-20261017.md](docs/RELEASE-model-tuning-v3-20261017.md)；billing-card 0.2.0 / tofu-box 1.2.1 的发布说明见 [docs/RELEASE-billing-card-20261019.md](docs/RELEASE-billing-card-20261019.md)（0.1.0 见 [docs/RELEASE-billing-card-20261017.md](docs/RELEASE-billing-card-20261017.md)）。
+当前 npm 版本：`tofu-box 1.2.1` / `model-tuning 3.0.0` / `read-image-preview 1.6.0` / `shell-selector 0.1.0` / `computer-use 2.5.0` / `mcp-ui 1.0.3` / `billing-card 0.2.0`。`pixel-ecosystem 0.1.0` 单独发布（不并入伞包），伞包仍是 1.2.3。本次发布的下线插件清单、从 v2 升级的步骤与安装/卸载说明见 [docs/RELEASE-model-tuning-v3-20261017.md](docs/RELEASE-model-tuning-v3-20261017.md)；billing-card 0.2.0 / tofu-box 1.2.1 的发布说明见 [docs/RELEASE-billing-card-20261019.md](docs/RELEASE-billing-card-20261019.md)（0.1.0 见 [docs/RELEASE-billing-card-20261017.md](docs/RELEASE-billing-card-20261017.md)）。
 
 装完重启 dsh 就能用。注册配置打进包里了（`dsh.bundle.patch`），不需要动 cordis 文件。卸载把 `add` 换成 `remove`。也可以从 git 直装（未发版 / 想追 HEAD 时）：`git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git#path:dsh-plugin-<name>`，伞包同理 `#path:tofu-box`；npm 版走 semver，git 版 `update` 永远追 HEAD。首次安装 computer-use 时 pnpm 可能拦下 koffi 的构建脚本并让 dsh 报错——按提示在 profile 的 `pnpm-workspace.yaml` 写 `allowBuilds: koffi: false`（koffi 用预编译二进制，不需要构建）后重试即可。
 
@@ -87,7 +86,7 @@ A few [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin
 dsh plugin --profile web add tofu-box
 ```
 
-`tofu-box` is an umbrella package: no code of its own, it pulls the seven plugins below as dependencies and registers all their rows in one patch layer (the same bundle pattern dsh-base uses). Install the umbrella **or** pick individual plugins — not both; after the umbrella is installed it shows up as a single entry in the plugin manager and individual pieces can't be disabled from the GUI.
+`tofu-box` is an umbrella package: no code of its own, it pulls the six plugins below as dependencies and registers all their rows in one patch layer (the same bundle pattern dsh-base uses). Install the umbrella **or** pick individual plugins — not both; after the umbrella is installed it shows up as a single entry in the plugin manager and individual pieces can't be disabled from the GUI.
 
 | Plugin | What it does | dsh versions | Platform | Install |
 | --- | --- | --- | --- | --- |
@@ -97,11 +96,11 @@ dsh plugin --profile web add tofu-box
 | **computer-use** | 13 `computer_*` tools: window screenshots + accessibility tree, mouse, keyboard, launching apps; input actions require approval; v2 runs on the in-process Cua Driver SDK (no daemon/MCP/PowerShell); since v2.3 "open app" reuses an existing window (restoring it when minimized) and **never starts a second instance** of an app that is already running ([README](dsh-plugin-computer-use/README.md)) | ≥ 0.1.5-rc.1 (peer dep), tested on 0.1.7-rc.1 and 0.2.0-rc.2 (0.2.0 needs ≥ 2.4.1: approval probing no longer touches private APIs) | Cross-platform (tested on Windows 11; macOS/Linux untested) | `dsh plugin --profile web add dsh-plugin-computer-use` |
 | **mcp-ui** | "Settings → MCP Servers" page: add/edit/remove stdio & streamable-http servers; writes them into the profile patch and hot-applies (the official build ships no MCP UI yet) ([README](dsh-plugin-mcp-ui/README.md)) | ≥ 0.1.6-alpha.1 (needs the typert gateway; won't work on older dsh); **0.2.0 needs ≥ 1.0.3** — the old `^0.1.6` peer doesn't cover 0.2.0 and profile startup rejects the plugin outright; add/remove-server path not exercised yet | Tested on Win11; Linux/macOS untested | `dsh plugin --profile web add dsh-plugin-mcp-ui` |
 | **billing-card** | Estimated cost for the current session, right under the composer (DeepSeek first): the Host registers a `billingUsage` session projection that folds model-reported usage per route (retried attempts included) and ships DeepSeek's official **peak/off-peak prices** (CNY/USD, legacy v4-flash names mapped); since 0.2.0 it also estimates the DeepSeek official **web search / fetch API** per-request charges from the Session log (server-side search is free until 2026-11-01 00:00 Beijing; `web_fetch` calls the Fetch API directly and is billed from launch). The Client is a cost-only pill plus a click-open per-model/search breakdown card. Prices, peak windows, holidays and search pricing are configurable, and rules match exact or wildcard provider+model pairs, so other vendors are a config change. See [README](dsh-plugin-billing-card/README.md) | baseline **0.2.1-rc.1** (tested); rendering also confirmed on 0.2.1-rc.2 desktop; needs the base `ctx.sessionProjections` | Tested on Win11 (Web rendering); Linux/macOS untested | `dsh plugin --profile web add dsh-plugin-billing-card` |
-| **pixel-ecosystem** | A pixel terrarium you open from the sidebar: a full-canvas panel running a self-driving ecosystem. Two producer chains (per-cell grass on land plus per-cell weed underwater, and plantable trees and shrubs) feed a land food web (grass → rabbits, deer; rabbits → foxes, wolves; deer → wolves) and a water food web (weed → fish → pike), while crows only scavenge remains; every death leaves remains that rot back into fertility, closing the loop. Animals carry six heritable genes (speed, vision, size, metabolism, lifespan, fertility) and offspring mutate, so populations drift on their own; day/night lighting, and the world autosaves into browser localStorage. Something to poke at while the AI works — the Host half is an empty `apply`, so nothing is written to the Session log. See [README](dsh-plugin-pixel-ecosystem/README.md) | `engines` says `>=0.2.0-rc.2 <0.3.0-0`; **rc-dev assembly and visual confirmation not done yet** | Declares `platform: web` only; developed on Win11, Linux/macOS untested | 0.1.0 **not published to npm**: `dsh plugin --profile web add "link:D:\program\dsh-plugins\dsh-plugin-pixel-ecosystem"` |
+| **pixel-ecosystem** | A pixel terrarium you open from the sidebar: a full-canvas panel running a self-driving ecosystem. Two producer chains (per-cell grass on land plus per-cell weed underwater, and plantable trees and shrubs) feed a land food web (grass → rabbits, deer; rabbits → foxes, wolves; deer → wolves) and a water food web (weed → fish → pike), while crows only scavenge remains; every death leaves remains that rot back into fertility, closing the loop. Animals carry six heritable genes (speed, vision, size, metabolism, lifespan, fertility) and offspring mutate, so populations drift on their own; day/night lighting, and the world autosaves into browser localStorage. Something to poke at while the AI works — the Host half is an empty `apply`, so nothing is written to the Session log. See [README](dsh-plugin-pixel-ecosystem/README.md) | `engines` says `>=0.2.0-rc.2 <0.3.0-0`; rc-dev assembly and real-browser render verification done | Declares `platform: web` only; developed on Win11, Linux/macOS untested | 0.1.0: `dsh plugin --profile rc-dev add dsh-plugin-pixel-ecosystem@0.1.0` |
 
 > `billing-card` is now part of the `tofu-box` umbrella (since 1.2.0) and can still be installed on its own. This release publishes the child package `dsh-plugin-billing-card@0.2.0` first, then the umbrella `tofu-box@1.2.1` (`./publish.ps1 -Publish dsh-plugin-billing-card tofu-box`).
 
-> `pixel-ecosystem` joined the `tofu-box` umbrella in 1.3.0, but its `0.1.0` **is not published to npm yet**: for now install it with `link:` from this checkout or straight from git (`git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git#path:dsh-plugin-pixel-ecosystem`). When it ships, publish the child package `dsh-plugin-pixel-ecosystem` **first** and the `tofu-box` umbrella after it (`./publish.ps1 -Publish dsh-plugin-pixel-ecosystem tofu-box`) — the other way round the umbrella would depend on a version that does not exist.
+> `pixel-ecosystem` is a **standalone plugin, not part of the `tofu-box` umbrella** (its manifest sets `dsh.umbrella: false`, so the umbrella sync check skips it). It ships on its own version: `./publish.ps1 -Publish dsh-plugin-pixel-ecosystem`.
 
 computer-use **v2.5 automatically enables native Wayland** and includes a WinRects installer and diagnostics for Ubuntu/GNOME. Install the extension, log out and back in once, and allow the system portal prompt for input. See the [computer-use setup guide](dsh-plugin-computer-use/README.md).
 
@@ -120,8 +119,7 @@ dsh plugin --profile web add \
   dsh-plugin-shell-selector \
   dsh-plugin-computer-use \
   dsh-plugin-mcp-ui \
-  dsh-plugin-billing-card \
-  dsh-plugin-pixel-ecosystem
+  dsh-plugin-billing-card
 ```
 
 Restart dsh after installing. Registration is bundled in each package (`dsh.bundle.patch`), nothing to wire up. To remove: `dsh plugin --profile web remove <name>`. Git installs still work (`git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git#path:dsh-plugin-<name>`, or `#path:tofu-box` for the umbrella) when you want unreleased changes; npm installs update via semver, git installs always track HEAD. First-time computer-use installs may fail on koffi's blocked build script — follow dsh's hint and add `allowBuilds: koffi: false` to the profile's `pnpm-workspace.yaml` (koffi ships prebuilt binaries), then retry.
