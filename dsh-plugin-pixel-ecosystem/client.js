@@ -146,9 +146,16 @@ window.__ModuleLoader__.load({
        * is still a real body-fat figure for a small mammal and it keeps the
        * first generation inside one watching session.
        */
-      RESERVE_DAYS: 2,
-      /** Energy cost of one kg of new wet tissue (structure growth), kJ. */
+      RESERVE_DAYS: 4,
+      /**
+       * Energy cost of one kg of new wet tissue (structure growth), kJ. It MUST
+       * equal MEAT_ENERGY: growth then moves energy from the reserve into the
+       * structure without creating or destroying any, which is what makes the
+       * world's energy book close exactly.
+       */
       STRUCTURE_COST: 7000,
+      /** Share of the parent's energy that becomes offspring tissue (rest: heat). */
+      REPRODUCTION_EFFICIENCY: 0.8,
       /** Edible share of a body's wet mass when something eats it. */
       MEAT_FRACTION: 0.7,
       /** Energy content of animal tissue, kJ/kg wet. */
@@ -301,7 +308,7 @@ window.__ModuleLoader__.load({
           speed: [2.6, 4.3], vision: [5, 13], size: [0.75, 1.35],
           metabolism: [0.75, 1.3], lifespan: [140, 240], fertility: [70, 110],
         },
-        history: { maturityYears: 0.3, lifespanYears: [1, 3], littersPerYear: 4.5 },
+        history: { maturityYears: 0.3, lifespanYears: [1, 3], littersPerYear: 4.5, litterMassShare: 0.15 },
         balance: { litter: [4, 7], fleeSpeed: 1.9 },
       },
       deer: {
@@ -315,7 +322,7 @@ window.__ModuleLoader__.load({
           speed: [2.6, 3.8], vision: [8, 16], size: [1.4, 2.2],
           metabolism: [1.05, 1.5], lifespan: [1100, 1600], fertility: [600, 720],
         },
-        history: { maturityYears: 2, lifespanYears: [10, 15], littersPerYear: 1 },
+        history: { maturityYears: 2, lifespanYears: [10, 15], littersPerYear: 1, litterMassShare: 0.067 },
         balance: { litter: [1, 3], fleeSpeed: 1.85 },
       },
       fox: {
@@ -327,7 +334,7 @@ window.__ModuleLoader__.load({
           speed: [3.9, 5.7], vision: [9, 19], size: [0.85, 1.55],
           metabolism: [0.85, 1.35], lifespan: [300, 420], fertility: [600, 720],
         },
-        history: { maturityYears: 0.8, lifespanYears: [3, 10], littersPerYear: 1 },
+        history: { maturityYears: 0.8, lifespanYears: [3, 10], littersPerYear: 1, litterMassShare: 0.11 },
         balance: { litter: [3, 6], catchRadius: 1.15, huntSpeed: 1.5, scavengeShare: 0.6 },
       },
       wolf: {
@@ -340,7 +347,7 @@ window.__ModuleLoader__.load({
           speed: [4.3, 6.0], vision: [11, 22], size: [1.3, 2.1],
           metabolism: [1.25, 1.9], lifespan: [700, 900], fertility: [600, 720],
         },
-        history: { maturityYears: 2.5, lifespanYears: [6, 8], littersPerYear: 1 },
+        history: { maturityYears: 2.5, lifespanYears: [6, 8], littersPerYear: 1, litterMassShare: 0.044 },
         balance: { litter: [3, 5], catchRadius: 1.3, huntSpeed: 1.45, scavengeShare: 0.55 },
       },
       crow: {
@@ -352,7 +359,7 @@ window.__ModuleLoader__.load({
           speed: [5.2, 7.6], vision: [14, 26], size: [0.8, 1.2],
           metabolism: [0.85, 1.3], lifespan: [500, 700], fertility: [360, 600],
         },
-        history: { maturityYears: 1, lifespanYears: [4, 8], littersPerYear: 1 },
+        history: { maturityYears: 1, lifespanYears: [4, 8], littersPerYear: 1, litterMassShare: 0.2 },
         balance: { litter: [3, 5], scavengeRadius: 1.7, corpseShare: 0.8 },
       },
       fish: {
@@ -366,7 +373,7 @@ window.__ModuleLoader__.load({
           speed: [2.2, 4.0], vision: [5, 11], size: [0.7, 1.3],
           metabolism: [0.7, 1.2], lifespan: [420, 560], fertility: [500, 700],
         },
-        history: { maturityYears: 1.5, lifespanYears: [5, 10], littersPerYear: 1 },
+        history: { maturityYears: 1.5, lifespanYears: [5, 10], littersPerYear: 1, litterMassShare: 0.01 },
         balance: { litter: [6, 10], fleeSpeed: 1.9 },
       },
       pike: {
@@ -379,7 +386,7 @@ window.__ModuleLoader__.load({
           speed: [4.4, 6.2], vision: [8, 16], size: [1.1, 1.9],
           metabolism: [0.95, 1.4], lifespan: [1000, 1300], fertility: [600, 720],
         },
-        history: { maturityYears: 2.5, lifespanYears: [7, 15], littersPerYear: 1 },
+        history: { maturityYears: 2.5, lifespanYears: [7, 15], littersPerYear: 1, litterMassShare: 0.0133 },
         balance: { litter: [2, 4], catchRadius: 1.8, huntSpeed: 1.5, scavengeShare: 0.4 },
       },
       // The next four are the land/water bridge. A heron and a bear stand in the
@@ -398,7 +405,7 @@ window.__ModuleLoader__.load({
           speed: [3.2, 5.0], vision: [12, 22], size: [0.9, 1.3],
           metabolism: [0.8, 1.2], lifespan: [420, 620], fertility: [500, 700],
         },
-        history: { maturityYears: 1.5, lifespanYears: [5, 8], littersPerYear: 1 },
+        history: { maturityYears: 1.5, lifespanYears: [5, 8], littersPerYear: 1, litterMassShare: 0.075 },
         balance: { litter: [2, 4], catchRadius: 2.4, huntSpeed: 1.25, scavengeShare: 0.5 },
       },
       otter: {
@@ -411,7 +418,7 @@ window.__ModuleLoader__.load({
           speed: [3.6, 5.4], vision: [10, 18], size: [0.9, 1.3],
           metabolism: [0.95, 1.35], lifespan: [380, 560], fertility: [500, 700],
         },
-        history: { maturityYears: 1.5, lifespanYears: [5, 8], littersPerYear: 1 },
+        history: { maturityYears: 1.5, lifespanYears: [5, 8], littersPerYear: 1, litterMassShare: 0.056 },
         balance: { litter: [2, 4], catchRadius: 1.7, huntSpeed: 1.55, scavengeShare: 0.5 },
       },
       bear: {
@@ -424,7 +431,7 @@ window.__ModuleLoader__.load({
           speed: [3.0, 4.4], vision: [10, 18], size: [1.8, 2.6],
           metabolism: [0.8, 1.15], lifespan: [900, 1300], fertility: [1200, 1440],
         },
-        history: { maturityYears: 4.5, lifespanYears: [20, 25], littersPerYear: 0.4 },
+        history: { maturityYears: 4.5, lifespanYears: [20, 25], littersPerYear: 0.4, litterMassShare: 0.004 },
         balance: { litter: [1, 2], catchRadius: 2.1, huntSpeed: 1.3, scavengeShare: 0.7 },
       },
       frog: {
@@ -441,7 +448,7 @@ window.__ModuleLoader__.load({
           speed: [1.4, 2.6], vision: [3, 7], size: [0.55, 0.9],
           metabolism: [0.6, 1.05], lifespan: [150, 260], fertility: [500, 700],
         },
-        history: { maturityYears: 1, lifespanYears: [3, 5], littersPerYear: 1 },
+        history: { maturityYears: 1, lifespanYears: [3, 5], littersPerYear: 1, litterMassShare: 0.04 },
         balance: { litter: [8, 14], fleeSpeed: 2.15 },
       },
     }
@@ -499,8 +506,24 @@ window.__ModuleLoader__.load({
         const capacity = reserveCapacity(species, adultMassOf(species))
         balance.maxEnergy = capacity
         balance.startEnergy = capacity * SPAWN_RESERVE_SHARE
-        balance.breedEnergy = capacity * 0.6
-        balance.breedCost = capacity * 0.22
+        // --- what a litter actually costs ------------------------------------
+        // A newborn is not free: it is tissue plus a reserve, and the parent has
+        // to pay for both out of its own body, at a conversion efficiency below
+        // 1 (the rest leaves as heat and is real respiration). Dividing the
+        // litter's total wet mass by the litter size gives one newborn's mass,
+        // so a rabbit kit is 43 g and a wolf pup is 350 g without either number
+        // being typed anywhere.
+        const history = species.history
+        const litterMax = Math.max(1, balance.litter?.[1] ?? 1)
+        const litterMass = adultMassOf(species) * (history?.litterMassShare ?? 0.05)
+        const birthMass = litterMass / litterMax
+        const birthReserve = reserveCapacity(species, birthMass) * BIRTH_RESERVE_SHARE
+        balance.birthMass = birthMass
+        balance.breedCost = (litterMass * BIO.MEAT_ENERGY + litterMax * birthReserve)
+          / BIO.REPRODUCTION_EFFICIENCY
+        // A species may only breed when its reserve covers the whole litter, so
+        // the ledger never has to invent the difference.
+        balance.breedEnergy = Math.min(capacity * 0.97, balance.breedCost * 1.02)
         // The reserve is spent inside metabolise() and nowhere else. These two
         // keys stay because other layers read them; they must stay zero or the
         // animal would be charged twice for standing still.
@@ -1100,7 +1123,13 @@ window.__ModuleLoader__.load({
           } else if (species.habitat === 'air') {
             if (terrain === TERRAIN.STONE) continue
           } else if (terrain !== TERRAIN.GRASS) continue
-          spawnEntity(world, id, x, y)
+          // A real population is not all newborns: seed the starting stock with
+          // an age spread from just-mature to late in life, so the world opens
+          // with animals old enough to breed and the age pyramid looks like one.
+          const maxAge = species.genes.lifespan[0]
+          spawnEntity(world, id, x, y, undefined, 1, {
+            age: randomBetween(world, species.balance.maturity, maxAge),
+          })
           placed += 1
         }
       }
@@ -1639,37 +1668,6 @@ window.__ModuleLoader__.load({
     // ---------------------------------------------------------------------
     // Simulation step
     // ---------------------------------------------------------------------
-
-    /**
-     * Kill an animal and leave a carcass behind.
-     * Single death path: starvation, old age and predation all end here, and the
-     * cause is written down — a world where animals vanish without a reason is
-     * unreadable (docs/20-CORE-LOOP.md invariant 3).
-     * @param {object} world - the world.
-     * @param {object} entity - the dying animal.
-     * @param {string} [cause] - 'starved' | 'frozen' | 'predation' | 'old' | 'disease'.
-     */
-    function killEntity(world, entity, cause) {
-      if (entity.fate === 'dead') return
-      entity.fate = 'dead'
-      if (cause !== undefined && entity.cause === undefined) entity.cause = cause
-      if (entity.body !== undefined && entity.body.cause === undefined && cause !== undefined) entity.body.cause = cause
-      for (let puff = 0; puff < 3; puff++) spawnEffect(world, entity.x, entity.y, PALETTE.effect.death, 0.5, 0.5)
-      if (world.population !== undefined && world.population[entity.species] !== undefined) {
-        world.population[entity.species] = Math.max(0, world.population[entity.species] - 1)
-      }
-      const species = SPECIES[entity.species]
-      const meat = species === undefined ? 24 : species.meat
-      world.corpses.push({
-        id: world.nextId++,
-        x: entity.x,
-        y: entity.y,
-        species: entity.species,
-        decay: 0,
-        energy: Math.round(meat * 0.8),
-      })
-      if (world.corpses.length > MAX_CORPSES) world.corpses.shift()
-    }
 
     /**
      * Move an animal toward a target, sliding along terrain edges.
@@ -2244,8 +2242,12 @@ window.__ModuleLoader__.load({
         }
       }
 
-      // --- water: only worth looking for once the animal is actually dry -----
-      if (species.habitat !== 'water' && entity.drives !== undefined && entity.drives.thirst > 0.12) {
+      // --- water: worth looking for when dry, and always when the animal eats
+      // something that only grows in water (a frog on land needs to know where
+      // the pond is even when it is not thirsty) ----------------------------
+      const aimsForWaterWeed = species.flora === 'weed' && species.habitat !== 'water'
+      const thirsty = entity.drives !== undefined && entity.drives.thirst > 0.12
+      if (species.habitat !== 'water' && (thirsty || aimsForWaterWeed)) {
         const water = nearestWater(world, entity.x, entity.y, genes.vision)
         if (water !== null) {
           const spot = drinkSpot(world, species, water)
@@ -2754,7 +2756,9 @@ window.__ModuleLoader__.load({
      */
     function fieldMetabolicRate(species, volume) {
       const row = FMR_TABLE[species?.taxon ?? 'mammal'] ?? FMR_TABLE.mammal
-      const grams = Math.max(1, volume * 1000)
+      // The floor is 0.1 g, not 1 g: a 60 mg frog hatchling has a real metabolic
+      // rate, and flooring it at a gram made every amphibian litter unaffordable.
+      const grams = Math.max(0.1, volume * 1000)
       return row[0] * Math.pow(grams, row[1])
     }
 
@@ -2776,6 +2780,32 @@ window.__ModuleLoader__.load({
      */
     function adultMassOf(species) {
       return species?.mass ?? 1
+    }
+
+    /**
+     * How temperature scales an animal's metabolism.
+     *
+     * Ectotherms follow Q10 over the whole range: their body IS the weather.
+     * Endotherms do not — Nagy's field metabolic rate is measured at a normal
+     * body temperature, so a mammal only spends MORE energy once the air drops
+     * below its lower critical temperature, and spends the same amount in mild
+     * weather. Applying a plant-style Q10 to a rabbit's air temperature was
+     * quietly halving its metabolism every cool spring day (2.5^-0.75 = 0.48 at
+     * 12.5 C), which is why a "fed" herbivore read as half-starved.
+     * @param {object} species - species row.
+     * @param {number} temperature - felt temperature, degrees C.
+     * @returns {number} multiplier on the field metabolic rate.
+     */
+    function metabolicTemperatureFactor(species, temperature) {
+      if (species?.taxon === 'ectotherm') {
+        return Math.pow(BIO.Q10, (temperature - BIO.Q10_REFERENCE_C) / 10)
+      }
+      // Lower critical temperature falls with body size: a mouse shivers at 20 C,
+      // a bear barely notices 0 C.
+      const mass = adultMassOf(species ?? {})
+      const lowerCritical = 20 - 7 * Math.log10(mass + 1)
+      if (temperature >= lowerCritical) return 1
+      return 1 + 0.06 * (lowerCritical - temperature)
     }
 
     /**
@@ -2809,9 +2839,10 @@ window.__ModuleLoader__.load({
       if (entity.body !== undefined) return entity.body
       const species = SPECIES[entity.species] ?? { taxon: 'mammal', mass: 1 }
       const adult = adultMassOf(species)
+      const birthMass = species.balance?.birthMass ?? adult * 0.05
       const maturity = Math.max(1, species.balance?.maturity ?? 60)
       const phase = clamp((entity.age ?? 0) / maturity, 0, 1)
-      const volume = adult * BIRTH_MASS_SHARE + (adult - adult * BIRTH_MASS_SHARE) * phase
+      const volume = birthMass + (adult - birthMass) * phase
       const body = {
         /** Reserve capacity, kJ: grows with the structure. */
         Emax: reserveCapacity(species, volume),
@@ -2901,9 +2932,14 @@ window.__ModuleLoader__.load({
     function activityOf(entity) {
       const body = entity.body
       if (body !== undefined && body.handling !== null) return 0.7
-      if (entity.fleeing === true || entity.running === true) return 1.7
-      if (entity.intent === 'hunt' || entity.intent === 'scavenge') return 1.5
-      if (entity.intent === 'rest') return 0.55
+      // Nagy's field metabolic rate already folds in a typical day's activity, so
+      // these multipliers have to average near 1 for the daily intake to land on
+      // the 182 g/day calibration. A resting animal still stands up, looks around
+      // and digests: 0.7, not 0.55, or a sleepy population quietly reads as an
+      // under-fed one.
+      if (entity.fleeing === true || entity.running === true) return 1.8
+      if (entity.intent === 'hunt' || entity.intent === 'scavenge') return 1.6
+      if (entity.intent === 'rest') return 0.7
       return 1
     }
 
@@ -2962,8 +2998,8 @@ window.__ModuleLoader__.load({
 
       growBody(world, entity, species, body, days)
 
-      const temperature = world.climate === undefined ? BIO.Q10_REFERENCE_C : world.climate.temperature
-      const q10 = Math.pow(BIO.Q10, (temperature - BIO.Q10_REFERENCE_C) / 10)
+      const temperature = feltTemperature(world, species)
+      const q10 = metabolicTemperatureFactor(species, temperature)
       const activity = activityOf(entity) * (entity.genes?.metabolism ?? 1)
       const fmr = fieldMetabolicRate(species, body.V)
       const pM = fmr * activity * q10
@@ -3053,7 +3089,7 @@ window.__ModuleLoader__.load({
       const maturity = Math.max(1, species.balance?.maturity ?? 60)
       const phase = clamp((entity.age ?? 0) / maturity, 0, 1)
       const adult = adultMassOf(species)
-      const birth = adult * BIRTH_MASS_SHARE
+      const birth = species.balance?.birthMass ?? adult * 0.05
       const target = birth + (adult - birth) * phase
       body.M = clamp((body.V - birth) / Math.max(1e-9, adult - birth), 0, 1)
       if (target <= body.V + 1e-12) return
@@ -3129,7 +3165,9 @@ window.__ModuleLoader__.load({
         species: entity.species,
         decay: 0,
         energy: carried + structure,
-        mass: Math.max(0, body.V) * BIO.MEAT_FRACTION,
+        // Mass is the WHOLE body, the same basis the energy figure uses, so a
+        // carcass does not claim to be meatier than it is.
+        mass: Math.max(0, body.V),
         cause: body.cause,
       }
       world.corpses.push(corpse)
@@ -3482,7 +3520,14 @@ window.__ModuleLoader__.load({
           offer('forage', weights.hunger * drives.hunger * quality, food.x, food.y, 'hunger')
         } else if (drives.hunger > 0.25) {
           // Nothing edible is in sight and the reserve is draining: go look.
-          const spot = wanderTarget(world, entity, species, Math.min(40, genes.vision * (1.6 + drives.hunger * 1.6)))
+          // A frog eats water weed but lives on land, so looking for food means
+          // heading for the water — wandering inland is how it starved with a
+          // full pond two cells behind it.
+          const landlocked = species.flora === 'weed' && species.habitat !== 'water'
+          const pond = belief.water
+          const spot = landlocked && pond !== null
+            ? { x: pond.x, y: pond.y }
+            : wanderTarget(world, entity, species, Math.min(40, genes.vision * (1.6 + drives.hunger * 1.6)))
           offer('explore', weights.hunger * drives.hunger * 0.6, spot.x, spot.y, 'search')
         }
       } else if (species.role === 'hunter') {
@@ -3799,6 +3844,22 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Quality of the sward directly under an animal's feet (0 when it is
+     * standing on the wrong terrain or the cell is bare).
+     * @param {object} world - the world.
+     * @param {object} entity - the grazer.
+     * @param {object} species - species row.
+     * @returns {number} 0..1 quality.
+     */
+    function swardUnderfoot(world, entity, species) {
+      const field = floraField(world, species)
+      if (field === null) return 0
+      const wanted = species.flora === 'grass' ? TERRAIN.GRASS : TERRAIN.WATER
+      const index = cellIndex(world, entity.x, entity.y)
+      if (index < 0 || world.terrain[index] !== wanted) return 0
+      return swardQuality(field[index])
+    }
+    /**
      * Give an animal that has an intent but no clock (a restored save, a
      * hand-placed test animal) a bout it can run out.
      * @param {object} world - the world.
@@ -3946,9 +4007,18 @@ window.__ModuleLoader__.load({
         done = fear < 0.3
       } else if (state.id === 'forage') {
         const local = bestLocalBite(world, entity, species)
+        const standing = swardUnderfoot(world, entity, species)
         const distanceToPlan = Math.hypot(state.x - entity.x, state.y - entity.y)
-        if (local !== null && (distanceToPlan < 2.5 || local.value > 0.55)) {
-          // Head down: eat where it stands and step to the next bite in place.
+        if (standing >= CROPPED_SWARD) {
+          // Standing on good grass: put the head down and STAY. Stepping to a
+          // neighbouring cell every tick is how a grazing animal accumulated a
+          // long path without going anywhere.
+          state.phase = 'do'
+          entity.targetX = entity.x
+          entity.targetY = entity.y
+          if (local !== null) rememberFood(entity, local.x, local.y, local.value, now)
+        } else if (local !== null && (distanceToPlan < 2.5 || local.value > 0.55)) {
+          // This cell is cropped: step to the best bite next to it.
           state.phase = 'do'
           entity.targetX = local.x
           entity.targetY = local.y
@@ -4298,25 +4368,16 @@ window.__ModuleLoader__.load({
       // A predator may have bitten this animal earlier in the same tick. It must
       // die before feed() runs, otherwise it would graze back the energy the
       // predator already took and stay alive with fate === 'eaten' forever.
-      if (entity.fate === 'eaten') {
-        killEntity(world, entity, 'predation')
+      if (entity.fate === 'eaten' || entity.body?.dead === true) {
+        dieOf(world, entity, entity.body?.dead === true ? (entity.body.cause || 'predation') : 'predation')
         return false
       }
       // While a predator is working through a kill it stands still: the carcass
-      // is being eaten, not carried. Without this the animal is nailed to its
-      // target position and jitters in place for the whole handling time.
-      // intent keeps its last value (hunt/scavenge) so the panel still says what
-      // it is doing; entity.handling is the flag the renderer uses for the
-      // crouched, head-down eating pose.
+      // is being eaten, not carried. The flag is set here and honoured by the
+      // pace chain below (pace 0), so the animal keeps perceiving and thinking
+      // while its legs stay planted — pinning its target every tick made it
+      // jitter in place for the whole handling time.
       entity.handling = entity.body !== undefined && entity.body.handling !== null
-      if (entity.handling) {
-        entity.targetX = entity.x
-        entity.targetY = entity.y
-        entity.running = false
-        entity.gait = (entity.gait ?? 0)
-        updateFatigue(entity, dt, 0.12)
-        return true
-      }
       entity.prevX = entity.x
       entity.prevY = entity.y
       entity.age += dt
@@ -4347,7 +4408,12 @@ window.__ModuleLoader__.load({
       const activity = activityFactor(world, species)
       const stageSpeed = STAGE_SPEED[entity.stage] ?? 1
       let pace
-      if (entity.intent === 'rest') {
+      if (entity.handling === true) {
+        // Head down over a kill: no travel, no gait, no wander.
+        entity.targetX = entity.x
+        entity.targetY = entity.y
+        pace = 0
+      } else if (entity.intent === 'rest') {
         // Resting is visible: the animal stops and the fatigue bar recovers.
         pace = 0.12
       } else if (species.ambush !== undefined && entity.intent === 'hunt') {
@@ -4443,10 +4509,13 @@ window.__ModuleLoader__.load({
           const childX = clamp(entity.x + randomBetween(world, -1.1, 1.1), 0.5, world.width - 1.5)
           const childY = clamp(entity.y + randomBetween(world, -1.1, 1.1), 0.5, world.height - 1.5)
           if (!canStand(world, species, childX, childY)) continue
+          // The parent is named so the ledger can charge the litter to the body
+          // that made it: a newborn's structure is transferred tissue, not
+          // energy invented by the world. Its reserve is spawnEntity's call.
           const child = spawnEntity(world, entity.species, childX, childY,
-            mutateGenes(world, genes, entity.species), entity.generation + 1)
+            mutateGenes(world, genes, entity.species), entity.generation + 1,
+            { parent: entity, juvenile: true })
           if (child === null) break
-          child.energy = balance.startEnergy * 0.4
           born += 1
         }
         if (born > 0) {
@@ -6003,49 +6072,110 @@ window.__ModuleLoader__.load({
         grassLush: [50, 118, 54],
         leaf: { dark: rgb(30, 76, 44), mid: rgb(54, 118, 58), light: rgb(98, 160, 76), outline: rgb(16, 40, 26) },
         weed: [rgb(70, 146, 110), rgb(104, 186, 130)],
+        needle: { dark: rgb(26, 70, 50), mid: rgb(42, 98, 64), light: rgb(66, 128, 78), outline: rgb(12, 34, 26) },
         water: {
           surface: rgb(120, 200, 214), shallow: rgb(76, 158, 186), mid: rgb(34, 102, 148),
           deep: rgb(30, 80, 122), caustic: rgb(156, 226, 236), foam: rgb(214, 244, 250),
         },
-        snow: 0.04,
-        bare: 0,
       },
       summer: {
         grassDry: [136, 128, 66],
         grassLush: [36, 94, 46],
         leaf: { dark: rgb(22, 58, 32), mid: rgb(40, 94, 44), light: rgb(74, 132, 60), outline: rgb(12, 32, 20) },
         weed: [rgb(58, 132, 96), rgb(92, 174, 118)],
+        needle: { dark: rgb(20, 60, 44), mid: rgb(34, 86, 56), light: rgb(56, 114, 68), outline: rgb(10, 28, 22) },
         water: {
           surface: rgb(104, 188, 204), shallow: rgb(66, 146, 178), mid: rgb(28, 94, 142),
           deep: rgb(24, 72, 112), caustic: rgb(146, 220, 232), foam: rgb(208, 240, 248),
         },
-        snow: 0,
-        bare: 0,
       },
       autumn: {
         grassDry: [166, 140, 62],
         grassLush: [126, 116, 50],
         leaf: { dark: rgb(92, 50, 24), mid: rgb(164, 98, 38), light: rgb(206, 148, 58), outline: rgb(56, 30, 16) },
         weed: [rgb(104, 118, 66), rgb(140, 148, 84)],
+        needle: { dark: rgb(28, 62, 46), mid: rgb(46, 88, 58), light: rgb(70, 112, 66), outline: rgb(14, 32, 24) },
         water: {
           surface: rgb(128, 186, 190), shallow: rgb(84, 138, 148), mid: rgb(44, 96, 120),
           deep: rgb(34, 76, 100), caustic: rgb(170, 210, 210), foam: rgb(216, 236, 238),
         },
-        snow: 0.12,
-        bare: 0.35,
       },
       winter: {
         grassDry: [182, 176, 150],
         grassLush: [136, 140, 108],
         leaf: { dark: rgb(80, 72, 64), mid: rgb(108, 100, 86), light: rgb(146, 138, 122), outline: rgb(48, 42, 38) },
         weed: [rgb(120, 128, 104), rgb(154, 160, 136)],
+        needle: { dark: rgb(26, 56, 44), mid: rgb(40, 76, 52), light: rgb(60, 100, 64), outline: rgb(12, 28, 22) },
         water: {
           surface: rgb(196, 228, 246), shallow: rgb(162, 204, 230), mid: rgb(116, 168, 210),
           deep: rgb(86, 134, 180), caustic: rgb(210, 238, 250), foam: rgb(244, 252, 255),
         },
-        snow: 1,
-        bare: 1,
       },
+    }
+
+    // ---------------------------------------------------------------------
+    // Phenology: how much snow lies and how bare the canopy is, over the year
+    // ---------------------------------------------------------------------
+    //
+    // These used to be one number per season, which made the whole of winter
+    // read as a single white block for an eighth of the year: at yearPhase
+    // 0.75–0.875 `seasonLook` reported snow 1 and every tree was grey. A real
+    // winter has a short deep-snow window with long shoulders, so the cover is
+    // now a profile over the year instead of a per-season constant:
+    // deep snow only across ~4% of the year, with 0.2–0.6 banks either side.
+
+    /** Snow cover over the year: `[yearPhase, cover]` control points. */
+    const SNOW_PROFILE = [
+      [0.0, 0.03],
+      [0.3, 0.0],
+      [0.58, 0.0],
+      [0.7, 0.18],
+      [0.76, 0.45],
+      [0.8, 0.74],
+      [0.82, 1.0],
+      [0.86, 1.0],
+      [0.89, 0.6],
+      [0.93, 0.3],
+      [0.97, 0.12],
+      [1.0, 0.03],
+    ]
+
+    /**
+     * How much of the canopy is gone: autumn thins, winter is bare, spring buds.
+     * Evergreens ignore this (they keep their needles), so it only affects the
+     * deciduous silhouettes.
+     */
+    const BARE_PROFILE = [
+      [0.0, 0.08],
+      [0.26, 0.0],
+      [0.55, 0.02],
+      [0.66, 0.35],
+      [0.74, 0.72],
+      [0.82, 0.96],
+      [0.9, 1.0],
+      [0.94, 0.88],
+      [0.98, 0.45],
+      [1.0, 0.08],
+    ]
+
+    /**
+     * Sample a `[phase, value]` profile with linear interpolation.
+     * @param {number[][]} profile - control points, sorted by phase, 0..1.
+     * @param {number} phase - 0..1.
+     * @returns {number} interpolated value.
+     */
+    function profileValue(profile, phase) {
+      const clamped = clamp(phase, 0, 1)
+      let previous = profile[0]
+      if (clamped <= previous[0]) return previous[1]
+      for (let index = 1; index < profile.length; index += 1) {
+        const point = profile[index]
+        if (clamped > point[0]) { previous = point; continue }
+        const span = point[0] - previous[0]
+        const t = span <= 0 ? 0 : (clamped - previous[0]) / span
+        return mix(previous[1], point[1], t)
+      }
+      return profile[profile.length - 1][1]
     }
 
     /** Snow and frost colours shared by every season (the cover ramps to them). */
@@ -6186,14 +6316,30 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** Memo for the blended seasonal look: one slot is enough, one world is shown. */
-    const seasonMemo = { key: -1, look: null }
+    /**
+     * Year-phase steps per season. `SUMMER` would be index 1, step 0.
+     *
+     * Part of the look-key contract: `key = seasonIndex * 17 + step`, with
+     * `step = round(local * 16)` therefore in 0..16. Decoding is
+     * `index = floor(key / 17)`, `step = key % 17`. Two worlds at the same
+     * yearPhase always get the same key, and the key only ever moves when the
+     * quantised year phase does.
+     */
+    const SEASON_STEPS = 16
+
+    /** Bumped whenever the shape of a look record changes, for cache safety. */
+    const LOOK_MEMO_SIZE = 8
+
+    /** Memo for the blended seasonal looks, keyed by `look.key`. */
+    const seasonMemo = new Map()
 
     /**
      * The blended seasonal look for this frame.
      *
      * Rebuilt only when the quantised year phase moves, so the per-cell hot loop
-     * never does colour maths for the season.
+     * never does colour maths for the season. The memo holds a few looks because
+     * a probe (or a test) painting two worlds in the same frame must not thrash
+     * the cache and rebuild 170 sprites per frame.
      * @param {object} world - the world.
      * @returns {object} look record.
      */
@@ -6203,26 +6349,36 @@ window.__ModuleLoader__.load({
       const scaled = phase * seasons
       const index = Math.min(seasons - 1, Math.floor(scaled))
       const local = scaled - index
-      const step = Math.round(local * 16)
-      const key = index * 17 + step
-      if (seasonMemo.key === key) return seasonMemo.look
+      const step = Math.round(local * SEASON_STEPS)
+      const key = index * (SEASON_STEPS + 1) + step
+      const cached = seasonMemo.get(key)
+      if (cached !== undefined) return cached
       const from = SEASON_LOOK[SEASON_IDS[index]]
       const to = SEASON_LOOK[SEASON_IDS[(index + 1) % seasons]]
-      const t = step / 16
+      const t = step / SEASON_STEPS
       // Each season holds its own palette for the first three quarters and only
       // bleeds into the next one at the end. Blending across the whole quarter
-      // made mid-winter already half spring: the snow cover was gone by the
-      // middle of the season and the ground never actually turned white.
+      // made mid-winter already half spring while the ground was still white.
       const eased = smooth(clamp((t - 0.75) / 0.25, 0, 1))
+      // Snow and bareness are year-phase profiles, not per-season constants: the
+      // deep-snow window is ~4% of the year with long 0.2–0.6 shoulders.
+      const quantisedPhase = (index + t) / seasons
+      const snow = profileValue(SNOW_PROFILE, quantisedPhase)
+      const bare = profileValue(BARE_PROFILE, quantisedPhase)
       const look = {
         key,
         // Foliage sprites are rebuilt from scratch, so they use a coarser key.
         plantKey: index * 9 + Math.round(local * 8),
         index,
+        step,
         t,
-        snow: mix(from.snow, to.snow, eased),
-        bare: mix(from.bare, to.bare, eased),
+        phase: quantisedPhase,
+        snow,
+        bare,
+        // Ice on the shallows appears a little before the ground is fully white.
+        ice: clamp((snow - 0.42) / 0.5, 0, 1),
         leaf: blendPaletteRecord(from.leaf, to.leaf, eased),
+        needle: blendPaletteRecord(from.needle, to.needle, eased),
         water: blendPaletteRecord(from.water, to.water, eased),
         weed: [
           blendColor(from.weed[0], to.weed[0], eased),
@@ -6233,8 +6389,8 @@ window.__ModuleLoader__.load({
           blendTriple(from.grassLush, to.grassLush, eased),
         ),
       }
-      seasonMemo.key = key
-      seasonMemo.look = look
+      if (seasonMemo.size >= LOOK_MEMO_SIZE) seasonMemo.clear()
+      seasonMemo.set(key, look)
       return look
     }
 
@@ -6680,14 +6836,6 @@ window.__ModuleLoader__.load({
       return pose.role
     }
 
-    /** Plants: three tree sizes, a shrub, and the two aquatic plants. */
-    const PLANT_SPRITES = {
-      tree: [1, 2, 3].map(size => buildTreeSprite(size)),
-      bush: buildBushSprite(),
-      lily: [0, 1].map(variant => buildLilySprite(variant)),
-      reed: buildReedSprite(),
-    }
-
     /**
      * Build a sprite from a per-pixel painter.
      * @param {number} width - sprite width in pixels.
@@ -6706,60 +6854,143 @@ window.__ModuleLoader__.load({
       return { width, height, pixels }
     }
 
+    // ---------------------------------------------------------------------
+    // Plant silhouettes
+    // ---------------------------------------------------------------------
+    //
+    // Every tree used to be the *same* shape, only recoloured and moved, and it
+    // was the strongest "this was stamped by a machine" tell on the map: a forest
+    // of forty identical umbrellas. Each plant now picks one of five silhouettes
+    // from its own id, so the forest is made of individuals that never need to be
+    // drawn by hand: round, tall, wide, leaning and spire crowns, plus three
+    // evergreen cones and a leafless winter skeleton.
+
     /**
-     * A tree, drawn rather than hand-lettered so all three sizes share a shape.
+     * Deciduous crown silhouettes.
      *
-     * The canopy is three overlapping lobes with a hard dark rim, a lit top-left
-     * and a shaded bottom. The rim is the whole point: a green blob on a green
-     * meadow is invisible, a green blob with a near-black edge and a brown trunk
-     * is a tree.
+     * Lobe offsets and radii are in units of the crown radius, so all three sizes
+     * share the proportions; `spread`/`flatten` reshape the crown into an
+     * ellipse, and the trunk may lean or stay upright.
+     */
+    const TREE_SHAPES = [
+      // 0 · round — the classic compass crown
+      {
+        lobes: [[0, -0.1, 0.82], [-0.5, 0.3, 0.62], [0.52, 0.26, 0.6], [0, 0.34, 0.56]],
+        spread: 1, flatten: 0.92, trunk: { lean: 0, rows: [2, 2, 3], width: [2, 2, 3] },
+      },
+      // 1 · tall — an upright crown, half a size narrower than round
+      {
+        lobes: [[0, -0.5, 0.58], [-0.32, 0.02, 0.62], [0.32, 0.16, 0.6], [0, 0.56, 0.52]],
+        spread: 0.9, flatten: 1.3, trunk: { lean: 0, rows: [2, 3, 4], width: [2, 2, 2] },
+      },
+      // 2 · wide — a spreading old crown, wider than it is tall
+      {
+        lobes: [[-0.62, 0.16, 0.56], [0.62, 0.18, 0.54], [0, 0.02, 0.74], [0, 0.46, 0.5]],
+        spread: 1.34, flatten: 0.62, trunk: { lean: 0, rows: [2, 2, 3], width: [3, 3, 4] },
+      },
+      // 3 · leaning — one side of the crown pushed out over a bent trunk
+      {
+        lobes: [[0.34, -0.06, 0.74], [-0.3, 0.3, 0.56], [0.66, 0.28, 0.5]],
+        spread: 1.05, flatten: 0.9, trunk: { lean: 1.8, rows: [2, 3, 4], width: [2, 2, 3] },
+      },
+      // 4 · spire — a poplar: narrow and tall, pointed at the top
+      {
+        lobes: [[0, -0.66, 0.5], [0, -0.2, 0.62], [0, 0.26, 0.64], [0, 0.64, 0.48]],
+        spread: 1, flatten: 1.2, trunk: { lean: 0, rows: [2, 3, 4], width: [2, 2, 2] },
+      },
+    ]
+
+    /** Evergreen silhouettes: a fir, a slim spruce and a broad pine. */
+    const CONIFER_SHAPES = [
+      { tiers: 6, spread: 1.05, tallness: 1.5, taper: 0.95 },
+      { tiers: 7, spread: 0.82, tallness: 1.72, taper: 0.86 },
+      { tiers: 4, spread: 1.35, tallness: 1.05, taper: 1.1 },
+    ]
+
+    /**
+     * Distance from a point to a line segment, for the bare-tree skeleton.
+     * @param {number} px - point x.
+     * @param {number} py - point y.
+     * @param {number} ax - segment start x.
+     * @param {number} ay - segment start y.
+     * @param {number} bx - segment end x.
+     * @param {number} by - segment end y.
+     * @returns {number} distance in pixels.
+     */
+    function distanceToSegment(px, py, ax, ay, bx, by) {
+      const vx = bx - ax
+      const vy = by - ay
+      const lengthSquared = vx * vx + vy * vy
+      const t = lengthSquared === 0 ? 0 : clamp(((px - ax) * vx + (py - ay) * vy) / lengthSquared, 0, 1)
+      return Math.hypot(px - (ax + vx * t), py - (ay + vy * t))
+    }
+
+    /**
+     * A deciduous tree: an elliptical crown over a trunk.
+     *
+     * The rim is the whole point: a green blob on a green meadow is invisible, a
+     * green blob with a near-black edge and a brown trunk is a tree. Snow settles
+     * on the top edge of the crown, which is what keeps a winter forest readable
+     * instead of turning it into grey blocks.
      * @param {number} size - 1, 2 or 3.
-     * @param {object} [leaf] - foliage palette (seasonal); defaults to the shared one.
-     * @param {number} [bare] - 0..1 share of interior canopy lost (autumn→winter).
+     * @param {object} [leaf] - foliage palette (seasonal).
+     * @param {number} [thin] - 0..1 share of interior canopy lost (autumn).
+     * @param {number} [shapeIndex] - silhouette index into TREE_SHAPES.
+     * @param {number} [snowCap] - 0..1 snow on the top of the crown.
      * @returns {{width: number, height: number, pixels: Uint32Array}} sprite.
      */
-    function buildTreeSprite(size, leaf = PALETTE.leaf, bare = 0) {
+    function buildTreeSprite(size, leaf = PALETTE.leaf, thin = 0, shapeIndex = 0, snowCap = 0) {
+      const shape = TREE_SHAPES[shapeIndex % TREE_SHAPES.length]
       const radius = [4.3, 6.0, 7.6][size - 1]
-      const trunkHeight = [2, 2, 3][size - 1]
-      const trunkWidth = size >= 3 ? 3 : 2
-      const width = Math.ceil(radius * 2) + 3
-      const canopyHeight = Math.ceil(radius * 1.85)
-      const height = canopyHeight + trunkHeight + 1
+      const trunkRows = shape.trunk.rows[size - 1]
+      const trunkWidth = shape.trunk.width[size - 1]
+      const width = Math.ceil(radius * 2 * Math.max(1, shape.spread)) + 3
+      const canopyHeight = Math.ceil(radius * 1.85 * shape.flatten)
+      const height = canopyHeight + trunkRows + 1
       const cx = width / 2
       const cy = canopyHeight / 2
-      const lobes = [
-        [0, -radius * 0.1, radius * 0.82],
-        [-radius * 0.5, radius * 0.3, radius * 0.62],
-        [radius * 0.52, radius * 0.26, radius * 0.6],
-        [0, radius * 0.34, radius * 0.56],
-      ]
-      return buildSprite(width, height, (x, y) => {
-        const px = x + 0.5
-        const py = y + 0.5
-        let margin = -Infinity
-        for (const [offsetX, offsetY, lobeRadius] of lobes) {
-          const dx = px - (cx + offsetX)
-          const dy = (py - (cy + offsetY)) / 0.92
-          margin = Math.max(margin, lobeRadius - Math.hypot(dx, dy))
+      // Pass 1: the crown mask, so pass 2 can find its own edge and top.
+      const mask = new Uint8Array(width * height)
+      for (let y = 0; y < canopyHeight; y++) {
+        for (let x = 0; x < width; x++) {
+          const px = x + 0.5
+          const py = y + 0.5
+          let margin = -Infinity
+          for (const [offsetX, offsetY, lobeRadius] of shape.lobes) {
+            const dx = (px - (cx + offsetX * radius)) / shape.spread
+            const dy = (py - (cy + offsetY * radius)) / shape.flatten
+            margin = Math.max(margin, lobeRadius * radius - Math.hypot(dx, dy))
+          }
+          if (margin > 0) mask[y * width + x] = 1
         }
-        if (margin > 0) {
-          // Winter thins the canopy to a skeleton: interior pixels drop out by a
-          // hash while the rim and the trunk stay, so the tree keeps a readable
-          // silhouette instead of turning into a grey ring.
-          if (bare > 0 && margin > 1.15 && (((x * 37 + y * 61 + 5) & 31) / 31) < bare * 0.62) return 0
+      }
+      // Pass 2: shade the crown, drop the autumn interior, cap the snow.
+      return buildSprite(width, height, (x, y) => {
+        if (mask[y * width + x] === 1) {
+          const above = y === 0 ? 0 : mask[(y - 1) * width + x]
+          const edge = above === 0
+            || x === 0 || x === width - 1
+            || mask[y * width + x - 1] === 0 || mask[y * width + x + 1] === 0
+          // Snow sits on the upper edge only: the canopy keeps its own colour
+          // underneath, so the tree still reads as a tree.
+          if (snowCap > 0.3 && above === 0) return snowCap > 0.6 ? SNOW_COLORS.light : SNOW_COLORS.mid
+          if (thin > 0 && !edge && (((x * 37 + y * 61 + 5) & 31) / 31) < thin * 0.55) return 0
+          if (edge) return leaf.outline
+          const px = x + 0.5
+          const py = y + 0.5
           // Light comes from the top left: -dx -dy is brightest up and left.
           const lit = -(px - cx) / radius * 0.55 - (py - cy) / radius * 0.85
-          if (margin < 1.15) return leaf.outline
           if (lit > 0.34) return leaf.light
           if (lit < -0.1) return leaf.dark
           return ((x * 5 + y * 3) & 15) < 5 ? leaf.light : leaf.mid
         }
-        const trunkTop = canopyHeight - 2
-        if (y >= trunkTop && y < trunkTop + trunkHeight + 1) {
-          const offset = px - cx
+        const trunkTop = canopyHeight - 1
+        if (y >= trunkTop) {
+          const t = (y - trunkTop) / Math.max(1, height - 1 - trunkTop)
+          const centre = cx + shape.trunk.lean * t
+          const offset = x + 0.5 - centre
           if (Math.abs(offset) <= trunkWidth / 2) {
-            if (Math.abs(offset) > trunkWidth / 2 - 1) return PALETTE.trunkDark
-            return PALETTE.trunk
+            return Math.abs(offset) > trunkWidth / 2 - 1 ? PALETTE.trunkDark : PALETTE.trunk
           }
         }
         return 0
@@ -6767,12 +6998,124 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * A shrub: the tree canopy without a trunk, so the meadow reads as layers.
-     * @param {object} [leaf] - foliage palette (seasonal).
-     * @param {number} [bare] - 0..1 share of interior canopy lost.
+     * A leafless deciduous tree: trunk and branches only.
+     *
+     * The winter answer used to be "thin the same green crown by a hash", which
+     * printed a grey ring. A real bare tree is a skeleton, so it is drawn as one.
+     * @param {number} size - 1, 2 or 3.
+     * @param {object} [leaf] - foliage palette, for the branch outline.
+     * @param {number} [shapeIndex] - silhouette index, so the skeleton matches.
      * @returns {{width: number, height: number, pixels: Uint32Array}} sprite.
      */
-    function buildBushSprite(leaf = PALETTE.leaf, bare = 0) {
+    function buildBareTreeSprite(size, leaf = PALETTE.leaf, shapeIndex = 0) {
+      const shape = TREE_SHAPES[shapeIndex % TREE_SHAPES.length]
+      const radius = [4.3, 6.0, 7.6][size - 1]
+      const width = Math.ceil(radius * 2 * Math.max(1, shape.spread)) + 3
+      const height = Math.ceil(radius * 1.95 * shape.flatten) + 2
+      const cx = width / 2 + shape.trunk.lean * 0.4
+      const baseY = height - 1
+      const crownY = Math.max(1, height * 0.16)
+      const trunkX = cx - shape.trunk.lean * 0.35
+      // Trunk, then four branches per level as two-segment polylines that bend
+      // upward: straight spokes read as a spider, a bend reads as a tree.
+      const segments = [[cx, baseY, trunkX, crownY]]
+      // Four long branches at a steep angle plus a fork at the top. Short flat
+      // spokes read as a brown cross; the reach has to be close to the crown
+      // radius or the skeleton stops looking like a tree at all.
+      const levels = [[0.95, 0.95], [0.8, 1.0], [0.6, 1.0]]
+      for (let step = 0; step < levels.length; step += 1) {
+        const [spreadAt, rise] = levels[step]
+        const t = 0.22 + step * 0.2
+        const fromX = cx - (cx - trunkX) * t
+        const fromY = baseY - (baseY - crownY) * t
+        const reach = radius * spreadAt * Math.max(0.85, shape.spread)
+        const side = step % 2 === 0 ? 1 : -1
+        const tipX = fromX + side * reach
+        const tipY = fromY - radius * rise * 0.8
+        segments.push([fromX, fromY, fromX + side * reach * 0.55, fromY - radius * rise * 0.35])
+        segments.push([fromX + side * reach * 0.55, fromY - radius * rise * 0.35, tipX, tipY])
+        // A short twig on the other side keeps the skeleton from looking combed.
+        if (step > 0) segments.push([fromX, fromY, fromX - side * reach * 0.45, fromY - radius * rise * 0.6])
+      }
+      segments.push([trunkX, crownY, trunkX - radius * 0.42, crownY - radius * 0.5])
+      segments.push([trunkX, crownY + 1, trunkX + radius * 0.38, crownY - radius * 0.34])
+      return buildSprite(width, height, (x, y) => {
+        const px = x + 0.5
+        const py = y + 0.5
+        let best = Infinity
+        for (const [ax, ay, bx, by] of segments) {
+          const distance = distanceToSegment(px, py, ax, ay, bx, by)
+          if (distance < best) best = distance
+        }
+        if (best > 0.62) return 0
+        return best < 0.34 ? PALETTE.trunk : leaf.outline
+      })
+    }
+
+    /**
+     * An evergreen: stacked tiers of needles, snow-cap on every tier's top.
+     *
+     * Without evergreens a winter forest is nothing but grey sticks; with them the
+     * map keeps a spine of dark green under the snow.
+     * @param {number} size - 1, 2 or 3.
+     * @param {object} needle - needle palette (seasonal).
+     * @param {number} [shapeIndex] - silhouette index into CONIFER_SHAPES.
+     * @param {number} [snowCap] - 0..1 snow on the tier tops.
+     * @returns {{width: number, height: number, pixels: Uint32Array}} sprite.
+     */
+    function buildConiferSprite(size, needle, shapeIndex = 0, snowCap = 0) {
+      const shape = CONIFER_SHAPES[shapeIndex % CONIFER_SHAPES.length]
+      const radius = [3.4, 4.6, 5.8][size - 1]
+      const height = Math.ceil(radius * 2.4 * shape.tallness) + 2
+      const width = Math.ceil(radius * 2 * shape.spread) + 3
+      const cx = width / 2
+      const mask = new Uint8Array(width * height)
+      const tierHeight = (height - 1) / shape.tiers
+      for (let tier = 0; tier < shape.tiers; tier += 1) {
+        const top = tier * tierHeight
+        const bottom = top + tierHeight + 0.7
+        const halfAtBottom = radius * shape.spread * shape.taper * (0.55 + 0.75 * ((tier + 1) / shape.tiers))
+        for (let y = Math.round(top); y <= Math.round(bottom) && y < height; y += 1) {
+          const t = (y - top) / Math.max(1, bottom - top)
+          const half = halfAtBottom * t
+          const from = Math.round(cx - half)
+          const to = Math.round(cx + half)
+          for (let x = from; x <= to; x += 1) {
+            if (x >= 0 && x < width) mask[y * width + x] = 1
+          }
+        }
+      }
+      return buildSprite(width, height, (x, y) => {
+        if (mask[y * width + x] !== 1) return 0
+        const above = y === 0 ? 0 : mask[(y - 1) * width + x]
+        const edge = above === 0 || x === 0 || x === width - 1
+          || mask[y * width + x - 1] === 0 || mask[y * width + x + 1] === 0
+        if (snowCap > 0.3 && above === 0) return snowCap > 0.6 ? SNOW_COLORS.light : SNOW_COLORS.mid
+        if (edge) return needle.outline
+        const lit = -(x + 0.5 - cx) / radius * 0.5
+        if (lit > 0.18) return needle.light
+        if (lit < -0.2) return needle.dark
+        return ((x * 3 + y * 5) & 7) < 3 ? needle.mid : needle.dark
+      })
+    }
+
+    /** Shrub silhouettes: low and flat, tall and lanky, wide and spreading. */
+    const BUSH_SHAPES = [
+      [[0, 0, 0.78], [-0.55, 0.2, 0.55], [0.55, 0.16, 0.55]],
+      [[0, -0.32, 0.6], [-0.2, 0.28, 0.5], [0.3, 0.24, 0.46], [0, 0.62, 0.36]],
+      [[-0.62, 0.1, 0.46], [0.62, 0.14, 0.44], [0, 0, 0.72], [0, 0.4, 0.5]],
+    ]
+
+    /**
+     * A shrub: the tree canopy without a trunk, so the meadow reads as layers.
+     * @param {object} [leaf] - foliage palette (seasonal).
+     * @param {number} [thin] - 0..1 share of interior canopy lost.
+     * @param {number} [shapeIndex] - silhouette index into BUSH_SHAPES.
+     * @param {number} [snowCap] - 0..1 snow on the top of the shrub.
+     * @returns {{width: number, height: number, pixels: Uint32Array}} sprite.
+     */
+    function buildBushSprite(leaf = PALETTE.leaf, thin = 0, shapeIndex = 0, snowCap = 0) {
+      const lobes = BUSH_SHAPES[shapeIndex % BUSH_SHAPES.length]
       const radius = 3.1
       const width = Math.ceil(radius * 2) + 2
       const height = Math.ceil(radius * 1.9) + 1
@@ -6782,11 +7125,13 @@ window.__ModuleLoader__.load({
         const px = x + 0.5
         const py = y + 0.5
         let margin = -Infinity
-        for (const [offsetX, offsetY, lobeRadius] of [[0, 0, radius * 0.78], [-radius * 0.55, radius * 0.2, radius * 0.55], [radius * 0.55, radius * 0.16, radius * 0.55]]) {
-          margin = Math.max(margin, lobeRadius - Math.hypot(px - (cx + offsetX), (py - (cy + offsetY)) / 0.9))
+        for (const [offsetX, offsetY, lobeRadius] of lobes) {
+          margin = Math.max(margin, lobeRadius * radius - Math.hypot(px - (cx + offsetX * radius), (py - (cy + offsetY * radius)) / 0.9))
         }
         if (margin <= 0) return y === height - 1 && Math.abs(px - cx) < 1.2 ? PALETTE.trunkDark : 0
-        if (bare > 0 && margin > 1.05 && (((x * 41 + y * 29 + 7) & 31) / 31) < bare * 0.55) return 0
+        // Snow caps the top row of the shrub, same rule as the tree crown.
+        if (snowCap > 0.3 && y === 0) return snowCap > 0.6 ? SNOW_COLORS.light : SNOW_COLORS.mid
+        if (thin > 0 && margin > 1.05 && (((x * 41 + y * 29 + 7) & 31) / 31) < thin * 0.55) return 0
         const lit = -(px - cx) / radius * 0.5 - (py - cy) / radius * 0.9
         if (margin < 1.05) return leaf.outline
         if (lit > 0.3) return leaf.light
@@ -6803,7 +7148,7 @@ window.__ModuleLoader__.load({
      * @param {object} [leaf] - foliage palette, for the shaded underside.
      * @returns {{width: number, height: number, pixels: Uint32Array}} sprite.
      */
-    function buildLilySprite(variant, weed = PALETTE.weed, leaf = PALETTE.leaf) {
+    function buildLilySprite(variant, weed = PALETTE.weed, leaf = PALETTE.leaf, snowCap = 0) {
       const width = 10
       const height = variant === 1 ? 7 : 5
       const cy = height - 2
@@ -6814,11 +7159,12 @@ window.__ModuleLoader__.load({
         const dy = (py - cy) / 2.1
         if (dx * dx + dy * dy <= 1) {
           if (x >= 5 && y <= cy - 1) return 0
+          if (snowCap > 0.4 && py < cy - 0.4) return SNOW_COLORS.mid
           if (py < cy - 0.6) return PALETTE.weedStalk
           if (py > cy + 0.8) return leaf.dark
           return weed[1]
         }
-        if (variant === 1 && y <= 2 && Math.abs(px - width / 2) < 1.6) {
+        if (variant === 1 && snowCap < 0.2 && y <= 2 && Math.abs(px - width / 2) < 1.6) {
           return y === 0 ? PALETTE.flowers[1] : PALETTE.flowers[3]
         }
         return 0
@@ -6830,7 +7176,7 @@ window.__ModuleLoader__.load({
      * @param {object} [leaf] - foliage palette (seasonal).
      * @returns {{width: number, height: number, pixels: Uint32Array}} sprite.
      */
-    function buildReedSprite(leaf = PALETTE.leaf) {
+    function buildReedSprite(leaf = PALETTE.leaf, snowCap = 0) {
       const width = 9
       const height = 11
       return buildSprite(width, height, (x, y) => {
@@ -6841,6 +7187,8 @@ window.__ModuleLoader__.load({
         }
         if (stalk(3, -1.6, 10) || stalk(5.5, 0.4, 9) || stalk(7.2, 1.8, 7)) {
           // A reed is olive, not teal: the teal read as a weed stalk in the water.
+          // The tips stay clear of the snow so the clump still pokes out of it.
+          if (snowCap > 0.5 && y > 3 && y < 8) return SNOW_COLORS.mid
           return y < 2 ? PALETTE.trunkDark : (y < 5 ? leaf.light : leaf.mid)
         }
         if (y >= height - 2 && Math.abs(x + 0.5 - 5) < 2.4) return leaf.dark
@@ -6849,20 +7197,56 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Build the whole plant set for one seasonal palette.
-     * @param {object} leaf - foliage palette.
-     * @param {number[]} weed - aquatic plant palette.
-     * @param {number} bare - 0..1 canopy loss.
-     * @returns {object} `{ tree, bush, lily, reed }` sprites.
+     * Build the whole plant set for one seasonal look.
+     *
+     * The set carries every silhouette for every size, for both phenologies, so
+     * the per-plant choice (`plantSpriteFor`) is a couple of array reads instead
+     * of a sprite build in the draw loop.
+     * @param {object} look - `{ leaf, needle, weed, bare, snow }`.
+     * @returns {object} the plant sprite set.
      */
-    function buildPlantSet(leaf, weed, bare) {
+    function buildPlantSet(look) {
+      const snowCap = look.snow ?? 0
+      const thin = look.bare ?? 0
       return {
-        tree: [1, 2, 3].map(size => buildTreeSprite(size, leaf, bare)),
-        bush: buildBushSprite(leaf, bare),
-        lily: [0, 1].map(variant => buildLilySprite(variant, weed, leaf)),
-        reed: buildReedSprite(leaf),
+        // Kept for the engine test seam and for the species sheet.
+        tree: [1, 2, 3].map(size => TREE_SHAPES.map((unused, shape) => buildTreeSprite(size, look.leaf, thin, shape, snowCap))),
+        conifer: [1, 2, 3].map(size => CONIFER_SHAPES.map((unused, shape) => buildConiferSprite(size, look.needle, shape, snowCap))),
+        leafless: [1, 2, 3].map(size => TREE_SHAPES.map((unused, shape) => buildBareTreeSprite(size, look.leaf, shape))),
+        bush: BUSH_SHAPES.map((unused, shape) => buildBushSprite(look.leaf, thin, shape, snowCap)),
+        lily: [0, 1].map(variant => buildLilySprite(variant, look.weed, look.leaf, snowCap)),
+        reed: [buildReedSprite(look.leaf, snowCap)],
+        bare: thin,
+        snow: snowCap,
       }
     }
+
+    /**
+     * Which kind of plant this is, from its own id.
+     *
+     * Phenology has to be per plant, not per world: a forest where every tree
+     * loses its leaves on the same frame pops, while a staggered one turns over
+     * like a real autumn.
+     * @param {object} plant - the plant record.
+     * @returns {boolean} true for an evergreen.
+     */
+    function isConifer(plant) {
+      // A modulus that shares no factor with the silhouette count, otherwise the
+      // cone flags and the crown shapes line up and every conifer looks alike.
+      return plant.variant === 'tree' && (plant.id % 7) < 2
+    }
+
+    /** Shared default look, so the exported sprite set works without a world. */
+    const DEFAULT_PLANT_LOOK = {
+      leaf: PALETTE.leaf,
+      needle: SEASON_LOOK.summer.needle,
+      weed: PALETTE.weed,
+      bare: 0,
+      snow: 0,
+    }
+
+    /** Every plant sprite at the default (high summer) palette. */
+    const PLANT_SPRITES = buildPlantSet(DEFAULT_PLANT_LOOK)
 
     /** Seasonal plant sets, keyed by the look's coarse plant key. */
     const plantSetCache = new Map()
@@ -6871,8 +7255,8 @@ window.__ModuleLoader__.load({
      * Plant sprites for the current seasonal look.
      *
      * Foliage is rebuilt, not tinted: at 6x a tinted canopy reads as a colour
-     * filter over the meadow, while an ochre or a bare one reads as autumn and
-     * winter.
+     * filter over the meadow, while an ochre, a bare or a snow-capped one reads
+     * as the season.
      * @param {object|null} look - seasonal look (`null` for the default palette).
      * @returns {object} plant sprite set.
      */
@@ -6881,9 +7265,35 @@ window.__ModuleLoader__.load({
       const key = look.plantKey ?? 0
       const cached = plantSetCache.get(key)
       if (cached !== undefined) return cached
-      const set = buildPlantSet(look.leaf, look.weed, look.bare)
+      const set = buildPlantSet(look)
+      // Fifty-odd sprites per look and only a few looks are ever alive at once.
+      if (plantSetCache.size > 12) plantSetCache.clear()
       plantSetCache.set(key, set)
       return set
+    }
+
+    /**
+     * The sprite for one plant: size, silhouette and phenology from its id.
+     * @param {object} set - plant sprite set for the current look.
+     * @param {object} plant - the plant record.
+     * @returns {{width: number, height: number, pixels: Uint32Array}|undefined} sprite.
+     */
+    function plantSpriteFor(set, plant) {
+      if (set === null || set === undefined) return undefined
+      const id = plant.id | 0
+      if (plant.variant === 'lily') return set.lily[id % set.lily.length]
+      if (plant.variant === 'reed') return set.reed[0]
+      if (plant.variant === 'bush') return set.bush[id % set.bush.length]
+      const size = clamp(plant.size ?? 1, 1, 3) - 1
+      if (isConifer(plant)) {
+        const cones = set.conifer[size]
+        return cones[((id >> 1) % cones.length + cones.length) % cones.length]
+      }
+      // Deciduous trees drop their leaves one by one as the season turns: the
+      // threshold is staggered by id so the forest does not pop.
+      const leafless = (set.bare ?? 0) > ((id % 7) / 7)
+      const group = leafless ? set.leafless[size] : set.tree[size]
+      return group[id % group.length]
     }
 
     /** Carcass: two frames, meat then bones. */
@@ -7202,8 +7612,7 @@ window.__ModuleLoader__.load({
      */
     function drawPlantSprite(context, world, view, plant, look, shadow) {
       const set = plantSpritesFor(look)
-      const variant = set[plant.variant] ?? set.tree
-      const sprite = Array.isArray(variant) ? variant[clamp(plant.size, 1, variant.length) - 1] : variant
+      const sprite = plantSpriteFor(set, plant)
       if (sprite === undefined) return
       const canvas = spriteToCanvas(sprite)
       if (canvas === null) return
@@ -7215,13 +7624,21 @@ window.__ModuleLoader__.load({
       const drawHeight = sprite.height * scale
       if (plant.variant !== 'lily' && sprite.width > 4) {
         context.save()
-        context.fillStyle = 'rgba(10, 22, 14, ' + (0.2 * shadow.strength).toFixed(3) + ')'
-        context.beginPath()
         // The sun drags the shadow sideways and makes it long at dawn and dusk;
         // at noon it sits under the canopy.
-        context.ellipse(left + drawWidth * 0.5 + shadow.x * drawWidth,
-          top + drawHeight - 1 + shadow.y * drawWidth,
-          drawWidth * 0.4, Math.max(1.5, drawWidth * 0.13), 0, 0, Math.PI * 2)
+        const centreX = left + drawWidth * 0.5 + shadow.x * drawWidth
+        const centreY = top + drawHeight - 1 + shadow.y * drawWidth
+        const radiusX = drawWidth * 0.34
+        const radiusY = Math.max(1.5, drawWidth * 0.11)
+        // Two ellipses, not one: a single flat disc reads as a painted puddle at
+        // 6x, a lighter outer ring over a darker core reads as a shadow.
+        context.fillStyle = 'rgba(10, 22, 14, ' + (0.08 * shadow.strength).toFixed(3) + ')'
+        context.beginPath()
+        context.ellipse(centreX, centreY, radiusX * 1.02, radiusY * 1.4, 0, 0, Math.PI * 2)
+        context.fill()
+        context.fillStyle = 'rgba(10, 22, 14, ' + (0.12 * shadow.strength).toFixed(3) + ')'
+        context.beginPath()
+        context.ellipse(centreX, centreY, radiusX * 0.66, radiusY * 0.85, 0, 0, Math.PI * 2)
         context.fill()
         context.restore()
       }
@@ -7464,28 +7881,45 @@ window.__ModuleLoader__.load({
       return GRASS_LUT
     }
 
-    /** Two slow sine fields, cached per world size: the meadow's large-scale patches. */
-    const patchState = { width: 0, height: 0, xs: null, ys: null }
+    /** Slow sine fields, cached per world size: the meadow's patches and snow drifts. */
+    const patchState = { width: 0, height: 0, xs: null, ys: null, driftX: null, driftY: null, driftU: null, driftV: null }
 
     /**
-     * Sine tables for the patch field.
+     * Build one separable sine table pair.
+     * @param {number} length - table length in cells.
+     * @param {number} frequency - radians per cell.
+     * @param {number} offset - phase offset in radians.
+     * @returns {Float64Array} table.
+     */
+    function sineTable(length, frequency, offset) {
+      const table = new Float64Array(length)
+      for (let index = 0; index < length; index += 1) table[index] = Math.sin(index * frequency + offset)
+      return table
+    }
+
+    /**
+     * Sine tables for the patch field and the snow drifts.
      *
-     * The field is separable (`sin(x*a) * sin(y*b)`), so two 1-D tables replace
-     * two `Math.sin` calls per grass cell.
+     * Both fields are separable (`sin(x*a) * sin(y*b)`), so 1-D tables replace
+     * `Math.sin` in the per-cell loop. The snow field is deliberately made of two
+     * frequencies: a single hash-based dither printed a 2-cell checkerboard over
+     * the whole winter map, which reads as static rather than as snow.
      * @param {number} width - world width in cells.
      * @param {number} height - world height in cells.
-     * @returns {object} `{ xs, ys }` tables.
+     * @returns {object} the table record.
      */
     function patchTablesFor(width, height) {
       if (patchState.width === width && patchState.height === height) return patchState
-      const xs = new Float64Array(width)
-      for (let x = 0; x < width; x++) xs[x] = Math.sin(x * 0.055 + 0.7)
-      const ys = new Float64Array(height)
-      for (let y = 0; y < height; y++) ys[y] = Math.sin(y * 0.043 - 1.1)
+      patchState.xs = sineTable(width, 0.055, 0.7)
+      patchState.ys = sineTable(height, 0.043, -1.1)
+      // Drift field: a 33-cell undulation crossed with a 55-cell one, which has no
+      // visible tiling at 6x and still varies cell to cell across a hillside.
+      patchState.driftX = sineTable(width, 0.19, 0.3)
+      patchState.driftY = sineTable(height, 0.23, -0.7)
+      patchState.driftU = sineTable(width, 0.07, 1.7)
+      patchState.driftV = sineTable(height, 0.09, 0.2)
       patchState.width = width
       patchState.height = height
-      patchState.xs = xs
-      patchState.ys = ys
       return patchState
     }
 
@@ -7682,10 +8116,10 @@ window.__ModuleLoader__.load({
             if (damp > 0.3) color = blendColor(color, weedColors[1], Math.min(0.5, damp * 0.55))
             // Snow settles in patches, not per-pixel: the dither is sampled in
             // 2x2 blocks, which at 6x reads as banks of snow instead of static.
-            if (snow > 0.15) color = snowCovered(color, snow, 1, ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3))
+            if (snow > 0.15) color = snowCovered(color, snow, 1, snowDriftAt(patch, worldX, worldY))
           } else if (surface === TERRAIN.STONE) {
             color = nudgeColor(PALETTE.stone[noise > 198 ? 2 : 1], noiseAt(noise))
-            if (snow > 0.15) color = snowCovered(color, snow, 0.8, ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3))
+            if (snow > 0.15) color = snowCovered(color, snow, 0.8, snowDriftAt(patch, worldX, worldY))
           } else {
             const cover = grass[index]
             const step = cover <= 0 ? 0 : Math.min(7, (cover * 8) | 0)
@@ -7706,7 +8140,7 @@ window.__ModuleLoader__.load({
             else if (cover < 0.08 && (noise & 63) === 5) color = blendColor(color, PALETTE.dirt[0], 0.5)
             // Snow settles on open ground first: tall cover still pokes through,
             // which is the difference between "winter" and "white paint".
-            if (snow > 0.15) color = snowCovered(color, snow, 0.75 + cover * 0.2, ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3))
+            if (snow > 0.15) color = snowCovered(color, snow, 0.78 + cover * 0.18, snowDriftAt(patch, worldX, worldY))
           }
           out[outBase + col] = color
         }
@@ -7743,8 +8177,7 @@ window.__ModuleLoader__.load({
       const strength = shadow.strength
       for (let index = 0; index < count; index++) {
         const plant = visible.order[order[index]]
-        const group = set[plant.variant] ?? set.tree
-        const sprite = Array.isArray(group) ? group[clamp(plant.size, 1, group.length) - 1] : group
+        const sprite = plantSpriteFor(set, plant)
         if (sprite === undefined) continue
         const baseX = Math.round(plant.x - view.x)
         const baseY = Math.round(plant.y - view.y)
@@ -7758,7 +8191,7 @@ window.__ModuleLoader__.load({
         // the same forest look different at dawn and at noon.
         if (plant.variant !== 'lily' && strength > 0.08) {
           shadeEllipse(out, view, baseX + shadow.x * sprite.width, baseY + 1 + shadow.y * sprite.width,
-            Math.max(2, sprite.width * 0.44), Math.max(1.3, sprite.width * 0.19), strength)
+            Math.max(2, sprite.width * 0.36), Math.max(1.2, sprite.width * 0.16), strength, (look.snow ?? 0) * 0.6)
         }
         drawSprite(out, view.width, view.height, sprite,
           baseX - (sprite.width >> 1) + swayX, baseY - sprite.height + 1, false, factor)
@@ -7775,11 +8208,13 @@ window.__ModuleLoader__.load({
      * @param {number} color - the ground colour.
      * @param {number} snow - seasonal snow cover 0..1.
      * @param {number} exposure - how much the surface pokes through (1 = open).
-     * @param {number} flake - 0..255 blocky noise sample.
+     * @param {number} flake - 0..1 drift field sample.
      * @returns {number} packed colour.
      */
     function snowCovered(color, snow, exposure, flake) {
-      const amount = snow * (0.35 + 0.8 * (flake / 255)) - (exposure - 1) * 0.35
+      // `flake` is the smooth drift field (0..1), with a little per-cell texture on
+      // top: the drifts give the banks, the texture keeps them from looking flat.
+      const amount = snow * (0.5 + 0.62 * flake) - (exposure - 1) * 0.35
       if (amount < 0.06) return color
       // Fixed-point blend instead of blendColor: this runs on every land pixel
       // of a winter frame, and the float version measured 13 ms of the 32 ms
@@ -7791,6 +8226,23 @@ window.__ModuleLoader__.load({
         | (((((color >>> 16) & 0xFF) * inv + tint[2] * q) >> 8) << 16)
         | (((((color >>> 8) & 0xFF) * inv + tint[1] * q) >> 8) << 8)
         | ((((color & 0xFF) * inv + tint[0] * q) >> 8))) >>> 0
+    }
+
+    /**
+     * Snow drift field at one cell, 0..1.
+     *
+     * Two crossed sine undulations plus a very small per-cell jitter. It is
+     * smooth on purpose: the buffer is upscaled 6x, so any per-cell binary choice
+     * prints as a checkerboard of 6-pixel squares.
+     * @param {object} tables - patch tables.
+     * @param {number} x - world column.
+     * @param {number} y - world row.
+     * @returns {number} 0..1 drift value.
+     */
+    function snowDriftAt(tables, x, y) {
+      const broad = tables.driftX[x] * tables.driftY[y]
+      const narrow = tables.driftU[x] * tables.driftV[y]
+      return clamp(0.5 + 0.32 * broad + 0.22 * narrow, 0, 1)
     }
 
     /**
@@ -7812,8 +8264,9 @@ window.__ModuleLoader__.load({
      * @param {number} rx - radius x.
      * @param {number} ry - radius y.
      * @param {number} [strength] - 0..1 shadow opacity (sun elevation).
+     * @param {number} [cool] - 0..1 how much the shadow keeps a blue cast (snow).
      */
-    function shadeEllipse(out, view, cx, cy, rx, ry, strength = 1) {
+    function shadeEllipse(out, view, cx, cy, rx, ry, strength = 1, cool = 0) {
       if (strength <= 0.02 || rx <= 0 || ry <= 0) return
       const viewWidth = view.width
       const viewHeight = view.height
@@ -7832,10 +8285,13 @@ window.__ModuleLoader__.load({
         if (fromX > toX) continue
         const q = Math.abs(ny) > 0.72 ? outerQ : innerQ
         const rowBase = y * viewWidth
+        // On snow a neutral multiply reads as grey paint; keeping a little more
+        // blue in the shadow is what makes it read as snow in shade.
+        const bq = cool <= 0 ? q : q + Math.round((256 - q) * cool * 0.32)
         for (let x = fromX; x <= toX; x++) {
           const color = out[rowBase + x]
           out[rowBase + x] = (0xFF000000
-            | (((((color >>> 16) & 0xFF) * q) >> 8) << 16)
+            | (((((color >>> 16) & 0xFF) * bq) >> 8) << 16)
             | (((((color >>> 8) & 0xFF) * q) >> 8) << 8)
             | (((color & 0xFF) * q) >> 8)) >>> 0
         }
@@ -11861,6 +12317,14 @@ window.__ModuleLoader__.load({
       pushHistory,
       serializeWorld,
       deserializeWorld,
+      // Save v2 is an async, compressed codec: the store must await these, and a
+      // headless test asserts the round trip without touching localStorage.
+      packWorld,
+      unpackWorld,
+      formatSaveSize,
+      saveError,
+      metabolicTemperatureFactor,
+      feltTemperature,
       paintView,
       paintWorld,
       paintMinimap,

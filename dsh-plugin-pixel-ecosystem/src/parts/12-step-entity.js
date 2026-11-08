@@ -20,25 +20,16 @@
       // A predator may have bitten this animal earlier in the same tick. It must
       // die before feed() runs, otherwise it would graze back the energy the
       // predator already took and stay alive with fate === 'eaten' forever.
-      if (entity.fate === 'eaten') {
-        killEntity(world, entity, 'predation')
+      if (entity.fate === 'eaten' || entity.body?.dead === true) {
+        dieOf(world, entity, entity.body?.dead === true ? (entity.body.cause || 'predation') : 'predation')
         return false
       }
       // While a predator is working through a kill it stands still: the carcass
-      // is being eaten, not carried. Without this the animal is nailed to its
-      // target position and jitters in place for the whole handling time.
-      // intent keeps its last value (hunt/scavenge) so the panel still says what
-      // it is doing; entity.handling is the flag the renderer uses for the
-      // crouched, head-down eating pose.
+      // is being eaten, not carried. The flag is set here and honoured by the
+      // pace chain below (pace 0), so the animal keeps perceiving and thinking
+      // while its legs stay planted — pinning its target every tick made it
+      // jitter in place for the whole handling time.
       entity.handling = entity.body !== undefined && entity.body.handling !== null
-      if (entity.handling) {
-        entity.targetX = entity.x
-        entity.targetY = entity.y
-        entity.running = false
-        entity.gait = (entity.gait ?? 0)
-        updateFatigue(entity, dt, 0.12)
-        return true
-      }
       entity.prevX = entity.x
       entity.prevY = entity.y
       entity.age += dt
@@ -69,7 +60,12 @@
       const activity = activityFactor(world, species)
       const stageSpeed = STAGE_SPEED[entity.stage] ?? 1
       let pace
-      if (entity.intent === 'rest') {
+      if (entity.handling === true) {
+        // Head down over a kill: no travel, no gait, no wander.
+        entity.targetX = entity.x
+        entity.targetY = entity.y
+        pace = 0
+      } else if (entity.intent === 'rest') {
         // Resting is visible: the animal stops and the fatigue bar recovers.
         pace = 0.12
       } else if (species.ambush !== undefined && entity.intent === 'hunt') {
@@ -165,10 +161,13 @@
           const childX = clamp(entity.x + randomBetween(world, -1.1, 1.1), 0.5, world.width - 1.5)
           const childY = clamp(entity.y + randomBetween(world, -1.1, 1.1), 0.5, world.height - 1.5)
           if (!canStand(world, species, childX, childY)) continue
+          // The parent is named so the ledger can charge the litter to the body
+          // that made it: a newborn's structure is transferred tissue, not
+          // energy invented by the world. Its reserve is spawnEntity's call.
           const child = spawnEntity(world, entity.species, childX, childY,
-            mutateGenes(world, genes, entity.species), entity.generation + 1)
+            mutateGenes(world, genes, entity.species), entity.generation + 1,
+            { parent: entity, juvenile: true })
           if (child === null) break
-          child.energy = balance.startEnergy * 0.4
           born += 1
         }
         if (born > 0) {

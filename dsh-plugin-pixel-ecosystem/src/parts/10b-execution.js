@@ -69,6 +69,22 @@
     }
 
     /**
+     * Quality of the sward directly under an animal's feet (0 when it is
+     * standing on the wrong terrain or the cell is bare).
+     * @param {object} world - the world.
+     * @param {object} entity - the grazer.
+     * @param {object} species - species row.
+     * @returns {number} 0..1 quality.
+     */
+    function swardUnderfoot(world, entity, species) {
+      const field = floraField(world, species)
+      if (field === null) return 0
+      const wanted = species.flora === 'grass' ? TERRAIN.GRASS : TERRAIN.WATER
+      const index = cellIndex(world, entity.x, entity.y)
+      if (index < 0 || world.terrain[index] !== wanted) return 0
+      return swardQuality(field[index])
+    }
+    /**
      * Give an animal that has an intent but no clock (a restored save, a
      * hand-placed test animal) a bout it can run out.
      * @param {object} world - the world.
@@ -216,9 +232,18 @@
         done = fear < 0.3
       } else if (state.id === 'forage') {
         const local = bestLocalBite(world, entity, species)
+        const standing = swardUnderfoot(world, entity, species)
         const distanceToPlan = Math.hypot(state.x - entity.x, state.y - entity.y)
-        if (local !== null && (distanceToPlan < 2.5 || local.value > 0.55)) {
-          // Head down: eat where it stands and step to the next bite in place.
+        if (standing >= CROPPED_SWARD) {
+          // Standing on good grass: put the head down and STAY. Stepping to a
+          // neighbouring cell every tick is how a grazing animal accumulated a
+          // long path without going anywhere.
+          state.phase = 'do'
+          entity.targetX = entity.x
+          entity.targetY = entity.y
+          if (local !== null) rememberFood(entity, local.x, local.y, local.value, now)
+        } else if (local !== null && (distanceToPlan < 2.5 || local.value > 0.55)) {
+          // This cell is cropped: step to the best bite next to it.
           state.phase = 'do'
           entity.targetX = local.x
           entity.targetY = local.y

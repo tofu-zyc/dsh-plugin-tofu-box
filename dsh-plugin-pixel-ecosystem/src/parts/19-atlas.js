@@ -302,8 +302,7 @@
      */
     function drawPlantSprite(context, world, view, plant, look, shadow) {
       const set = plantSpritesFor(look)
-      const variant = set[plant.variant] ?? set.tree
-      const sprite = Array.isArray(variant) ? variant[clamp(plant.size, 1, variant.length) - 1] : variant
+      const sprite = plantSpriteFor(set, plant)
       if (sprite === undefined) return
       const canvas = spriteToCanvas(sprite)
       if (canvas === null) return
@@ -315,13 +314,21 @@
       const drawHeight = sprite.height * scale
       if (plant.variant !== 'lily' && sprite.width > 4) {
         context.save()
-        context.fillStyle = 'rgba(10, 22, 14, ' + (0.2 * shadow.strength).toFixed(3) + ')'
-        context.beginPath()
         // The sun drags the shadow sideways and makes it long at dawn and dusk;
         // at noon it sits under the canopy.
-        context.ellipse(left + drawWidth * 0.5 + shadow.x * drawWidth,
-          top + drawHeight - 1 + shadow.y * drawWidth,
-          drawWidth * 0.4, Math.max(1.5, drawWidth * 0.13), 0, 0, Math.PI * 2)
+        const centreX = left + drawWidth * 0.5 + shadow.x * drawWidth
+        const centreY = top + drawHeight - 1 + shadow.y * drawWidth
+        const radiusX = drawWidth * 0.34
+        const radiusY = Math.max(1.5, drawWidth * 0.11)
+        // Two ellipses, not one: a single flat disc reads as a painted puddle at
+        // 6x, a lighter outer ring over a darker core reads as a shadow.
+        context.fillStyle = 'rgba(10, 22, 14, ' + (0.08 * shadow.strength).toFixed(3) + ')'
+        context.beginPath()
+        context.ellipse(centreX, centreY, radiusX * 1.02, radiusY * 1.4, 0, 0, Math.PI * 2)
+        context.fill()
+        context.fillStyle = 'rgba(10, 22, 14, ' + (0.12 * shadow.strength).toFixed(3) + ')'
+        context.beginPath()
+        context.ellipse(centreX, centreY, radiusX * 0.66, radiusY * 0.85, 0, 0, Math.PI * 2)
         context.fill()
         context.restore()
       }

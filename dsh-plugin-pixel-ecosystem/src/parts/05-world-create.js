@@ -107,7 +107,13 @@
           } else if (species.habitat === 'air') {
             if (terrain === TERRAIN.STONE) continue
           } else if (terrain !== TERRAIN.GRASS) continue
-          spawnEntity(world, id, x, y)
+          // A real population is not all newborns: seed the starting stock with
+          // an age spread from just-mature to late in life, so the world opens
+          // with animals old enough to breed and the age pyramid looks like one.
+          const maxAge = species.genes.lifespan[0]
+          spawnEntity(world, id, x, y, undefined, 1, {
+            age: randomBetween(world, species.balance.maturity, maxAge),
+          })
           placed += 1
         }
       }

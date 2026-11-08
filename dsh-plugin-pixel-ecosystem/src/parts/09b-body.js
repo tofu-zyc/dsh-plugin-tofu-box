@@ -65,7 +65,9 @@
      */
     function fieldMetabolicRate(species, volume) {
       const row = FMR_TABLE[species?.taxon ?? 'mammal'] ?? FMR_TABLE.mammal
-      const grams = Math.max(1, volume * 1000)
+      // The floor is 0.1 g, not 1 g: a 60 mg frog hatchling has a real metabolic
+      // rate, and flooring it at a gram made every amphibian litter unaffordable.
+      const grams = Math.max(0.1, volume * 1000)
       return row[0] * Math.pow(grams, row[1])
     }
 
@@ -87,6 +89,32 @@
      */
     function adultMassOf(species) {
       return species?.mass ?? 1
+    }
+
+    /**
+     * How temperature scales an animal's metabolism.
+     *
+     * Ectotherms follow Q10 over the whole range: their body IS the weather.
+     * Endotherms do not — Nagy's field metabolic rate is measured at a normal
+     * body temperature, so a mammal only spends MORE energy once the air drops
+     * below its lower critical temperature, and spends the same amount in mild
+     * weather. Applying a plant-style Q10 to a rabbit's air temperature was
+     * quietly halving its metabolism every cool spring day (2.5^-0.75 = 0.48 at
+     * 12.5 C), which is why a "fed" herbivore read as half-starved.
+     * @param {object} species - species row.
+     * @param {number} temperature - felt temperature, degrees C.
+     * @returns {number} multiplier on the field metabolic rate.
+     */
+    function metabolicTemperatureFactor(species, temperature) {
+      if (species?.taxon === 'ectotherm') {
+        return Math.pow(BIO.Q10, (temperature - BIO.Q10_REFERENCE_C) / 10)
+      }
+      // Lower critical temperature falls with body size: a mouse shivers at 20 C,
+      // a bear barely notices 0 C.
+      const mass = adultMassOf(species ?? {})
+      const lowerCritical = 20 - 7 * Math.log10(mass + 1)
+      if (temperature >= lowerCritical) return 1
+      return 1 + 0.06 * (lowerCritical - temperature)
     }
 
     /**
@@ -120,9 +148,10 @@
       if (entity.body !== undefined) return entity.body
       const species = SPECIES[entity.species] ?? { taxon: 'mammal', mass: 1 }
       const adult = adultMassOf(species)
+      const birthMass = species.balance?.birthMass ?? adult * 0.05
       const maturity = Math.max(1, species.balance?.maturity ?? 60)
       const phase = clamp((entity.age ?? 0) / maturity, 0, 1)
-      const volume = adult * BIRTH_MASS_SHARE + (adult - adult * BIRTH_MASS_SHARE) * phase
+      const volume = birthMass + (adult - birthMass) * phase
       const body = {
         /** Reserve capacity, kJ: grows with the structure. */
         Emax: reserveCapacity(species, volume),
@@ -212,9 +241,14 @@
     function activityOf(entity) {
       const body = entity.body
       if (body !== undefined && body.handling !== null) return 0.7
-      if (entity.fleeing === true || entity.running === true) return 1.7
-      if (entity.intent === 'hunt' || entity.intent === 'scavenge') return 1.5
-      if (entity.intent === 'rest') return 0.55
+      // Nagy's field metabolic rate already folds in a typical day's activity, so
+      // these multipliers have to average near 1 for the daily intake to land on
+      // the 182 g/day calibration. A resting animal still stands up, looks around
+      // and digests: 0.7, not 0.55, or a sleepy population quietly reads as an
+      // under-fed one.
+      if (entity.fleeing === true || entity.running === true) return 1.8
+      if (entity.intent === 'hunt' || entity.intent === 'scavenge') return 1.6
+      if (entity.intent === 'rest') return 0.7
       return 1
     }
 
@@ -273,8 +307,8 @@
 
       growBody(world, entity, species, body, days)
 
-      const temperature = world.climate === undefined ? BIO.Q10_REFERENCE_C : world.climate.temperature
-      const q10 = Math.pow(BIO.Q10, (temperature - BIO.Q10_REFERENCE_C) / 10)
+      const temperature = feltTemperature(world, species)
+      const q10 = metabolicTemperatureFactor(species, temperature)
       const activity = activityOf(entity) * (entity.genes?.metabolism ?? 1)
       const fmr = fieldMetabolicRate(species, body.V)
       const pM = fmr * activity * q10
@@ -364,7 +398,7 @@
       const maturity = Math.max(1, species.balance?.maturity ?? 60)
       const phase = clamp((entity.age ?? 0) / maturity, 0, 1)
       const adult = adultMassOf(species)
-      const birth = adult * BIRTH_MASS_SHARE
+      const birth = species.balance?.birthMass ?? adult * 0.05
       const target = birth + (adult - birth) * phase
       body.M = clamp((body.V - birth) / Math.max(1e-9, adult - birth), 0, 1)
       if (target <= body.V + 1e-12) return
@@ -440,7 +474,9 @@
         species: entity.species,
         decay: 0,
         energy: carried + structure,
-        mass: Math.max(0, body.V) * BIO.MEAT_FRACTION,
+        // Mass is the WHOLE body, the same basis the energy figure uses, so a
+        // carcass does not claim to be meatier than it is.
+        mass: Math.max(0, body.V),
         cause: body.cause,
       }
       world.corpses.push(corpse)

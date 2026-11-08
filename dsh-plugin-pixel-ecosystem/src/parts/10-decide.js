@@ -200,7 +200,14 @@
           offer('forage', weights.hunger * drives.hunger * quality, food.x, food.y, 'hunger')
         } else if (drives.hunger > 0.25) {
           // Nothing edible is in sight and the reserve is draining: go look.
-          const spot = wanderTarget(world, entity, species, Math.min(40, genes.vision * (1.6 + drives.hunger * 1.6)))
+          // A frog eats water weed but lives on land, so looking for food means
+          // heading for the water — wandering inland is how it starved with a
+          // full pond two cells behind it.
+          const landlocked = species.flora === 'weed' && species.habitat !== 'water'
+          const pond = belief.water
+          const spot = landlocked && pond !== null
+            ? { x: pond.x, y: pond.y }
+            : wanderTarget(world, entity, species, Math.min(40, genes.vision * (1.6 + drives.hunger * 1.6)))
           offer('explore', weights.hunger * drives.hunger * 0.6, spot.x, spot.y, 'search')
         }
       } else if (species.role === 'hunter') {

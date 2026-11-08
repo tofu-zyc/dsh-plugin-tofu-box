@@ -88,9 +88,16 @@
        * is still a real body-fat figure for a small mammal and it keeps the
        * first generation inside one watching session.
        */
-      RESERVE_DAYS: 2,
-      /** Energy cost of one kg of new wet tissue (structure growth), kJ. */
+      RESERVE_DAYS: 4,
+      /**
+       * Energy cost of one kg of new wet tissue (structure growth), kJ. It MUST
+       * equal MEAT_ENERGY: growth then moves energy from the reserve into the
+       * structure without creating or destroying any, which is what makes the
+       * world's energy book close exactly.
+       */
       STRUCTURE_COST: 7000,
+      /** Share of the parent's energy that becomes offspring tissue (rest: heat). */
+      REPRODUCTION_EFFICIENCY: 0.8,
       /** Edible share of a body's wet mass when something eats it. */
       MEAT_FRACTION: 0.7,
       /** Energy content of animal tissue, kJ/kg wet. */

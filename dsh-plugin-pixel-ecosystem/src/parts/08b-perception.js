@@ -362,8 +362,12 @@
         }
       }
 
-      // --- water: only worth looking for once the animal is actually dry -----
-      if (species.habitat !== 'water' && entity.drives !== undefined && entity.drives.thirst > 0.12) {
+      // --- water: worth looking for when dry, and always when the animal eats
+      // something that only grows in water (a frog on land needs to know where
+      // the pond is even when it is not thirsty) ----------------------------
+      const aimsForWaterWeed = species.flora === 'weed' && species.habitat !== 'water'
+      const thirsty = entity.drives !== undefined && entity.drives.thirst > 0.12
+      if (species.habitat !== 'water' && (thirsty || aimsForWaterWeed)) {
         const water = nearestWater(world, entity.x, entity.y, genes.vision)
         if (water !== null) {
           const spot = drinkSpot(world, species, water)

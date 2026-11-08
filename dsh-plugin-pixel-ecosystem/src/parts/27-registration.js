@@ -87,6 +87,14 @@
       pushHistory,
       serializeWorld,
       deserializeWorld,
+      // Save v2 is an async, compressed codec: the store must await these, and a
+      // headless test asserts the round trip without touching localStorage.
+      packWorld,
+      unpackWorld,
+      formatSaveSize,
+      saveError,
+      metabolicTemperatureFactor,
+      feltTemperature,
       paintView,
       paintWorld,
       paintMinimap,

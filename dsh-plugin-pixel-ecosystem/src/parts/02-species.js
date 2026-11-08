@@ -57,7 +57,7 @@
           speed: [2.6, 4.3], vision: [5, 13], size: [0.75, 1.35],
           metabolism: [0.75, 1.3], lifespan: [140, 240], fertility: [70, 110],
         },
-        history: { maturityYears: 0.3, lifespanYears: [1, 3], littersPerYear: 4.5 },
+        history: { maturityYears: 0.3, lifespanYears: [1, 3], littersPerYear: 4.5, litterMassShare: 0.15 },
         balance: { litter: [4, 7], fleeSpeed: 1.9 },
       },
       deer: {
@@ -71,7 +71,7 @@
           speed: [2.6, 3.8], vision: [8, 16], size: [1.4, 2.2],
           metabolism: [1.05, 1.5], lifespan: [1100, 1600], fertility: [600, 720],
         },
-        history: { maturityYears: 2, lifespanYears: [10, 15], littersPerYear: 1 },
+        history: { maturityYears: 2, lifespanYears: [10, 15], littersPerYear: 1, litterMassShare: 0.067 },
         balance: { litter: [1, 3], fleeSpeed: 1.85 },
       },
       fox: {
@@ -83,7 +83,7 @@
           speed: [3.9, 5.7], vision: [9, 19], size: [0.85, 1.55],
           metabolism: [0.85, 1.35], lifespan: [300, 420], fertility: [600, 720],
         },
-        history: { maturityYears: 0.8, lifespanYears: [3, 10], littersPerYear: 1 },
+        history: { maturityYears: 0.8, lifespanYears: [3, 10], littersPerYear: 1, litterMassShare: 0.11 },
         balance: { litter: [3, 6], catchRadius: 1.15, huntSpeed: 1.5, scavengeShare: 0.6 },
       },
       wolf: {
@@ -96,7 +96,7 @@
           speed: [4.3, 6.0], vision: [11, 22], size: [1.3, 2.1],
           metabolism: [1.25, 1.9], lifespan: [700, 900], fertility: [600, 720],
         },
-        history: { maturityYears: 2.5, lifespanYears: [6, 8], littersPerYear: 1 },
+        history: { maturityYears: 2.5, lifespanYears: [6, 8], littersPerYear: 1, litterMassShare: 0.044 },
         balance: { litter: [3, 5], catchRadius: 1.3, huntSpeed: 1.45, scavengeShare: 0.55 },
       },
       crow: {
@@ -108,7 +108,7 @@
           speed: [5.2, 7.6], vision: [14, 26], size: [0.8, 1.2],
           metabolism: [0.85, 1.3], lifespan: [500, 700], fertility: [360, 600],
         },
-        history: { maturityYears: 1, lifespanYears: [4, 8], littersPerYear: 1 },
+        history: { maturityYears: 1, lifespanYears: [4, 8], littersPerYear: 1, litterMassShare: 0.2 },
         balance: { litter: [3, 5], scavengeRadius: 1.7, corpseShare: 0.8 },
       },
       fish: {
@@ -122,7 +122,7 @@
           speed: [2.2, 4.0], vision: [5, 11], size: [0.7, 1.3],
           metabolism: [0.7, 1.2], lifespan: [420, 560], fertility: [500, 700],
         },
-        history: { maturityYears: 1.5, lifespanYears: [5, 10], littersPerYear: 1 },
+        history: { maturityYears: 1.5, lifespanYears: [5, 10], littersPerYear: 1, litterMassShare: 0.01 },
         balance: { litter: [6, 10], fleeSpeed: 1.9 },
       },
       pike: {
@@ -135,7 +135,7 @@
           speed: [4.4, 6.2], vision: [8, 16], size: [1.1, 1.9],
           metabolism: [0.95, 1.4], lifespan: [1000, 1300], fertility: [600, 720],
         },
-        history: { maturityYears: 2.5, lifespanYears: [7, 15], littersPerYear: 1 },
+        history: { maturityYears: 2.5, lifespanYears: [7, 15], littersPerYear: 1, litterMassShare: 0.0133 },
         balance: { litter: [2, 4], catchRadius: 1.8, huntSpeed: 1.5, scavengeShare: 0.4 },
       },
       // The next four are the land/water bridge. A heron and a bear stand in the
@@ -154,7 +154,7 @@
           speed: [3.2, 5.0], vision: [12, 22], size: [0.9, 1.3],
           metabolism: [0.8, 1.2], lifespan: [420, 620], fertility: [500, 700],
         },
-        history: { maturityYears: 1.5, lifespanYears: [5, 8], littersPerYear: 1 },
+        history: { maturityYears: 1.5, lifespanYears: [5, 8], littersPerYear: 1, litterMassShare: 0.075 },
         balance: { litter: [2, 4], catchRadius: 2.4, huntSpeed: 1.25, scavengeShare: 0.5 },
       },
       otter: {
@@ -167,7 +167,7 @@
           speed: [3.6, 5.4], vision: [10, 18], size: [0.9, 1.3],
           metabolism: [0.95, 1.35], lifespan: [380, 560], fertility: [500, 700],
         },
-        history: { maturityYears: 1.5, lifespanYears: [5, 8], littersPerYear: 1 },
+        history: { maturityYears: 1.5, lifespanYears: [5, 8], littersPerYear: 1, litterMassShare: 0.056 },
         balance: { litter: [2, 4], catchRadius: 1.7, huntSpeed: 1.55, scavengeShare: 0.5 },
       },
       bear: {
@@ -180,7 +180,7 @@
           speed: [3.0, 4.4], vision: [10, 18], size: [1.8, 2.6],
           metabolism: [0.8, 1.15], lifespan: [900, 1300], fertility: [1200, 1440],
         },
-        history: { maturityYears: 4.5, lifespanYears: [20, 25], littersPerYear: 0.4 },
+        history: { maturityYears: 4.5, lifespanYears: [20, 25], littersPerYear: 0.4, litterMassShare: 0.004 },
         balance: { litter: [1, 2], catchRadius: 2.1, huntSpeed: 1.3, scavengeShare: 0.7 },
       },
       frog: {
@@ -197,7 +197,7 @@
           speed: [1.4, 2.6], vision: [3, 7], size: [0.55, 0.9],
           metabolism: [0.6, 1.05], lifespan: [150, 260], fertility: [500, 700],
         },
-        history: { maturityYears: 1, lifespanYears: [3, 5], littersPerYear: 1 },
+        history: { maturityYears: 1, lifespanYears: [3, 5], littersPerYear: 1, litterMassShare: 0.04 },
         balance: { litter: [8, 14], fleeSpeed: 2.15 },
       },
     }
@@ -255,8 +255,24 @@
         const capacity = reserveCapacity(species, adultMassOf(species))
         balance.maxEnergy = capacity
         balance.startEnergy = capacity * SPAWN_RESERVE_SHARE
-        balance.breedEnergy = capacity * 0.6
-        balance.breedCost = capacity * 0.22
+        // --- what a litter actually costs ------------------------------------
+        // A newborn is not free: it is tissue plus a reserve, and the parent has
+        // to pay for both out of its own body, at a conversion efficiency below
+        // 1 (the rest leaves as heat and is real respiration). Dividing the
+        // litter's total wet mass by the litter size gives one newborn's mass,
+        // so a rabbit kit is 43 g and a wolf pup is 350 g without either number
+        // being typed anywhere.
+        const history = species.history
+        const litterMax = Math.max(1, balance.litter?.[1] ?? 1)
+        const litterMass = adultMassOf(species) * (history?.litterMassShare ?? 0.05)
+        const birthMass = litterMass / litterMax
+        const birthReserve = reserveCapacity(species, birthMass) * BIRTH_RESERVE_SHARE
+        balance.birthMass = birthMass
+        balance.breedCost = (litterMass * BIO.MEAT_ENERGY + litterMax * birthReserve)
+          / BIO.REPRODUCTION_EFFICIENCY
+        // A species may only breed when its reserve covers the whole litter, so
+        // the ledger never has to invent the difference.
+        balance.breedEnergy = Math.min(capacity * 0.97, balance.breedCost * 1.02)
         // The reserve is spent inside metabolise() and nowhere else. These two
         // keys stay because other layers read them; they must stay zero or the
         // animal would be charged twice for standing still.

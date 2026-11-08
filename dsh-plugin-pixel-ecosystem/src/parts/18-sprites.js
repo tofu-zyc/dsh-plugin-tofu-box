@@ -415,14 +415,6 @@
       return pose.role
     }
 
-    /** Plants: three tree sizes, a shrub, and the two aquatic plants. */
-    const PLANT_SPRITES = {
-      tree: [1, 2, 3].map(size => buildTreeSprite(size)),
-      bush: buildBushSprite(),
-      lily: [0, 1].map(variant => buildLilySprite(variant)),
-      reed: buildReedSprite(),
-    }
-
     /**
      * Build a sprite from a per-pixel painter.
      * @param {number} width - sprite width in pixels.
@@ -441,60 +433,143 @@
       return { width, height, pixels }
     }
 
+    // ---------------------------------------------------------------------
+    // Plant silhouettes
+    // ---------------------------------------------------------------------
+    //
+    // Every tree used to be the *same* shape, only recoloured and moved, and it
+    // was the strongest "this was stamped by a machine" tell on the map: a forest
+    // of forty identical umbrellas. Each plant now picks one of five silhouettes
+    // from its own id, so the forest is made of individuals that never need to be
+    // drawn by hand: round, tall, wide, leaning and spire crowns, plus three
+    // evergreen cones and a leafless winter skeleton.
+
     /**
-     * A tree, drawn rather than hand-lettered so all three sizes share a shape.
+     * Deciduous crown silhouettes.
      *
-     * The canopy is three overlapping lobes with a hard dark rim, a lit top-left
-     * and a shaded bottom. The rim is the whole point: a green blob on a green
-     * meadow is invisible, a green blob with a near-black edge and a brown trunk
-     * is a tree.
+     * Lobe offsets and radii are in units of the crown radius, so all three sizes
+     * share the proportions; `spread`/`flatten` reshape the crown into an
+     * ellipse, and the trunk may lean or stay upright.
+     */
+    const TREE_SHAPES = [
+      // 0 · round — the classic compass crown
+      {
+        lobes: [[0, -0.1, 0.82], [-0.5, 0.3, 0.62], [0.52, 0.26, 0.6], [0, 0.34, 0.56]],
+        spread: 1, flatten: 0.92, trunk: { lean: 0, rows: [2, 2, 3], width: [2, 2, 3] },
+      },
+      // 1 · tall — an upright crown, half a size narrower than round
+      {
+        lobes: [[0, -0.5, 0.58], [-0.32, 0.02, 0.62], [0.32, 0.16, 0.6], [0, 0.56, 0.52]],
+        spread: 0.9, flatten: 1.3, trunk: { lean: 0, rows: [2, 3, 4], width: [2, 2, 2] },
+      },
+      // 2 · wide — a spreading old crown, wider than it is tall
+      {
+        lobes: [[-0.62, 0.16, 0.56], [0.62, 0.18, 0.54], [0, 0.02, 0.74], [0, 0.46, 0.5]],
+        spread: 1.34, flatten: 0.62, trunk: { lean: 0, rows: [2, 2, 3], width: [3, 3, 4] },
+      },
+      // 3 · leaning — one side of the crown pushed out over a bent trunk
+      {
+        lobes: [[0.34, -0.06, 0.74], [-0.3, 0.3, 0.56], [0.66, 0.28, 0.5]],
+        spread: 1.05, flatten: 0.9, trunk: { lean: 1.8, rows: [2, 3, 4], width: [2, 2, 3] },
+      },
+      // 4 · spire — a poplar: narrow and tall, pointed at the top
+      {
+        lobes: [[0, -0.66, 0.5], [0, -0.2, 0.62], [0, 0.26, 0.64], [0, 0.64, 0.48]],
+        spread: 1, flatten: 1.2, trunk: { lean: 0, rows: [2, 3, 4], width: [2, 2, 2] },
+      },
+    ]
+
+    /** Evergreen silhouettes: a fir, a slim spruce and a broad pine. */
+    const CONIFER_SHAPES = [
+      { tiers: 6, spread: 1.05, tallness: 1.5, taper: 0.95 },
+      { tiers: 7, spread: 0.82, tallness: 1.72, taper: 0.86 },
+      { tiers: 4, spread: 1.35, tallness: 1.05, taper: 1.1 },
+    ]
+
+    /**
+     * Distance from a point to a line segment, for the bare-tree skeleton.
+     * @param {number} px - point x.
+     * @param {number} py - point y.
+     * @param {number} ax - segment start x.
+     * @param {number} ay - segment start y.
+     * @param {number} bx - segment end x.
+     * @param {number} by - segment end y.
+     * @returns {number} distance in pixels.
+     */
+    function distanceToSegment(px, py, ax, ay, bx, by) {
+      const vx = bx - ax
+      const vy = by - ay
+      const lengthSquared = vx * vx + vy * vy
+      const t = lengthSquared === 0 ? 0 : clamp(((px - ax) * vx + (py - ay) * vy) / lengthSquared, 0, 1)
+      return Math.hypot(px - (ax + vx * t), py - (ay + vy * t))
+    }
+
+    /**
+     * A deciduous tree: an elliptical crown over a trunk.
+     *
+     * The rim is the whole point: a green blob on a green meadow is invisible, a
+     * green blob with a near-black edge and a brown trunk is a tree. Snow settles
+     * on the top edge of the crown, which is what keeps a winter forest readable
+     * instead of turning it into grey blocks.
      * @param {number} size - 1, 2 or 3.
-     * @param {object} [leaf] - foliage palette (seasonal); defaults to the shared one.
-     * @param {number} [bare] - 0..1 share of interior canopy lost (autumn→winter).
+     * @param {object} [leaf] - foliage palette (seasonal).
+     * @param {number} [thin] - 0..1 share of interior canopy lost (autumn).
+     * @param {number} [shapeIndex] - silhouette index into TREE_SHAPES.
+     * @param {number} [snowCap] - 0..1 snow on the top of the crown.
      * @returns {{width: number, height: number, pixels: Uint32Array}} sprite.
      */
-    function buildTreeSprite(size, leaf = PALETTE.leaf, bare = 0) {
+    function buildTreeSprite(size, leaf = PALETTE.leaf, thin = 0, shapeIndex = 0, snowCap = 0) {
+      const shape = TREE_SHAPES[shapeIndex % TREE_SHAPES.length]
       const radius = [4.3, 6.0, 7.6][size - 1]
-      const trunkHeight = [2, 2, 3][size - 1]
-      const trunkWidth = size >= 3 ? 3 : 2
-      const width = Math.ceil(radius * 2) + 3
-      const canopyHeight = Math.ceil(radius * 1.85)
-      const height = canopyHeight + trunkHeight + 1
+      const trunkRows = shape.trunk.rows[size - 1]
+      const trunkWidth = shape.trunk.width[size - 1]
+      const width = Math.ceil(radius * 2 * Math.max(1, shape.spread)) + 3
+      const canopyHeight = Math.ceil(radius * 1.85 * shape.flatten)
+      const height = canopyHeight + trunkRows + 1
       const cx = width / 2
       const cy = canopyHeight / 2
-      const lobes = [
-        [0, -radius * 0.1, radius * 0.82],
-        [-radius * 0.5, radius * 0.3, radius * 0.62],
-        [radius * 0.52, radius * 0.26, radius * 0.6],
-        [0, radius * 0.34, radius * 0.56],
-      ]
-      return buildSprite(width, height, (x, y) => {
-        const px = x + 0.5
-        const py = y + 0.5
-        let margin = -Infinity
-        for (const [offsetX, offsetY, lobeRadius] of lobes) {
-          const dx = px - (cx + offsetX)
-          const dy = (py - (cy + offsetY)) / 0.92
-          margin = Math.max(margin, lobeRadius - Math.hypot(dx, dy))
+      // Pass 1: the crown mask, so pass 2 can find its own edge and top.
+      const mask = new Uint8Array(width * height)
+      for (let y = 0; y < canopyHeight; y++) {
+        for (let x = 0; x < width; x++) {
+          const px = x + 0.5
+          const py = y + 0.5
+          let margin = -Infinity
+          for (const [offsetX, offsetY, lobeRadius] of shape.lobes) {
+            const dx = (px - (cx + offsetX * radius)) / shape.spread
+            const dy = (py - (cy + offsetY * radius)) / shape.flatten
+            margin = Math.max(margin, lobeRadius * radius - Math.hypot(dx, dy))
+          }
+          if (margin > 0) mask[y * width + x] = 1
         }
-        if (margin > 0) {
-          // Winter thins the canopy to a skeleton: interior pixels drop out by a
-          // hash while the rim and the trunk stay, so the tree keeps a readable
-          // silhouette instead of turning into a grey ring.
-          if (bare > 0 && margin > 1.15 && (((x * 37 + y * 61 + 5) & 31) / 31) < bare * 0.62) return 0
+      }
+      // Pass 2: shade the crown, drop the autumn interior, cap the snow.
+      return buildSprite(width, height, (x, y) => {
+        if (mask[y * width + x] === 1) {
+          const above = y === 0 ? 0 : mask[(y - 1) * width + x]
+          const edge = above === 0
+            || x === 0 || x === width - 1
+            || mask[y * width + x - 1] === 0 || mask[y * width + x + 1] === 0
+          // Snow sits on the upper edge only: the canopy keeps its own colour
+          // underneath, so the tree still reads as a tree.
+          if (snowCap > 0.3 && above === 0) return snowCap > 0.6 ? SNOW_COLORS.light : SNOW_COLORS.mid
+          if (thin > 0 && !edge && (((x * 37 + y * 61 + 5) & 31) / 31) < thin * 0.55) return 0
+          if (edge) return leaf.outline
+          const px = x + 0.5
+          const py = y + 0.5
           // Light comes from the top left: -dx -dy is brightest up and left.
           const lit = -(px - cx) / radius * 0.55 - (py - cy) / radius * 0.85
-          if (margin < 1.15) return leaf.outline
           if (lit > 0.34) return leaf.light
           if (lit < -0.1) return leaf.dark
           return ((x * 5 + y * 3) & 15) < 5 ? leaf.light : leaf.mid
         }
-        const trunkTop = canopyHeight - 2
-        if (y >= trunkTop && y < trunkTop + trunkHeight + 1) {
-          const offset = px - cx
+        const trunkTop = canopyHeight - 1
+        if (y >= trunkTop) {
+          const t = (y - trunkTop) / Math.max(1, height - 1 - trunkTop)
+          const centre = cx + shape.trunk.lean * t
+          const offset = x + 0.5 - centre
           if (Math.abs(offset) <= trunkWidth / 2) {
-            if (Math.abs(offset) > trunkWidth / 2 - 1) return PALETTE.trunkDark
-            return PALETTE.trunk
+            return Math.abs(offset) > trunkWidth / 2 - 1 ? PALETTE.trunkDark : PALETTE.trunk
           }
         }
         return 0
@@ -502,12 +577,124 @@
     }
 
     /**
-     * A shrub: the tree canopy without a trunk, so the meadow reads as layers.
-     * @param {object} [leaf] - foliage palette (seasonal).
-     * @param {number} [bare] - 0..1 share of interior canopy lost.
+     * A leafless deciduous tree: trunk and branches only.
+     *
+     * The winter answer used to be "thin the same green crown by a hash", which
+     * printed a grey ring. A real bare tree is a skeleton, so it is drawn as one.
+     * @param {number} size - 1, 2 or 3.
+     * @param {object} [leaf] - foliage palette, for the branch outline.
+     * @param {number} [shapeIndex] - silhouette index, so the skeleton matches.
      * @returns {{width: number, height: number, pixels: Uint32Array}} sprite.
      */
-    function buildBushSprite(leaf = PALETTE.leaf, bare = 0) {
+    function buildBareTreeSprite(size, leaf = PALETTE.leaf, shapeIndex = 0) {
+      const shape = TREE_SHAPES[shapeIndex % TREE_SHAPES.length]
+      const radius = [4.3, 6.0, 7.6][size - 1]
+      const width = Math.ceil(radius * 2 * Math.max(1, shape.spread)) + 3
+      const height = Math.ceil(radius * 1.95 * shape.flatten) + 2
+      const cx = width / 2 + shape.trunk.lean * 0.4
+      const baseY = height - 1
+      const crownY = Math.max(1, height * 0.16)
+      const trunkX = cx - shape.trunk.lean * 0.35
+      // Trunk, then four branches per level as two-segment polylines that bend
+      // upward: straight spokes read as a spider, a bend reads as a tree.
+      const segments = [[cx, baseY, trunkX, crownY]]
+      // Four long branches at a steep angle plus a fork at the top. Short flat
+      // spokes read as a brown cross; the reach has to be close to the crown
+      // radius or the skeleton stops looking like a tree at all.
+      const levels = [[0.95, 0.95], [0.8, 1.0], [0.6, 1.0]]
+      for (let step = 0; step < levels.length; step += 1) {
+        const [spreadAt, rise] = levels[step]
+        const t = 0.22 + step * 0.2
+        const fromX = cx - (cx - trunkX) * t
+        const fromY = baseY - (baseY - crownY) * t
+        const reach = radius * spreadAt * Math.max(0.85, shape.spread)
+        const side = step % 2 === 0 ? 1 : -1
+        const tipX = fromX + side * reach
+        const tipY = fromY - radius * rise * 0.8
+        segments.push([fromX, fromY, fromX + side * reach * 0.55, fromY - radius * rise * 0.35])
+        segments.push([fromX + side * reach * 0.55, fromY - radius * rise * 0.35, tipX, tipY])
+        // A short twig on the other side keeps the skeleton from looking combed.
+        if (step > 0) segments.push([fromX, fromY, fromX - side * reach * 0.45, fromY - radius * rise * 0.6])
+      }
+      segments.push([trunkX, crownY, trunkX - radius * 0.42, crownY - radius * 0.5])
+      segments.push([trunkX, crownY + 1, trunkX + radius * 0.38, crownY - radius * 0.34])
+      return buildSprite(width, height, (x, y) => {
+        const px = x + 0.5
+        const py = y + 0.5
+        let best = Infinity
+        for (const [ax, ay, bx, by] of segments) {
+          const distance = distanceToSegment(px, py, ax, ay, bx, by)
+          if (distance < best) best = distance
+        }
+        if (best > 0.62) return 0
+        return best < 0.34 ? PALETTE.trunk : leaf.outline
+      })
+    }
+
+    /**
+     * An evergreen: stacked tiers of needles, snow-cap on every tier's top.
+     *
+     * Without evergreens a winter forest is nothing but grey sticks; with them the
+     * map keeps a spine of dark green under the snow.
+     * @param {number} size - 1, 2 or 3.
+     * @param {object} needle - needle palette (seasonal).
+     * @param {number} [shapeIndex] - silhouette index into CONIFER_SHAPES.
+     * @param {number} [snowCap] - 0..1 snow on the tier tops.
+     * @returns {{width: number, height: number, pixels: Uint32Array}} sprite.
+     */
+    function buildConiferSprite(size, needle, shapeIndex = 0, snowCap = 0) {
+      const shape = CONIFER_SHAPES[shapeIndex % CONIFER_SHAPES.length]
+      const radius = [3.4, 4.6, 5.8][size - 1]
+      const height = Math.ceil(radius * 2.4 * shape.tallness) + 2
+      const width = Math.ceil(radius * 2 * shape.spread) + 3
+      const cx = width / 2
+      const mask = new Uint8Array(width * height)
+      const tierHeight = (height - 1) / shape.tiers
+      for (let tier = 0; tier < shape.tiers; tier += 1) {
+        const top = tier * tierHeight
+        const bottom = top + tierHeight + 0.7
+        const halfAtBottom = radius * shape.spread * shape.taper * (0.55 + 0.75 * ((tier + 1) / shape.tiers))
+        for (let y = Math.round(top); y <= Math.round(bottom) && y < height; y += 1) {
+          const t = (y - top) / Math.max(1, bottom - top)
+          const half = halfAtBottom * t
+          const from = Math.round(cx - half)
+          const to = Math.round(cx + half)
+          for (let x = from; x <= to; x += 1) {
+            if (x >= 0 && x < width) mask[y * width + x] = 1
+          }
+        }
+      }
+      return buildSprite(width, height, (x, y) => {
+        if (mask[y * width + x] !== 1) return 0
+        const above = y === 0 ? 0 : mask[(y - 1) * width + x]
+        const edge = above === 0 || x === 0 || x === width - 1
+          || mask[y * width + x - 1] === 0 || mask[y * width + x + 1] === 0
+        if (snowCap > 0.3 && above === 0) return snowCap > 0.6 ? SNOW_COLORS.light : SNOW_COLORS.mid
+        if (edge) return needle.outline
+        const lit = -(x + 0.5 - cx) / radius * 0.5
+        if (lit > 0.18) return needle.light
+        if (lit < -0.2) return needle.dark
+        return ((x * 3 + y * 5) & 7) < 3 ? needle.mid : needle.dark
+      })
+    }
+
+    /** Shrub silhouettes: low and flat, tall and lanky, wide and spreading. */
+    const BUSH_SHAPES = [
+      [[0, 0, 0.78], [-0.55, 0.2, 0.55], [0.55, 0.16, 0.55]],
+      [[0, -0.32, 0.6], [-0.2, 0.28, 0.5], [0.3, 0.24, 0.46], [0, 0.62, 0.36]],
+      [[-0.62, 0.1, 0.46], [0.62, 0.14, 0.44], [0, 0, 0.72], [0, 0.4, 0.5]],
+    ]
+
+    /**
+     * A shrub: the tree canopy without a trunk, so the meadow reads as layers.
+     * @param {object} [leaf] - foliage palette (seasonal).
+     * @param {number} [thin] - 0..1 share of interior canopy lost.
+     * @param {number} [shapeIndex] - silhouette index into BUSH_SHAPES.
+     * @param {number} [snowCap] - 0..1 snow on the top of the shrub.
+     * @returns {{width: number, height: number, pixels: Uint32Array}} sprite.
+     */
+    function buildBushSprite(leaf = PALETTE.leaf, thin = 0, shapeIndex = 0, snowCap = 0) {
+      const lobes = BUSH_SHAPES[shapeIndex % BUSH_SHAPES.length]
       const radius = 3.1
       const width = Math.ceil(radius * 2) + 2
       const height = Math.ceil(radius * 1.9) + 1
@@ -517,11 +704,13 @@
         const px = x + 0.5
         const py = y + 0.5
         let margin = -Infinity
-        for (const [offsetX, offsetY, lobeRadius] of [[0, 0, radius * 0.78], [-radius * 0.55, radius * 0.2, radius * 0.55], [radius * 0.55, radius * 0.16, radius * 0.55]]) {
-          margin = Math.max(margin, lobeRadius - Math.hypot(px - (cx + offsetX), (py - (cy + offsetY)) / 0.9))
+        for (const [offsetX, offsetY, lobeRadius] of lobes) {
+          margin = Math.max(margin, lobeRadius * radius - Math.hypot(px - (cx + offsetX * radius), (py - (cy + offsetY * radius)) / 0.9))
         }
         if (margin <= 0) return y === height - 1 && Math.abs(px - cx) < 1.2 ? PALETTE.trunkDark : 0
-        if (bare > 0 && margin > 1.05 && (((x * 41 + y * 29 + 7) & 31) / 31) < bare * 0.55) return 0
+        // Snow caps the top row of the shrub, same rule as the tree crown.
+        if (snowCap > 0.3 && y === 0) return snowCap > 0.6 ? SNOW_COLORS.light : SNOW_COLORS.mid
+        if (thin > 0 && margin > 1.05 && (((x * 41 + y * 29 + 7) & 31) / 31) < thin * 0.55) return 0
         const lit = -(px - cx) / radius * 0.5 - (py - cy) / radius * 0.9
         if (margin < 1.05) return leaf.outline
         if (lit > 0.3) return leaf.light
@@ -538,7 +727,7 @@
      * @param {object} [leaf] - foliage palette, for the shaded underside.
      * @returns {{width: number, height: number, pixels: Uint32Array}} sprite.
      */
-    function buildLilySprite(variant, weed = PALETTE.weed, leaf = PALETTE.leaf) {
+    function buildLilySprite(variant, weed = PALETTE.weed, leaf = PALETTE.leaf, snowCap = 0) {
       const width = 10
       const height = variant === 1 ? 7 : 5
       const cy = height - 2
@@ -549,11 +738,12 @@
         const dy = (py - cy) / 2.1
         if (dx * dx + dy * dy <= 1) {
           if (x >= 5 && y <= cy - 1) return 0
+          if (snowCap > 0.4 && py < cy - 0.4) return SNOW_COLORS.mid
           if (py < cy - 0.6) return PALETTE.weedStalk
           if (py > cy + 0.8) return leaf.dark
           return weed[1]
         }
-        if (variant === 1 && y <= 2 && Math.abs(px - width / 2) < 1.6) {
+        if (variant === 1 && snowCap < 0.2 && y <= 2 && Math.abs(px - width / 2) < 1.6) {
           return y === 0 ? PALETTE.flowers[1] : PALETTE.flowers[3]
         }
         return 0
@@ -565,7 +755,7 @@
      * @param {object} [leaf] - foliage palette (seasonal).
      * @returns {{width: number, height: number, pixels: Uint32Array}} sprite.
      */
-    function buildReedSprite(leaf = PALETTE.leaf) {
+    function buildReedSprite(leaf = PALETTE.leaf, snowCap = 0) {
       const width = 9
       const height = 11
       return buildSprite(width, height, (x, y) => {
@@ -576,6 +766,8 @@
         }
         if (stalk(3, -1.6, 10) || stalk(5.5, 0.4, 9) || stalk(7.2, 1.8, 7)) {
           // A reed is olive, not teal: the teal read as a weed stalk in the water.
+          // The tips stay clear of the snow so the clump still pokes out of it.
+          if (snowCap > 0.5 && y > 3 && y < 8) return SNOW_COLORS.mid
           return y < 2 ? PALETTE.trunkDark : (y < 5 ? leaf.light : leaf.mid)
         }
         if (y >= height - 2 && Math.abs(x + 0.5 - 5) < 2.4) return leaf.dark
@@ -584,20 +776,56 @@
     }
 
     /**
-     * Build the whole plant set for one seasonal palette.
-     * @param {object} leaf - foliage palette.
-     * @param {number[]} weed - aquatic plant palette.
-     * @param {number} bare - 0..1 canopy loss.
-     * @returns {object} `{ tree, bush, lily, reed }` sprites.
+     * Build the whole plant set for one seasonal look.
+     *
+     * The set carries every silhouette for every size, for both phenologies, so
+     * the per-plant choice (`plantSpriteFor`) is a couple of array reads instead
+     * of a sprite build in the draw loop.
+     * @param {object} look - `{ leaf, needle, weed, bare, snow }`.
+     * @returns {object} the plant sprite set.
      */
-    function buildPlantSet(leaf, weed, bare) {
+    function buildPlantSet(look) {
+      const snowCap = look.snow ?? 0
+      const thin = look.bare ?? 0
       return {
-        tree: [1, 2, 3].map(size => buildTreeSprite(size, leaf, bare)),
-        bush: buildBushSprite(leaf, bare),
-        lily: [0, 1].map(variant => buildLilySprite(variant, weed, leaf)),
-        reed: buildReedSprite(leaf),
+        // Kept for the engine test seam and for the species sheet.
+        tree: [1, 2, 3].map(size => TREE_SHAPES.map((unused, shape) => buildTreeSprite(size, look.leaf, thin, shape, snowCap))),
+        conifer: [1, 2, 3].map(size => CONIFER_SHAPES.map((unused, shape) => buildConiferSprite(size, look.needle, shape, snowCap))),
+        leafless: [1, 2, 3].map(size => TREE_SHAPES.map((unused, shape) => buildBareTreeSprite(size, look.leaf, shape))),
+        bush: BUSH_SHAPES.map((unused, shape) => buildBushSprite(look.leaf, thin, shape, snowCap)),
+        lily: [0, 1].map(variant => buildLilySprite(variant, look.weed, look.leaf, snowCap)),
+        reed: [buildReedSprite(look.leaf, snowCap)],
+        bare: thin,
+        snow: snowCap,
       }
     }
+
+    /**
+     * Which kind of plant this is, from its own id.
+     *
+     * Phenology has to be per plant, not per world: a forest where every tree
+     * loses its leaves on the same frame pops, while a staggered one turns over
+     * like a real autumn.
+     * @param {object} plant - the plant record.
+     * @returns {boolean} true for an evergreen.
+     */
+    function isConifer(plant) {
+      // A modulus that shares no factor with the silhouette count, otherwise the
+      // cone flags and the crown shapes line up and every conifer looks alike.
+      return plant.variant === 'tree' && (plant.id % 7) < 2
+    }
+
+    /** Shared default look, so the exported sprite set works without a world. */
+    const DEFAULT_PLANT_LOOK = {
+      leaf: PALETTE.leaf,
+      needle: SEASON_LOOK.summer.needle,
+      weed: PALETTE.weed,
+      bare: 0,
+      snow: 0,
+    }
+
+    /** Every plant sprite at the default (high summer) palette. */
+    const PLANT_SPRITES = buildPlantSet(DEFAULT_PLANT_LOOK)
 
     /** Seasonal plant sets, keyed by the look's coarse plant key. */
     const plantSetCache = new Map()
@@ -606,8 +834,8 @@
      * Plant sprites for the current seasonal look.
      *
      * Foliage is rebuilt, not tinted: at 6x a tinted canopy reads as a colour
-     * filter over the meadow, while an ochre or a bare one reads as autumn and
-     * winter.
+     * filter over the meadow, while an ochre, a bare or a snow-capped one reads
+     * as the season.
      * @param {object|null} look - seasonal look (`null` for the default palette).
      * @returns {object} plant sprite set.
      */
@@ -616,9 +844,35 @@
       const key = look.plantKey ?? 0
       const cached = plantSetCache.get(key)
       if (cached !== undefined) return cached
-      const set = buildPlantSet(look.leaf, look.weed, look.bare)
+      const set = buildPlantSet(look)
+      // Fifty-odd sprites per look and only a few looks are ever alive at once.
+      if (plantSetCache.size > 12) plantSetCache.clear()
       plantSetCache.set(key, set)
       return set
+    }
+
+    /**
+     * The sprite for one plant: size, silhouette and phenology from its id.
+     * @param {object} set - plant sprite set for the current look.
+     * @param {object} plant - the plant record.
+     * @returns {{width: number, height: number, pixels: Uint32Array}|undefined} sprite.
+     */
+    function plantSpriteFor(set, plant) {
+      if (set === null || set === undefined) return undefined
+      const id = plant.id | 0
+      if (plant.variant === 'lily') return set.lily[id % set.lily.length]
+      if (plant.variant === 'reed') return set.reed[0]
+      if (plant.variant === 'bush') return set.bush[id % set.bush.length]
+      const size = clamp(plant.size ?? 1, 1, 3) - 1
+      if (isConifer(plant)) {
+        const cones = set.conifer[size]
+        return cones[((id >> 1) % cones.length + cones.length) % cones.length]
+      }
+      // Deciduous trees drop their leaves one by one as the season turns: the
+      // threshold is staggered by id so the forest does not pop.
+      const leafless = (set.bare ?? 0) > ((id % 7) / 7)
+      const group = leafless ? set.leafless[size] : set.tree[size]
+      return group[id % group.length]
     }
 
     /** Carcass: two frames, meat then bones. */

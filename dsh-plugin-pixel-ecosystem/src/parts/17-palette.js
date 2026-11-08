@@ -95,49 +95,110 @@
         grassLush: [50, 118, 54],
         leaf: { dark: rgb(30, 76, 44), mid: rgb(54, 118, 58), light: rgb(98, 160, 76), outline: rgb(16, 40, 26) },
         weed: [rgb(70, 146, 110), rgb(104, 186, 130)],
+        needle: { dark: rgb(26, 70, 50), mid: rgb(42, 98, 64), light: rgb(66, 128, 78), outline: rgb(12, 34, 26) },
         water: {
           surface: rgb(120, 200, 214), shallow: rgb(76, 158, 186), mid: rgb(34, 102, 148),
           deep: rgb(30, 80, 122), caustic: rgb(156, 226, 236), foam: rgb(214, 244, 250),
         },
-        snow: 0.04,
-        bare: 0,
       },
       summer: {
         grassDry: [136, 128, 66],
         grassLush: [36, 94, 46],
         leaf: { dark: rgb(22, 58, 32), mid: rgb(40, 94, 44), light: rgb(74, 132, 60), outline: rgb(12, 32, 20) },
         weed: [rgb(58, 132, 96), rgb(92, 174, 118)],
+        needle: { dark: rgb(20, 60, 44), mid: rgb(34, 86, 56), light: rgb(56, 114, 68), outline: rgb(10, 28, 22) },
         water: {
           surface: rgb(104, 188, 204), shallow: rgb(66, 146, 178), mid: rgb(28, 94, 142),
           deep: rgb(24, 72, 112), caustic: rgb(146, 220, 232), foam: rgb(208, 240, 248),
         },
-        snow: 0,
-        bare: 0,
       },
       autumn: {
         grassDry: [166, 140, 62],
         grassLush: [126, 116, 50],
         leaf: { dark: rgb(92, 50, 24), mid: rgb(164, 98, 38), light: rgb(206, 148, 58), outline: rgb(56, 30, 16) },
         weed: [rgb(104, 118, 66), rgb(140, 148, 84)],
+        needle: { dark: rgb(28, 62, 46), mid: rgb(46, 88, 58), light: rgb(70, 112, 66), outline: rgb(14, 32, 24) },
         water: {
           surface: rgb(128, 186, 190), shallow: rgb(84, 138, 148), mid: rgb(44, 96, 120),
           deep: rgb(34, 76, 100), caustic: rgb(170, 210, 210), foam: rgb(216, 236, 238),
         },
-        snow: 0.12,
-        bare: 0.35,
       },
       winter: {
         grassDry: [182, 176, 150],
         grassLush: [136, 140, 108],
         leaf: { dark: rgb(80, 72, 64), mid: rgb(108, 100, 86), light: rgb(146, 138, 122), outline: rgb(48, 42, 38) },
         weed: [rgb(120, 128, 104), rgb(154, 160, 136)],
+        needle: { dark: rgb(26, 56, 44), mid: rgb(40, 76, 52), light: rgb(60, 100, 64), outline: rgb(12, 28, 22) },
         water: {
           surface: rgb(196, 228, 246), shallow: rgb(162, 204, 230), mid: rgb(116, 168, 210),
           deep: rgb(86, 134, 180), caustic: rgb(210, 238, 250), foam: rgb(244, 252, 255),
         },
-        snow: 1,
-        bare: 1,
       },
+    }
+
+    // ---------------------------------------------------------------------
+    // Phenology: how much snow lies and how bare the canopy is, over the year
+    // ---------------------------------------------------------------------
+    //
+    // These used to be one number per season, which made the whole of winter
+    // read as a single white block for an eighth of the year: at yearPhase
+    // 0.75–0.875 `seasonLook` reported snow 1 and every tree was grey. A real
+    // winter has a short deep-snow window with long shoulders, so the cover is
+    // now a profile over the year instead of a per-season constant:
+    // deep snow only across ~4% of the year, with 0.2–0.6 banks either side.
+
+    /** Snow cover over the year: `[yearPhase, cover]` control points. */
+    const SNOW_PROFILE = [
+      [0.0, 0.03],
+      [0.3, 0.0],
+      [0.58, 0.0],
+      [0.7, 0.18],
+      [0.76, 0.45],
+      [0.8, 0.74],
+      [0.82, 1.0],
+      [0.86, 1.0],
+      [0.89, 0.6],
+      [0.93, 0.3],
+      [0.97, 0.12],
+      [1.0, 0.03],
+    ]
+
+    /**
+     * How much of the canopy is gone: autumn thins, winter is bare, spring buds.
+     * Evergreens ignore this (they keep their needles), so it only affects the
+     * deciduous silhouettes.
+     */
+    const BARE_PROFILE = [
+      [0.0, 0.08],
+      [0.26, 0.0],
+      [0.55, 0.02],
+      [0.66, 0.35],
+      [0.74, 0.72],
+      [0.82, 0.96],
+      [0.9, 1.0],
+      [0.94, 0.88],
+      [0.98, 0.45],
+      [1.0, 0.08],
+    ]
+
+    /**
+     * Sample a `[phase, value]` profile with linear interpolation.
+     * @param {number[][]} profile - control points, sorted by phase, 0..1.
+     * @param {number} phase - 0..1.
+     * @returns {number} interpolated value.
+     */
+    function profileValue(profile, phase) {
+      const clamped = clamp(phase, 0, 1)
+      let previous = profile[0]
+      if (clamped <= previous[0]) return previous[1]
+      for (let index = 1; index < profile.length; index += 1) {
+        const point = profile[index]
+        if (clamped > point[0]) { previous = point; continue }
+        const span = point[0] - previous[0]
+        const t = span <= 0 ? 0 : (clamped - previous[0]) / span
+        return mix(previous[1], point[1], t)
+      }
+      return profile[profile.length - 1][1]
     }
 
     /** Snow and frost colours shared by every season (the cover ramps to them). */
@@ -278,14 +339,30 @@
       }
     }
 
-    /** Memo for the blended seasonal look: one slot is enough, one world is shown. */
-    const seasonMemo = { key: -1, look: null }
+    /**
+     * Year-phase steps per season. `SUMMER` would be index 1, step 0.
+     *
+     * Part of the look-key contract: `key = seasonIndex * 17 + step`, with
+     * `step = round(local * 16)` therefore in 0..16. Decoding is
+     * `index = floor(key / 17)`, `step = key % 17`. Two worlds at the same
+     * yearPhase always get the same key, and the key only ever moves when the
+     * quantised year phase does.
+     */
+    const SEASON_STEPS = 16
+
+    /** Bumped whenever the shape of a look record changes, for cache safety. */
+    const LOOK_MEMO_SIZE = 8
+
+    /** Memo for the blended seasonal looks, keyed by `look.key`. */
+    const seasonMemo = new Map()
 
     /**
      * The blended seasonal look for this frame.
      *
      * Rebuilt only when the quantised year phase moves, so the per-cell hot loop
-     * never does colour maths for the season.
+     * never does colour maths for the season. The memo holds a few looks because
+     * a probe (or a test) painting two worlds in the same frame must not thrash
+     * the cache and rebuild 170 sprites per frame.
      * @param {object} world - the world.
      * @returns {object} look record.
      */
@@ -295,26 +372,36 @@
       const scaled = phase * seasons
       const index = Math.min(seasons - 1, Math.floor(scaled))
       const local = scaled - index
-      const step = Math.round(local * 16)
-      const key = index * 17 + step
-      if (seasonMemo.key === key) return seasonMemo.look
+      const step = Math.round(local * SEASON_STEPS)
+      const key = index * (SEASON_STEPS + 1) + step
+      const cached = seasonMemo.get(key)
+      if (cached !== undefined) return cached
       const from = SEASON_LOOK[SEASON_IDS[index]]
       const to = SEASON_LOOK[SEASON_IDS[(index + 1) % seasons]]
-      const t = step / 16
+      const t = step / SEASON_STEPS
       // Each season holds its own palette for the first three quarters and only
       // bleeds into the next one at the end. Blending across the whole quarter
-      // made mid-winter already half spring: the snow cover was gone by the
-      // middle of the season and the ground never actually turned white.
+      // made mid-winter already half spring while the ground was still white.
       const eased = smooth(clamp((t - 0.75) / 0.25, 0, 1))
+      // Snow and bareness are year-phase profiles, not per-season constants: the
+      // deep-snow window is ~4% of the year with long 0.2–0.6 shoulders.
+      const quantisedPhase = (index + t) / seasons
+      const snow = profileValue(SNOW_PROFILE, quantisedPhase)
+      const bare = profileValue(BARE_PROFILE, quantisedPhase)
       const look = {
         key,
         // Foliage sprites are rebuilt from scratch, so they use a coarser key.
         plantKey: index * 9 + Math.round(local * 8),
         index,
+        step,
         t,
-        snow: mix(from.snow, to.snow, eased),
-        bare: mix(from.bare, to.bare, eased),
+        phase: quantisedPhase,
+        snow,
+        bare,
+        // Ice on the shallows appears a little before the ground is fully white.
+        ice: clamp((snow - 0.42) / 0.5, 0, 1),
         leaf: blendPaletteRecord(from.leaf, to.leaf, eased),
+        needle: blendPaletteRecord(from.needle, to.needle, eased),
         water: blendPaletteRecord(from.water, to.water, eased),
         weed: [
           blendColor(from.weed[0], to.weed[0], eased),
@@ -325,8 +412,8 @@
           blendTriple(from.grassLush, to.grassLush, eased),
         ),
       }
-      seasonMemo.key = key
-      seasonMemo.look = look
+      if (seasonMemo.size >= LOOK_MEMO_SIZE) seasonMemo.clear()
+      seasonMemo.set(key, look)
       return look
     }
 

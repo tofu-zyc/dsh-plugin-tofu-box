@@ -3,37 +3,6 @@
     // ---------------------------------------------------------------------
 
     /**
-     * Kill an animal and leave a carcass behind.
-     * Single death path: starvation, old age and predation all end here, and the
-     * cause is written down — a world where animals vanish without a reason is
-     * unreadable (docs/20-CORE-LOOP.md invariant 3).
-     * @param {object} world - the world.
-     * @param {object} entity - the dying animal.
-     * @param {string} [cause] - 'starved' | 'frozen' | 'predation' | 'old' | 'disease'.
-     */
-    function killEntity(world, entity, cause) {
-      if (entity.fate === 'dead') return
-      entity.fate = 'dead'
-      if (cause !== undefined && entity.cause === undefined) entity.cause = cause
-      if (entity.body !== undefined && entity.body.cause === undefined && cause !== undefined) entity.body.cause = cause
-      for (let puff = 0; puff < 3; puff++) spawnEffect(world, entity.x, entity.y, PALETTE.effect.death, 0.5, 0.5)
-      if (world.population !== undefined && world.population[entity.species] !== undefined) {
-        world.population[entity.species] = Math.max(0, world.population[entity.species] - 1)
-      }
-      const species = SPECIES[entity.species]
-      const meat = species === undefined ? 24 : species.meat
-      world.corpses.push({
-        id: world.nextId++,
-        x: entity.x,
-        y: entity.y,
-        species: entity.species,
-        decay: 0,
-        energy: Math.round(meat * 0.8),
-      })
-      if (world.corpses.length > MAX_CORPSES) world.corpses.shift()
-    }
-
-    /**
      * Move an animal toward a target, sliding along terrain edges.
      * @param {object} world - the world.
      * @param {object} entity - the animal.

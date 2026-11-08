@@ -102,28 +102,45 @@
       return GRASS_LUT
     }
 
-    /** Two slow sine fields, cached per world size: the meadow's large-scale patches. */
-    const patchState = { width: 0, height: 0, xs: null, ys: null }
+    /** Slow sine fields, cached per world size: the meadow's patches and snow drifts. */
+    const patchState = { width: 0, height: 0, xs: null, ys: null, driftX: null, driftY: null, driftU: null, driftV: null }
 
     /**
-     * Sine tables for the patch field.
+     * Build one separable sine table pair.
+     * @param {number} length - table length in cells.
+     * @param {number} frequency - radians per cell.
+     * @param {number} offset - phase offset in radians.
+     * @returns {Float64Array} table.
+     */
+    function sineTable(length, frequency, offset) {
+      const table = new Float64Array(length)
+      for (let index = 0; index < length; index += 1) table[index] = Math.sin(index * frequency + offset)
+      return table
+    }
+
+    /**
+     * Sine tables for the patch field and the snow drifts.
      *
-     * The field is separable (`sin(x*a) * sin(y*b)`), so two 1-D tables replace
-     * two `Math.sin` calls per grass cell.
+     * Both fields are separable (`sin(x*a) * sin(y*b)`), so 1-D tables replace
+     * `Math.sin` in the per-cell loop. The snow field is deliberately made of two
+     * frequencies: a single hash-based dither printed a 2-cell checkerboard over
+     * the whole winter map, which reads as static rather than as snow.
      * @param {number} width - world width in cells.
      * @param {number} height - world height in cells.
-     * @returns {object} `{ xs, ys }` tables.
+     * @returns {object} the table record.
      */
     function patchTablesFor(width, height) {
       if (patchState.width === width && patchState.height === height) return patchState
-      const xs = new Float64Array(width)
-      for (let x = 0; x < width; x++) xs[x] = Math.sin(x * 0.055 + 0.7)
-      const ys = new Float64Array(height)
-      for (let y = 0; y < height; y++) ys[y] = Math.sin(y * 0.043 - 1.1)
+      patchState.xs = sineTable(width, 0.055, 0.7)
+      patchState.ys = sineTable(height, 0.043, -1.1)
+      // Drift field: a 33-cell undulation crossed with a 55-cell one, which has no
+      // visible tiling at 6x and still varies cell to cell across a hillside.
+      patchState.driftX = sineTable(width, 0.19, 0.3)
+      patchState.driftY = sineTable(height, 0.23, -0.7)
+      patchState.driftU = sineTable(width, 0.07, 1.7)
+      patchState.driftV = sineTable(height, 0.09, 0.2)
       patchState.width = width
       patchState.height = height
-      patchState.xs = xs
-      patchState.ys = ys
       return patchState
     }
 
@@ -320,10 +337,10 @@
             if (damp > 0.3) color = blendColor(color, weedColors[1], Math.min(0.5, damp * 0.55))
             // Snow settles in patches, not per-pixel: the dither is sampled in
             // 2x2 blocks, which at 6x reads as banks of snow instead of static.
-            if (snow > 0.15) color = snowCovered(color, snow, 1, ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3))
+            if (snow > 0.15) color = snowCovered(color, snow, 1, snowDriftAt(patch, worldX, worldY))
           } else if (surface === TERRAIN.STONE) {
             color = nudgeColor(PALETTE.stone[noise > 198 ? 2 : 1], noiseAt(noise))
-            if (snow > 0.15) color = snowCovered(color, snow, 0.8, ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3))
+            if (snow > 0.15) color = snowCovered(color, snow, 0.8, snowDriftAt(patch, worldX, worldY))
           } else {
             const cover = grass[index]
             const step = cover <= 0 ? 0 : Math.min(7, (cover * 8) | 0)
@@ -344,7 +361,7 @@
             else if (cover < 0.08 && (noise & 63) === 5) color = blendColor(color, PALETTE.dirt[0], 0.5)
             // Snow settles on open ground first: tall cover still pokes through,
             // which is the difference between "winter" and "white paint".
-            if (snow > 0.15) color = snowCovered(color, snow, 0.75 + cover * 0.2, ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3))
+            if (snow > 0.15) color = snowCovered(color, snow, 0.78 + cover * 0.18, snowDriftAt(patch, worldX, worldY))
           }
           out[outBase + col] = color
         }
@@ -381,8 +398,7 @@
       const strength = shadow.strength
       for (let index = 0; index < count; index++) {
         const plant = visible.order[order[index]]
-        const group = set[plant.variant] ?? set.tree
-        const sprite = Array.isArray(group) ? group[clamp(plant.size, 1, group.length) - 1] : group
+        const sprite = plantSpriteFor(set, plant)
         if (sprite === undefined) continue
         const baseX = Math.round(plant.x - view.x)
         const baseY = Math.round(plant.y - view.y)
@@ -396,7 +412,7 @@
         // the same forest look different at dawn and at noon.
         if (plant.variant !== 'lily' && strength > 0.08) {
           shadeEllipse(out, view, baseX + shadow.x * sprite.width, baseY + 1 + shadow.y * sprite.width,
-            Math.max(2, sprite.width * 0.44), Math.max(1.3, sprite.width * 0.19), strength)
+            Math.max(2, sprite.width * 0.36), Math.max(1.2, sprite.width * 0.16), strength, (look.snow ?? 0) * 0.6)
         }
         drawSprite(out, view.width, view.height, sprite,
           baseX - (sprite.width >> 1) + swayX, baseY - sprite.height + 1, false, factor)
@@ -413,11 +429,13 @@
      * @param {number} color - the ground colour.
      * @param {number} snow - seasonal snow cover 0..1.
      * @param {number} exposure - how much the surface pokes through (1 = open).
-     * @param {number} flake - 0..255 blocky noise sample.
+     * @param {number} flake - 0..1 drift field sample.
      * @returns {number} packed colour.
      */
     function snowCovered(color, snow, exposure, flake) {
-      const amount = snow * (0.35 + 0.8 * (flake / 255)) - (exposure - 1) * 0.35
+      // `flake` is the smooth drift field (0..1), with a little per-cell texture on
+      // top: the drifts give the banks, the texture keeps them from looking flat.
+      const amount = snow * (0.5 + 0.62 * flake) - (exposure - 1) * 0.35
       if (amount < 0.06) return color
       // Fixed-point blend instead of blendColor: this runs on every land pixel
       // of a winter frame, and the float version measured 13 ms of the 32 ms
@@ -429,6 +447,23 @@
         | (((((color >>> 16) & 0xFF) * inv + tint[2] * q) >> 8) << 16)
         | (((((color >>> 8) & 0xFF) * inv + tint[1] * q) >> 8) << 8)
         | ((((color & 0xFF) * inv + tint[0] * q) >> 8))) >>> 0
+    }
+
+    /**
+     * Snow drift field at one cell, 0..1.
+     *
+     * Two crossed sine undulations plus a very small per-cell jitter. It is
+     * smooth on purpose: the buffer is upscaled 6x, so any per-cell binary choice
+     * prints as a checkerboard of 6-pixel squares.
+     * @param {object} tables - patch tables.
+     * @param {number} x - world column.
+     * @param {number} y - world row.
+     * @returns {number} 0..1 drift value.
+     */
+    function snowDriftAt(tables, x, y) {
+      const broad = tables.driftX[x] * tables.driftY[y]
+      const narrow = tables.driftU[x] * tables.driftV[y]
+      return clamp(0.5 + 0.32 * broad + 0.22 * narrow, 0, 1)
     }
 
     /**
@@ -450,8 +485,9 @@
      * @param {number} rx - radius x.
      * @param {number} ry - radius y.
      * @param {number} [strength] - 0..1 shadow opacity (sun elevation).
+     * @param {number} [cool] - 0..1 how much the shadow keeps a blue cast (snow).
      */
-    function shadeEllipse(out, view, cx, cy, rx, ry, strength = 1) {
+    function shadeEllipse(out, view, cx, cy, rx, ry, strength = 1, cool = 0) {
       if (strength <= 0.02 || rx <= 0 || ry <= 0) return
       const viewWidth = view.width
       const viewHeight = view.height
@@ -470,10 +506,13 @@
         if (fromX > toX) continue
         const q = Math.abs(ny) > 0.72 ? outerQ : innerQ
         const rowBase = y * viewWidth
+        // On snow a neutral multiply reads as grey paint; keeping a little more
+        // blue in the shadow is what makes it read as snow in shade.
+        const bq = cool <= 0 ? q : q + Math.round((256 - q) * cool * 0.32)
         for (let x = fromX; x <= toX; x++) {
           const color = out[rowBase + x]
           out[rowBase + x] = (0xFF000000
-            | (((((color >>> 16) & 0xFF) * q) >> 8) << 16)
+            | (((((color >>> 16) & 0xFF) * bq) >> 8) << 16)
             | (((((color >>> 8) & 0xFF) * q) >> 8) << 8)
             | (((color & 0xFF) * q) >> 8)) >>> 0
         }
