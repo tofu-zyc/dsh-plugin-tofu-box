@@ -247,8 +247,15 @@ window.__ModuleLoader__.load({
       productivity: 1,
       /** Seconds between immigration checks (min, max). */
       immigration: [25, 45],
-      /** Seconds a carcass takes to rot away completely. */
-      corpseSeconds: 42,
+      /**
+       * Seconds a carcass takes to rot away completely.
+       *
+       * A 2 kg carcass does not vanish in 42 in-world seconds: it is a larder
+       * for every scavenger on the map (crow, fox, bear, and any hunter that
+       * cannot find live prey). 42 s kept the scavenger guild permanently just
+       * short of its breeding reserve, so carrion feeders never reproduced.
+       */
+      corpseSeconds: 90,
     }
 
     /** Terrain codes stored in `world.terrain`. */
@@ -368,7 +375,10 @@ window.__ModuleLoader__.load({
           metabolism: [0.85, 1.3], lifespan: [500, 700], fertility: [360, 600],
         },
         history: { maturityYears: 1, lifespanYears: [4, 8], littersPerYear: 1, litterMassShare: 0.12 },
-        balance: { litter: [3, 5], scavengeRadius: 1.7, corpseShare: 0.8 },
+        // A crow is a bird: it finds carrion from the air, not by brushing past it.
+      // At 1.7 cells it lost every carcass to the fox before it arrived, and the
+      // scavenger guild sat permanently below its own breeding reserve.
+      balance: { litter: [3, 5], scavengeRadius: 4.0, corpseShare: 0.8 },
       },
       fish: {
         habitat: 'water', role: 'grazer', flora: 'weed', prey: [], mass: 1.2, taxon: 'ectotherm',

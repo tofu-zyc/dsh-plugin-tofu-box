@@ -189,8 +189,15 @@
       productivity: 1,
       /** Seconds between immigration checks (min, max). */
       immigration: [25, 45],
-      /** Seconds a carcass takes to rot away completely. */
-      corpseSeconds: 42,
+      /**
+       * Seconds a carcass takes to rot away completely.
+       *
+       * A 2 kg carcass does not vanish in 42 in-world seconds: it is a larder
+       * for every scavenger on the map (crow, fox, bear, and any hunter that
+       * cannot find live prey). 42 s kept the scavenger guild permanently just
+       * short of its breeding reserve, so carrion feeders never reproduced.
+       */
+      corpseSeconds: 90,
     }
 
     /** Terrain codes stored in `world.terrain`. */

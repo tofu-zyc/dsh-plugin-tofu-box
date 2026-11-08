@@ -109,7 +109,10 @@
           metabolism: [0.85, 1.3], lifespan: [500, 700], fertility: [360, 600],
         },
         history: { maturityYears: 1, lifespanYears: [4, 8], littersPerYear: 1, litterMassShare: 0.12 },
-        balance: { litter: [3, 5], scavengeRadius: 1.7, corpseShare: 0.8 },
+        // A crow is a bird: it finds carrion from the air, not by brushing past it.
+      // At 1.7 cells it lost every carcass to the fox before it arrived, and the
+      // scavenger guild sat permanently below its own breeding reserve.
+      balance: { litter: [3, 5], scavengeRadius: 4.0, corpseShare: 0.8 },
       },
       fish: {
         habitat: 'water', role: 'grazer', flora: 'weed', prey: [], mass: 1.2, taxon: 'ectotherm',
