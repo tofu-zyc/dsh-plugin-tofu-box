@@ -94,7 +94,9 @@
         generation: generation ?? 1,
         // Adults do not all breed on the same tick: a staggered cooldown is what
         // keeps the first minute from being one population explosion.
-        cooldown: options?.cooldown ?? (generation === undefined || generation <= 1 ? randomBetween(world, 0, 20) : 0),
+        cooldown: options?.cooldown ?? (options?.juvenile === true || (generation !== undefined && generation > 1)
+          ? 0
+          : randomBetween(world, species.genes.fertility[0] * 0.3, species.genes.fertility[1])),
         thinkTimer: randomBetween(world, 0, 0.3),
         herdTimer: randomBetween(world, 0, 0.8),
         herdAnchor: null,
@@ -119,9 +121,10 @@
       // A newborn (or a released animal) is energy ENTERING the system. The book
       // records it under its own name instead of pretending gestation is free.
       if (world.budget !== undefined) {
-        // Structure AND the reserve it starts with: both are energy entering the
-        // world with a new body, and both have to be on the books by name.
-        world.budget.reproduction += body.V * BIO.MEAT_ENERGY + body.E
+        // The structure is energy entering the world with a new body. The
+        // reserve that comes with it is counted by the ledger accessor itself,
+        // so it must NOT be added here as well or it would be counted twice.
+        world.budget.reproduction += body.V * BIO.MEAT_ENERGY
       }
       world.entities.push(entity)
       world.population[speciesId] = (world.population[speciesId] ?? 0) + 1

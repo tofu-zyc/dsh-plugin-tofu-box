@@ -398,26 +398,67 @@
       const listeners = new Set()
       /** First-run flag; null means "not read from storage yet". */
       let onboardingFlag = null
+      /** One-shot message about the save file: legacy format or a failed read. */
+      let notice = null
 
       /** Load the saved world, or create a fresh one. */
       function ensureWorld() {
         if (world !== null) return world
-        world = load() ?? createWorld()
+        const stored = readStored()
+        notice = stored.notice
+        world = stored.world ?? createWorld()
         world.hydrologyDirty = false
         minimap = null
         return world
       }
 
+      /**
+       * Read the stored world and say what happened to it.
+       *
+       * 0.2.x swallowed every load failure, so a corrupted or version-mismatched
+       * save looked exactly like a first run. G5 (failure must be explainable)
+       * needs the opposite: the reason travels with the result and the panel
+       * shows it instead of quietly starting over.
+       * @returns {{world: object|null, notice: object|null}} world and notice.
+       */
+      function readStored() {
+        const result = { world: null, notice: null }
+        if (storage === null) return result
+        let raw = null
+        try {
+          raw = storage.getItem(STORAGE_KEY)
+        } catch {
+          return result
+        }
+        if (raw === null || raw === undefined || raw === '') {
+          // Nothing to resume. An old build's world may still sit in the v1 key:
+          // report it and leave it exactly where it is (this build never writes
+          // it), rather than letting the first autosave look like a clean slate.
+          let legacy = null
+          try {
+            legacy = storage.getItem(LEGACY_STORAGE_KEY)
+          } catch {
+            legacy = null
+          }
+          if (legacy !== null && legacy !== undefined && legacy !== '') {
+            result.notice = { kind: 'legacy', detail: null }
+          }
+          return result
+        }
+        try {
+          result.world = deserializeWorld(JSON.parse(raw))
+        } catch (error) {
+          const detail = error !== null && error !== undefined && error.message !== undefined
+            ? String(error.message)
+            : String(error)
+          result.notice = { kind: 'load', detail }
+        }
+        return result
+      }
+
       /** Read and parse the saved world, ignoring anything unusable. */
       function load() {
-        if (storage === null) return null
-        try {
-          const raw = storage.getItem(STORAGE_KEY)
-          if (raw === null || raw === undefined) return null
-          return deserializeWorld(JSON.parse(raw))
-        } catch {
-          return null
-        }
+        return readStored().world
       }
 
       /** Persist the world; a full or missing storage is not fatal. */
@@ -462,6 +503,12 @@
         publish()
       }
 
+      /** Dismiss the save-file notice for this session. */
+      function dismissNotice() {
+        notice = null
+        publish()
+      }
+
       /** Show the guide again ("How to play" -> start over). */
       function resetOnboarding() {
         onboardingFlag = false
@@ -501,6 +548,8 @@
       let eventSeq = 0
       const causeTally = {}
       const deathCount = {}
+      /** How many death causes came from a carcass and how many were inferred. */
+      const causeSource = { exact: 0, inferred: 0 }
       const placedIds = new Set()
       const corpseSeen = new Set()
       const rateIntake = {}
@@ -519,6 +568,8 @@
         corpseSeen.clear()
         for (const key of Object.keys(causeTally)) delete causeTally[key]
         for (const key of Object.keys(deathCount)) delete deathCount[key]
+        causeSource.exact = 0
+        causeSource.inferred = 0
         for (const key of Object.keys(rateIntake)) delete rateIntake[key]
         rates.gpp = 0
         rates.herbs = 0
@@ -707,6 +758,10 @@
             const pool = explained.get(rec.species)
             const hit = pool === undefined || pool.length === 0 ? null : pool.pop()
             const cause = hit === null ? classifyDeath(rec, previous.hunters) : hit.cause
+            // The panel marks the difference: a carcass carries the cause the
+            // engine wrote, everything else is this layer's inference.
+            if (hit === null) causeSource.inferred += 1
+            else causeSource.exact += 1
             const atX = hit === null ? rec.x : hit.x
             const atY = hit === null ? rec.y : hit.y
             const causes = causeBucket(rec.species)
@@ -1053,6 +1108,8 @@
             plants: { grass: 0, weed: 0, energy: 0 },
             climate: { temperature: null, sunlight: 1, dayPhase: 0.26, yearPhase: null, season: null },
             onboarding: onboardingSeen(),
+            notice,
+            causeSource: { exact: 0, inferred: 0 },
           }
         }
         const stats = sampleStats(world)
@@ -1081,6 +1138,8 @@
           plants: observation === null ? { grass: 0, weed: 0, energy: 0 } : observation.plants,
           climate: climateView(world),
           onboarding: onboardingSeen(),
+          notice,
+          causeSource: { exact: causeSource.exact, inferred: causeSource.inferred },
         }
       }
 
@@ -1423,9 +1482,11 @@
         restock,
         markOnboardingSeen,
         resetOnboarding,
+        dismissNotice,
         save,
         peekSave() {
-          return load()
+          // Peeking must not consume the notice that the panel has not shown yet.
+          return readStored().world
         },
         dispose() {
           detach()

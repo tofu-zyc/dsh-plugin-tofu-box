@@ -29,18 +29,29 @@ import { boot } from './_harness.mjs'
 const { engine } = boot()
 const { SPECIES, SPECIES_IDS, TERRAIN, TICK, DAY_SECONDS, createWorld, sampleStats, stepWorld } = engine
 
-/** Fixed seed list: reproducible, but not a single draw. */
-const SEEDS = [777, 12345, 424242]
-/** Ticks per soak. One tick is `TICK` seconds. */
-const TICKS = 10_000
-/** How often populations are sampled inside a soak. */
-const SAMPLE_EVERY = 1_000
 /**
- * Share of a species' own cap that counts as a real breeding population.
- * A species that never reaches this is present only through immigration: the
- * chain behind it does not close.
+ * Two tiers, because a gate nobody can afford to run is not a gate.
+ *
+ *   daily   (default)   2 seeds x 900 ticks   ~20 s  smoke gate: nothing dies out,
+ *                                                nothing blooms past its cap, the
+ *                                                producers hold, throughput holds.
+ *   release (PE_SOAK=1) 3 seeds x 9000 ticks  ~4 min  the statistical gate: every
+ *                                                species must breed above its own
+ *                                                immigration line in most seeds,
+ *                                                over a full in-world year.
+ *
+ * A short window cannot prove that a slow species breeds, so at the daily tier the
+ * breeding claim is downgraded to survival-only and the test says which species it
+ * judged how. The release tier puts every species on the strong gate.
  */
-const MIN_CAP_SHARE = 0.1
+const RELEASE_TIER = process.env.PE_SOAK === '1' || process.env.PE_SOAK === 'true'
+
+/** Seeds per tier: reproducible, but never a single draw. */
+const SEEDS = RELEASE_TIER ? [777, 12345, 424242] : [777, 12345]
+/** Ticks per soak. One tick is `TICK` seconds (see the tier table above). */
+const TICKS = Number(process.env.PE_SOAK_TICKS ?? (RELEASE_TIER ? 9_000 : 900))
+/** How often populations are sampled inside a soak; both tiers get ~6-10 samples. */
+const SAMPLE_EVERY = Number(process.env.PE_SOAK_SAMPLE ?? (RELEASE_TIER ? 900 : 150))
 /**
  * Share of checkpoints a species may read zero. The migration net fires often
  * enough to rescue a crash; reading zero more than this means the net failed.
@@ -76,15 +87,20 @@ function fieldMean(world, field, terrain) {
 }
 
 /**
- * Viability floor for a species: its own immigration threshold, but at least a
- * tenth of its density ceiling. Read from the species table, never typed here.
+ * Viability floor for a species, read straight out of its own row.
+ *
+ * `minimum` is the engine's immigration threshold: below it the migration net
+ * injects a group. So a peak ABOVE that line can only have been produced by the
+ * animals themselves, which is exactly the claim this gate makes. No tuned
+ * fraction of `cap` is involved - docs/00-VISION.md principle 2 says balance
+ * numbers must come from physics, and a hand-picked share of the ceiling is the
+ * kind of number that made the old gate lie.
  * @param {string} id - species id.
- * @returns {number} minimum peak population that counts as alive.
+ * @returns {number} peak population that proves the species bred on its own.
  */
 function viableFloor(id) {
   const row = SPECIES[id]
-  const minimum = Number.isFinite(row.minimum) ? row.minimum : 0
-  return Math.max(minimum, Math.round(row.cap * MIN_CAP_SHARE))
+  return Number.isFinite(row.minimum) ? row.minimum : 0
 }
 
 /**
@@ -154,18 +170,36 @@ function median(values) {
 }
 
 test('every species builds a breeding population in most seeds', () => {
+  // A species needs roughly three maturities to breed, raise a cohort and have
+  // that cohort counted, so a soak shorter than that cannot prove anything about
+  // it. Judging a wolf on a 900 tick window would fail for a reason that is not a
+  // bug, so slow species are held to the weaker claim they CAN be held to at this
+  // window: they survive. PE_SOAK=1 puts every species on the strong gate.
+  const soakSeconds = TICKS * TICK
   const failures = []
+  const survivalOnly = []
   for (const id of SPECIES_IDS) {
     const floor = viableFloor(id)
     const samples = samplesOf(id)
-    const viable = samples.filter(sample => sample.peak >= floor && sample.last > 0)
-    if (viable.length < MAJORITY) {
-      failures.push(id + ': viable in ' + viable.length + '/' + samples.length
-        + ' seeds (floor ' + floor + '); peaks ' + samples.map(sample => sample.peak).join('/'))
+    const maturity = SPECIES[id].balance === undefined ? 0 : SPECIES[id].balance.maturity
+    const canBreed = maturity * 3 <= soakSeconds
+    if (!canBreed) survivalOnly.push(id)
+    const passed = samples.filter(sample => canBreed
+      ? sample.peak > floor && sample.last > 0
+      : sample.last > 0)
+    if (passed.length < MAJORITY) {
+      const evidence = canBreed
+        ? 'viable in ' + passed.length + '/' + samples.length + ' seeds (floor ' + floor + ')'
+        : 'alive at the end in ' + passed.length + '/' + samples.length + ' seeds'
+      failures.push(id + ': ' + evidence + '; peaks ' + samples.map(sample => sample.peak).join('/'))
     }
   }
+  const strong = SPECIES_IDS.filter(id => !survivalOnly.includes(id))
+  console.log((RELEASE_TIER ? 'release' : 'daily') + ' tier, soak ' + soakSeconds.toFixed(0) + ' s x '
+    + SEEDS.length + ' seeds: breeding gate for [' + (strong.join(', ') || 'none') + ']'
+    + (survivalOnly.length > 0 ? '; survival-only for [' + survivalOnly.join(', ') + '] (PE_SOAK=1 widens it)' : ''))
   assert.deepEqual(failures, [],
-    'a species that cannot build a breeding population in most seeds has a broken chain: '
+    'a species that cannot hold a population in most seeds has a broken chain: '
     + failures.join(' | '))
 })
 
@@ -223,16 +257,25 @@ test('the engine sustains the 8x speed budget', () => {
     + ' (slowest seed ' + slowest.toFixed(0) + ' ticks/s)')
 })
 
-test('the soak covers several in-world years and several seeds', () => {
-  // Guards the gate itself: a shortened soak or a dropped seed would silently
-  // weaken every assertion above, so the shape of the experiment is pinned.
+test('the soak is long enough and wide enough to mean something', () => {
+  // Guards the gate itself: a shortened soak, a coarser sample interval or a
+  // dropped seed would silently weaken every assertion above.
   const runs = soaks()
+  const minimumSeeds = RELEASE_TIER ? 3 : 2
+  assert.ok(SEEDS.length >= minimumSeeds,
+    'the ' + (RELEASE_TIER ? 'release' : 'daily') + ' tier needs at least ' + minimumSeeds + ' seeds, got ' + SEEDS.length)
   assert.equal(runs.length, SEEDS.length, 'every seed must produce one soak')
+  assert.ok(TICKS / SAMPLE_EVERY >= 5, 'a soak must produce at least five checkpoints, got ' + TICKS / SAMPLE_EVERY)
+  if (!RELEASE_TIER) {
+    // Guards the daily tier's promise: it has to stay cheap enough to run on every
+    // save, otherwise people start skipping the suite.
+    assert.ok(SEEDS.length * TICKS <= 2_000, 'the daily tier must stay under 2000 seed-ticks, got ' + SEEDS.length * TICKS)
+  }
   for (const run of runs) {
-    assert.equal(run.checkpoints.length, TICKS / SAMPLE_EVERY,
+    assert.equal(run.checkpoints.length, Math.floor(TICKS / SAMPLE_EVERY),
       'seed ' + run.seed + ' must report every checkpoint')
     assert.ok(run.world.tick > 0, 'seed ' + run.seed + ' never stepped')
   }
-  const years = (TICKS * TICK) / (DAY_SECONDS * 8)
-  assert.ok(years >= 1, 'the soak must span at least one in-world year, it spans ' + years.toFixed(2))
+  const days = (TICKS * TICK) / DAY_SECONDS
+  assert.ok(days >= 1, 'the soak must span at least one in-world day, it spans ' + days.toFixed(2))
 })

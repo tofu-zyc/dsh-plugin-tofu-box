@@ -4,23 +4,26 @@ const { engine } = boot()
 const store = engine.createStore({ storage: null, requestFrame: () => 0, cancelFrame: () => {}, now: () => 0 })
 store.ensureWorld()
 const world = store.getWorld()
-let last = null
-for (let step = 0; step < 900; step++) {
+let snap = store.getSnapshot()
+for (let step = 0; step < 600; step++) {
   engine.stepWorld(world, engine.TICK)
-  if (step % 10 === 0) { store.setPaused(false); last = store.getSnapshot() }
+  if (step % 10 === 9) { store.setPaused(false); snap = store.getSnapshot() }
 }
-console.log('time', world.time.toFixed(1), 'counts', JSON.stringify(last.stats.counts))
-console.log('events', last.events.length)
-for (const e of last.events.slice(0, 8)) console.log('  ', e.kind, e.species, 'x' + e.count, '@', e.x, e.y)
-console.log('pulse', JSON.stringify(last.pulse))
-console.log('flows', JSON.stringify(last.flows))
-console.log('plants', JSON.stringify({grass: +last.plants.grass.toFixed(3), weed: +last.plants.weed.toFixed(3), energy: Math.round(last.plants.energy)}))
-console.log('climate', JSON.stringify(last.climate))
-const dead = last.species.filter(s => s.dead > 0)
+console.log('world', world.width + 'x' + world.height, 'time', world.time.toFixed(1), 'day', snap.stats.day)
+console.log('counts', JSON.stringify(snap.stats.counts))
+console.log('pulse', JSON.stringify(snap.pulse), 'events', snap.events.length)
+const byKind = {}
+for (const e of snap.events) byKind[e.kind] = (byKind[e.kind] ?? 0) + 1
+console.log('events by kind', JSON.stringify(byKind))
+console.log('causeSource', JSON.stringify(snap.causeSource))
+const dead = snap.species.filter(s => s.dead > 0)
 console.log('deaths', JSON.stringify(dead.map(s => [s.id, s.dead, s.deaths])))
-console.log('budget', JSON.stringify(last.species.map(s => [s.id, s.count, +(s.meanRatio*100).toFixed(0), Math.round(s.respire), Math.round(s.intake)])))
-const target = world.entities.find(e => e.decision && e.state)
+console.log('flows kJ/day', JSON.stringify({gpp: Math.round(snap.flows.gpp), herbs: Math.round(snap.flows.herbs), carns: Math.round(snap.flows.carns), respire: Math.round(snap.flows.respire), plantStock: Math.round(snap.flows.plantStock), animalStock: Math.round(snap.flows.animalStock)}))
+console.log('plants', JSON.stringify({grass: +snap.plants.grass.toFixed(3), weed: +snap.plants.weed.toFixed(3)}))
+console.log('budget sample', JSON.stringify(snap.species.slice(0,3).map(s => [s.id, s.count, +(s.meanRatio*100).toFixed(0), Math.round(s.intake), Math.round(s.respire)])))
+console.log('climate', JSON.stringify({t: Math.round(snap.climate.temperature), sun: +snap.climate.sunlight.toFixed(2)}))
+const target = world.entities.find(e => e.decision && e.state) ?? world.entities[0]
 store.selectAt(target.x, target.y)
 const sel = store.getSnapshot().selected
-console.log('selected', JSON.stringify({id: sel.id, why: sel.reason, state: sel.state, plan: sel.plan, cause: sel.cause, decisionAge: sel.decisionAge && Math.round(sel.decisionAge), goal: sel.goal && {x: Math.round(sel.goal.x), y: Math.round(sel.goal.y), d: +sel.goal.distance.toFixed(1)}}))
+console.log('inspector', JSON.stringify({species: sel.species, E: Math.round(sel.energy), Emax: Math.round(sel.maxEnergy), drivesDerived: sel.drivesDerived, drives: Object.fromEntries(Object.entries(sel.drives).map(([k,v]) => [k, +v.toFixed(2)])), state: sel.state, reason: {derived: sel.reason.derived, why: sel.reason.why, picked: sel.reason.picked, rivals: sel.reason.rivals.length}, cause: sel.cause, threats: sel.threats, body: {unit: sel.body.structureUnit, derived: sel.body.derived}}))
 store.dispose()

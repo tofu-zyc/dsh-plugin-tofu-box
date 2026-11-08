@@ -37,6 +37,18 @@
      * entering the system rather than pretending it was always there.
      */
     let directReserveDeposits = 0
+    /**
+     * Cumulative kJ a legacy assignment took OUT of a reserve without naming a
+     * sink (breeding spends `balance.breedCost` this way). Counted as a drain so
+     * the audit stays closed instead of reporting a phantom leak.
+     */
+    let directReserveWithdrawals = 0
+    /**
+     * Non-zero while the ledger itself is moving the reserve. Writes made at
+     * depth 0 are somebody else's, and get counted; writes made inside
+     * metabolise() are already on the books as respiration, growth or overflow.
+     */
+    let ledgerWriteDepth = 0
 
     /** Taxon → [allometric coefficient, exponent] for field metabolic rate. */
     const FMR_TABLE = {
@@ -112,8 +124,6 @@
       const phase = clamp((entity.age ?? 0) / maturity, 0, 1)
       const volume = adult * BIRTH_MASS_SHARE + (adult - adult * BIRTH_MASS_SHARE) * phase
       const body = {
-        /** Reserve, kJ. The only energy an animal can spend or starve from. */
-        E: 0,
         /** Reserve capacity, kJ: grows with the structure. */
         Emax: reserveCapacity(species, volume),
         /** Structure, kg wet. Sets metabolism, strength and what a carcass is worth. */
@@ -139,20 +149,37 @@
         /** Handling state while eating a kill: { energy, left } in kJ / seconds. */
         handling: null,
       }
-      const seed = Number.isFinite(entity.energy) ? entity.energy : body.Emax * SPAWN_RESERVE_SHARE
-      body.E = clamp(seed, 0, body.Emax)
+      // The reserve itself lives in a closure cell behind an accessor. Any code
+      // in the bundle — including a part sim-core does not own — can therefore
+      // still write `body.E`, but it cannot do so without being counted. That is
+      // what keeps "one ledger" true even while the rest of the engine migrates.
+      let reserve = 0
+      Object.defineProperty(body, 'E', {
+        configurable: true,
+        enumerable: true,
+        get() { return reserve },
+        set(value) {
+          const next = Number.isFinite(value) ? clamp(value, 0, body.Emax) : 0
+          if (ledgerWriteDepth === 0) {
+            if (next > reserve) directReserveDeposits += next - reserve
+            else if (next < reserve) directReserveWithdrawals += reserve - next
+          }
+          reserve = next
+        },
+      })
+      // Seeding goes through the accessor on purpose: the reserve a body comes
+      // into existence with is energy entering the world, and the audit has to
+      // see it (callers restoring a save mute the ledger first).
+      body.E = Number.isFinite(entity.energy) ? entity.energy : body.Emax * SPAWN_RESERVE_SHARE
       entity.body = body
       Object.defineProperty(entity, 'energy', {
         configurable: true,
         enumerable: false,
         get() { return body.E },
         set(value) {
-          // Compatibility write (renderer, inspector, breeding code). It is
-          // clamped to the reserve ceiling and whatever it INJECTS is counted,
-          // so a legacy assignment cannot quietly open a hole in the energy book.
-          const next = Number.isFinite(value) ? clamp(value, 0, body.Emax) : 0
-          if (next > body.E) directReserveDeposits += next - body.E
-          body.E = next
+          // Compatibility write (renderer, inspector, breeding code). It goes
+          // through the ledger's own accessor, so it is clamped and counted.
+          body.E = value
         },
       })
       // The need channels belong to the behaviour layer, but hunger is not a
@@ -204,6 +231,24 @@
      * @returns {boolean} false when the animal died during this step.
      */
     function metabolise(world, entity, dt) {
+      ledgerWriteDepth += 1
+      try {
+        return metaboliseInner(world, entity, dt)
+      } finally {
+        ledgerWriteDepth -= 1
+      }
+    }
+
+    /**
+     * The real body step. Only called from `metabolise`, which holds the
+     * ledger-write flag so the reserve moves it makes are booked as respiration,
+     * growth or overflow rather than as anonymous writes.
+     * @param {object} world - the world.
+     * @param {object} entity - the animal.
+     * @param {number} dt - step in seconds.
+     * @returns {boolean} false when the animal died during this step.
+     */
+    function metaboliseInner(world, entity, dt) {
       const species = SPECIES[entity.species]
       if (species === undefined) return false
       const body = bodyOf(entity)
@@ -375,13 +420,14 @@
       // tissue. That is exactly the animal's entry in the world energy book, so
       // the transfer is neutral and a fat animal really does feed more.
       const structure = Math.max(0, body.V) * BIO.MEAT_ENERGY
+      body.gut = 0
       const corpse = {
         id: world.nextId++,
         x: entity.x,
         y: entity.y,
         species: entity.species,
         decay: 0,
-        energy: body.E + structure,
+        energy: body.E + (body.gut ?? 0) + structure,
         mass: Math.max(0, body.V) * BIO.MEAT_FRACTION,
         cause: body.cause,
       }
@@ -432,7 +478,9 @@
       for (const entity of world.entities) {
         const body = entity.body
         if (body === undefined || body.dead === true) continue
-        animals += body.E + body.V * BIO.MEAT_ENERGY
+        // The gut counts too: a bite leaves the plant pool the instant it is
+        // taken, and the animal carries it until the next metabolise call.
+        animals += body.E + (body.gut ?? 0) + body.V * BIO.MEAT_ENERGY
       }
       return { plants, detritus, carcasses, animals, total: plants + detritus + carcasses + animals }
     }
@@ -443,7 +491,14 @@
      * @returns {object} snapshot.
      */
     function snapshotEnergy(world) {
-      return { pools: energyPools(world), budget: { ...world.budget, directDeposits: directReserveDeposits } }
+      return {
+        pools: energyPools(world),
+        budget: {
+          ...world.budget,
+          directDeposits: directReserveDeposits,
+          directWithdrawals: directReserveWithdrawals,
+        },
+      }
     }
 
     /**
@@ -467,6 +522,7 @@
         + (after.budget.animalRespired - before.budget.animalRespired)
         + (after.budget.mineralised - before.budget.mineralised)
         + (after.budget.overflow - before.budget.overflow)
+        + ((after.budget.directWithdrawals ?? 0) - (before.budget.directWithdrawals ?? 0))
       const kJ = deltaPools - injected + drained
       const scale = Math.max(1, Math.abs(before.pools.total), Math.abs(after.pools.total))
       return { kJ, relative: Math.abs(kJ) / scale, detail: { deltaPools, injected, drained } }
@@ -492,6 +548,8 @@
         reproduction: 0,
         /** Energy injected by a direct write to a reserve, kJ. */
         directDeposits: 0,
+        /** Energy removed by a direct write to a reserve, kJ. */
+        directWithdrawals: 0,
         /** Reserve clamped away because a body was over capacity, kJ. */
         overflow: 0,
         /** Gross plant matter bitten off, kJ. */

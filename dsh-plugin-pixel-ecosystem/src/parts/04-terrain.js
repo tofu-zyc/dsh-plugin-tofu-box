@@ -285,12 +285,18 @@
           const wet = 0.5 + 0.5 * world.moisture[i]
           const soil = 0.45 + 0.55 * world.fertility[i]
           world.grass[i] = clamp(PRODUCERS.grass.bmax * rank * wet * soil, 0, PRODUCERS.grass.bmax)
+          // A fresh world is not a sterile one: the detritus layer a meadow
+          // carries between seasons is what recycles its nutrients, so it starts
+          // at the steady state of its own litter fall instead of at zero (which
+          // would mine the soil for the first days of the world).
+          world.detritus[i] = world.grass[i] * 0.25
         } else if (terrain === TERRAIN.WATER) {
           const x = i % world.width
           const y = (i / world.width) | 0
           const rank = 0.3 + 0.5 * patch(x + 17, y + 29)
           const soil = 0.4 + 0.6 * world.waterFertility[i]
           world.weed[i] = clamp(PRODUCERS.weed.bmax * rank * soil, 0, PRODUCERS.weed.bmax)
+          world.detritus[i] = world.weed[i] * 0.25
         }
       }
     }

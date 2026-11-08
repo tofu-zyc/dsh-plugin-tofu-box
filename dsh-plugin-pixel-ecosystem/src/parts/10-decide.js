@@ -67,19 +67,63 @@
      * @param {number} reach - how far ahead to aim.
      * @returns {{x: number, y: number}} target.
      */
-    function wanderTarget(world, entity, reach) {
-      let best = null
-      for (let attempt = 0; attempt < 4; attempt++) {
-        const angle = entity.heading + randomBetween(world, -1.1, 1.1)
-        const x = clamp(entity.x + Math.cos(angle) * reach, 1, world.width - 2)
-        const y = clamp(entity.y + Math.sin(angle) * reach, 1, world.height - 2)
-        const index = cellIndex(world, x, y)
-        if (index >= 0 && world.terrain[index] !== TERRAIN.STONE) return { x, y }
-        if (best === null) best = { x, y }
+    function wanderTarget(world, entity, species, reach) {
+      const bearing = roamBearingOf(world, entity)
+      let fallback = null
+      for (let attempt = 0; attempt < 6; attempt++) {
+        // First tries hug the bearing, the rest fan out: a fish pointed at the
+        // bank has to be able to notice that the bank is not water, or it
+        // spends its life pushing at the shoreline.
+        const spread = attempt < 3 ? 0.35 : 1.3
+        const distance = attempt < 3 ? reach : reach * 0.5
+        const angle = bearing + randomBetween(world, -spread, spread)
+        const x = clamp(entity.x + Math.cos(angle) * distance, 1, world.width - 2)
+        const y = clamp(entity.y + Math.sin(angle) * distance, 1, world.height - 2)
+        if (canStand(world, species, x, y)) return { x, y }
+        if (fallback === null) fallback = { x, y }
       }
-      return best ?? { x: entity.x + Math.cos(entity.heading) * reach, y: entity.y + Math.sin(entity.heading) * reach }
+      // Nowhere legal in sight: stand still here rather than walk into a wall.
+      return fallback ?? { x: entity.x, y: entity.y }
     }
 
+    /**
+     * The direction an animal is roaming in, kept across bouts.
+     *
+     * A walk whose every leg is aimed with a fresh random angle is a random walk
+     * no matter how brisk it looks: the legs cancel out and the animal never
+     * gets anywhere. An animal that holds a bearing for a few bouts, and only
+     * turns a little at a time, covers ground in the direction it is facing —
+     * which is what reads as going somewhere, and what makes a home range drift
+     * with the seasons instead of wobbling around one cell.
+     * @param {object} world - the world (needed for the edge rebound).
+     * @param {object} entity - the animal.
+     * @returns {number} bearing in radians.
+     */
+    function roamBearingOf(world, entity) {
+      if (!Number.isFinite(entity.roamHeading)) entity.roamHeading = entity.heading
+      return entity.roamHeading
+    }
+
+    /**
+     * Turn the roam bearing by a small amount, and keep the animal on the map.
+     * @param {object} world - the world.
+     * @param {object} entity - the animal.
+     * @param {number} delta - radians to turn (small).
+     * @returns {void}
+     */
+    function steerRoam(world, entity, delta) {
+      const margin = Math.max(8, Math.min(world.width, world.height) * 0.12)
+      const nearEdge = entity.x < margin || entity.y < margin
+        || entity.x > world.width - margin || entity.y > world.height - margin
+      if (nearEdge) {
+        // Walking into the frame edge is not a destination: turn back toward
+        // the middle, with a little noise so a herd does not turn as one body.
+        const homeward = Math.atan2(world.height / 2 - entity.y, world.width / 2 - entity.x)
+        entity.roamHeading = homeward + randomBetween(world, -0.5, 0.5)
+        return
+      }
+      entity.roamHeading = roamBearingOf(world, entity) + delta
+    }
     /**
      * Score every action this animal could take right now.
      * @param {object} world - the world.
@@ -156,7 +200,7 @@
           offer('forage', weights.hunger * drives.hunger * quality, food.x, food.y, 'hunger')
         } else if (drives.hunger > 0.25) {
           // Nothing edible is in sight and the reserve is draining: go look.
-          const spot = wanderTarget(world, entity, genes.vision * (1.1 + drives.hunger))
+          const spot = wanderTarget(world, entity, species, genes.vision * (1.1 + drives.hunger))
           offer('explore', weights.hunger * drives.hunger * 0.6, spot.x, spot.y, 'search')
         }
       } else if (species.role === 'hunter') {
@@ -169,7 +213,7 @@
         if (carrion !== null && carrion !== undefined) {
           offer('scavenge', weights.hunger * drives.hunger * 0.85, carrion.x, carrion.y, 'hunger')
         } else if (drives.hunger > 0.45 && (prey === null || prey === undefined)) {
-          const spot = wanderTarget(world, entity, genes.vision * 1.3)
+          const spot = wanderTarget(world, entity, species, genes.vision * 1.3)
           offer('explore', weights.hunger * drives.hunger * 0.55, spot.x, spot.y, 'search')
         }
       } else {
@@ -178,7 +222,7 @@
           offer('scavenge', weights.hunger * clamp(drives.hunger + 0.1, 0, 1) * (0.6 + carrion.value * 0.5),
             carrion.x, carrion.y, 'hunger')
         } else if (drives.hunger > 0.3) {
-          const spot = wanderTarget(world, entity, genes.vision * 1.4)
+          const spot = wanderTarget(world, entity, species, genes.vision * 1.4)
           offer('explore', weights.hunger * drives.hunger * 0.5, spot.x, spot.y, 'search')
         }
       }
@@ -200,14 +244,17 @@
         const angle = (entity.id * 2.399963229728653) % (Math.PI * 2)
         const x = clamp(entity.herdAnchor.x + Math.cos(angle) * ring, 1, world.width - 2)
         const y = clamp(entity.herdAnchor.y + Math.sin(angle) * ring * 0.75, 1, world.height - 2)
-        const pull = weights.social * (drives.social * 0.9 + drives.libido * 0.7)
+        // Company is capped: a full herd satisfies the channel, and mating
+        // eagerness alone must never outbid food for a whole lifetime.
+        const pull = weights.social
+          * clamp(drives.social * 0.9 + Math.min(drives.libido, 0.6) * 0.5, 0, 0.8)
         if (pull > 0.01) offer('socialize', pull, x, y, drives.libido > drives.social ? 'libido' : 'social')
       }
 
       // --- curiosity --------------------------------------------------------
       if (drives.curiosity > 0.06) {
         const reach = genes.vision * (0.7 + drives.curiosity * 1.2)
-        const spot = wanderTarget(world, entity, reach)
+        const spot = wanderTarget(world, entity, species, reach)
         offer('explore', weights.curiosity * drives.curiosity, spot.x, spot.y, 'curiosity')
       }
 
@@ -255,6 +302,7 @@
     function startState(world, entity, species, option, rivals) {
       const plan = STATE_PLAN[option.kind] ?? STATE_PLAN.rest
       const duration = randomBetween(world, plan.duration[0], plan.duration[1])
+      if (option.kind === 'explore') steerRoam(world, entity, randomBetween(world, -0.25, 0.25))
       entity.state = {
         id: option.kind,
         since: world.time,
@@ -372,8 +420,13 @@
       // Hysteresis: a rival has to be clearly better, not merely ahead. This is
       // what makes the intent dwell worth watching instead of a twitch.
       const clearlyBetter = best.score > currentScore * STATE_HYSTERESIS + STATE_MARGIN
-      const mayCut = klassGap > 0 || expired
-      if (mayCut && (!committed || klassGap > 0) && (clearlyBetter || expired)) {
+      // Only survival may cut a bout short: being killed or dried out cannot
+      // wait out a nap. An OPPORTUNITY (food, a hunt) does not get to interrupt
+      // an intrinsic bout — food is always somewhere, so that permission would
+      // mean no bout ever runs its course.
+      const survivalCut = klassGap >= 2
+      const mayCut = expired || (klassGap > 0 && (survivalCut || !committed))
+      if (mayCut && (clearlyBetter || expired)) {
         startState(world, entity, species, best, rivals)
         return
       }

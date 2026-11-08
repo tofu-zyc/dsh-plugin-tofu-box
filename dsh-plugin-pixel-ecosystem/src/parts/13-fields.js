@@ -100,7 +100,11 @@
       if (next < 0) next = 0
       // Litter is not lost: it becomes the detritus the soil will recycle.
       if (littered > 0) {
-        const cell = world.detritus[index] + littered / CELL_AREA
+        // `littered` is already kg per square metre, the same unit the detritus
+        // field holds. Dividing by CELL_AREA here used to make three quarters of
+        // the litter vanish, which is exactly the kind of leak the audit exists
+        // to catch.
+        const cell = world.detritus[index] + littered
         if (cell > DETRITUS.bmax) {
           world.budget.overflow += (cell - DETRITUS.bmax) * CELL_AREA * BIO.GRASS_ENERGY
           world.detritus[index] = DETRITUS.bmax

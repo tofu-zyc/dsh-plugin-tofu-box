@@ -215,14 +215,14 @@
      * considers its options again.
      */
     const STATE_PLAN = {
-      flee: { min: 1.5, duration: [2.5, 5] },
-      drink: { min: 1.5, duration: [2.5, 6] },
-      forage: { min: 5, duration: [11, 22] },
-      hunt: { min: 5, duration: [12, 24] },
-      scavenge: { min: 4, duration: [10, 20] },
-      rest: { min: 8, duration: [18, 38] },
-      socialize: { min: 4, duration: [8, 16] },
-      explore: { min: 4, duration: [10, 20] },
+      flee: { min: 2.5, duration: [4, 7] },
+      drink: { min: 3, duration: [4, 8] },
+      forage: { min: 8, duration: [14, 26] },
+      hunt: { min: 8, duration: [14, 26] },
+      scavenge: { min: 6, duration: [12, 22] },
+      rest: { min: 10, duration: [20, 40] },
+      socialize: { min: 6, duration: [10, 18] },
+      explore: { min: 8, duration: [14, 26] },
     }
 
     /** How much better a rival must score before it may cut a state short. */

@@ -36,9 +36,25 @@ window.__ModuleLoader__.load({
     /** Sidebar entry id and `main` panel key. The two must be the same string. */
     const PANEL_ID = 'pixel-ecosystem'
     /** localStorage key for the autosaved world. */
-    const STORAGE_KEY = 'dsh-pixel-ecosystem:v1'
-    /** Serialized world format version; a mismatch starts a fresh world. */
-    const SAVE_VERSION = 1
+    const STORAGE_KEY = 'dsh-pixel-ecosystem:v2'
+    /**
+     * Key the 0.2.x build used. v2 never writes it, so an old world survives a
+     * version bump instead of being overwritten by the first autosave; the store
+     * reads it once to tell the player why their old world is gone.
+     */
+    const LEGACY_STORAGE_KEY = 'dsh-pixel-ecosystem:v1'
+    /**
+     * Serialized world format version.
+     *
+     * 1 = the 0.2.x format (a 0..1 biomass scalar, a single `energy` number per
+     * animal and no psychology). 2 = the energy ledger: `body` (reserve,
+     * structure, maturity), drives, the behaviour state machine, belief, the
+     * climate and the per-cell nutrient / detritus pools (docs/20-CORE-LOOP.md
+     * section 5). There is no v1 -> v2 migration: a v2 build reads a v1 save as
+     * unsupported and starts a fresh world, which the store must report to the
+     * player instead of silently discarding it.
+     */
+    const SAVE_VERSION = 2
 
     // ---------------------------------------------------------------------
     // World constants
@@ -150,7 +166,7 @@ window.__ModuleLoader__.load({
         /** Dry mass at which the cell is treated as "full", kg/m^2. */
         bmax: 1.2,
         /** Potential relative growth, per in-world day. */
-        mu: 6.0,
+        mu: 26.0,
         /** Seed bank / basal meristem floor, kg/m^2: what regrows from bare soil. */
         seed: 0.04,
         /** Respiration loss, per in-world day, fraction of standing crop. */
@@ -164,7 +180,7 @@ window.__ModuleLoader__.load({
       },
       weed: {
         bmax: 0.9,
-        mu: 5.0,
+        mu: 18.0,
         seed: 0.03,
         resp: 0.30,
         litter: 0.40,
@@ -268,7 +284,7 @@ window.__ModuleLoader__.load({
         flight: { burst: 1.85, burstSeconds: 1.4, tired: 1.12 },
         genes: {
           speed: [2.6, 4.3], vision: [5, 13], size: [0.75, 1.35],
-          metabolism: [0.75, 1.3], lifespan: [140, 240], fertility: [20, 30],
+          metabolism: [0.75, 1.3], lifespan: [140, 240], fertility: [70, 110],
         },
         balance: { maturity: 36, litter: [4, 7], fleeSpeed: 1.9 },
       },
@@ -281,7 +297,7 @@ window.__ModuleLoader__.load({
         flight: { burst: 1.5, burstSeconds: 2.2, tired: 1.15 },
         genes: {
           speed: [2.6, 3.8], vision: [8, 16], size: [1.4, 2.2],
-          metabolism: [1.05, 1.5], lifespan: [1100, 1600], fertility: [110, 130],
+          metabolism: [1.05, 1.5], lifespan: [1100, 1600], fertility: [600, 720],
         },
         balance: { maturity: 150, litter: [1, 3], fleeSpeed: 1.85 },
       },
@@ -292,7 +308,7 @@ window.__ModuleLoader__.load({
         activity: { dawn: 1, day: 0.6, dusk: 1, night: 0.9 },
         genes: {
           speed: [3.9, 5.7], vision: [9, 19], size: [0.85, 1.55],
-          metabolism: [0.85, 1.35], lifespan: [300, 420], fertility: [110, 130],
+          metabolism: [0.85, 1.35], lifespan: [300, 420], fertility: [600, 720],
         },
         balance: { maturity: 96, litter: [3, 6], catchRadius: 1.15, huntSpeed: 1.5, scavengeShare: 0.6 },
       },
@@ -304,7 +320,7 @@ window.__ModuleLoader__.load({
         activity: { dawn: 1, day: 0.75, dusk: 1, night: 0.85 },
         genes: {
           speed: [4.3, 6.0], vision: [11, 22], size: [1.3, 2.1],
-          metabolism: [1.25, 1.9], lifespan: [700, 900], fertility: [110, 130],
+          metabolism: [1.25, 1.9], lifespan: [700, 900], fertility: [600, 720],
         },
         balance: { maturity: 240, litter: [3, 5], catchRadius: 1.3, huntSpeed: 1.45, scavengeShare: 0.55 },
       },
@@ -315,7 +331,7 @@ window.__ModuleLoader__.load({
         activity: { dawn: 1, day: 1, dusk: 0.9, night: 0.15 },
         genes: {
           speed: [5.2, 7.6], vision: [14, 26], size: [0.8, 1.2],
-          metabolism: [0.85, 1.3], lifespan: [500, 700], fertility: [110, 130],
+          metabolism: [0.85, 1.3], lifespan: [500, 700], fertility: [360, 600],
         },
         balance: { maturity: 200, litter: [3, 5], scavengeRadius: 1.7, corpseShare: 0.8 },
       },
@@ -328,7 +344,7 @@ window.__ModuleLoader__.load({
         flight: { burst: 1.6, burstSeconds: 0.8, tired: 1.1 },
         genes: {
           speed: [2.2, 4.0], vision: [5, 11], size: [0.7, 1.3],
-          metabolism: [0.7, 1.2], lifespan: [420, 560], fertility: [110, 130],
+          metabolism: [0.7, 1.2], lifespan: [420, 560], fertility: [500, 700],
         },
         balance: { maturity: 90, litter: [6, 10], fleeSpeed: 1.9 },
       },
@@ -340,7 +356,7 @@ window.__ModuleLoader__.load({
         activity: { dawn: 1, day: 0.8, dusk: 1, night: 0.7 },
         genes: {
           speed: [4.4, 6.2], vision: [8, 16], size: [1.1, 1.9],
-          metabolism: [0.95, 1.4], lifespan: [1000, 1300], fertility: [110, 130],
+          metabolism: [0.95, 1.4], lifespan: [1000, 1300], fertility: [600, 720],
         },
         balance: { maturity: 260, litter: [2, 4], catchRadius: 1.8, huntSpeed: 1.5, scavengeShare: 0.4 },
       },
@@ -358,7 +374,7 @@ window.__ModuleLoader__.load({
         activity: { dawn: 1, day: 0.95, dusk: 1, night: 0.25 },
         genes: {
           speed: [3.2, 5.0], vision: [12, 22], size: [0.9, 1.3],
-          metabolism: [0.8, 1.2], lifespan: [420, 620], fertility: [110, 130],
+          metabolism: [0.8, 1.2], lifespan: [420, 620], fertility: [500, 700],
         },
         balance: { maturity: 150, litter: [2, 4], catchRadius: 2.4, huntSpeed: 1.25, scavengeShare: 0.5 },
       },
@@ -370,7 +386,7 @@ window.__ModuleLoader__.load({
         activity: { dawn: 1, day: 0.85, dusk: 1, night: 0.6 },
         genes: {
           speed: [3.6, 5.4], vision: [10, 18], size: [0.9, 1.3],
-          metabolism: [0.95, 1.35], lifespan: [380, 560], fertility: [110, 130],
+          metabolism: [0.95, 1.35], lifespan: [380, 560], fertility: [500, 700],
         },
         balance: { maturity: 130, litter: [2, 4], catchRadius: 1.7, huntSpeed: 1.55, scavengeShare: 0.5 },
       },
@@ -382,7 +398,7 @@ window.__ModuleLoader__.load({
         activity: { dawn: 0.9, day: 0.8, dusk: 1, night: 0.7 },
         genes: {
           speed: [3.0, 4.4], vision: [10, 18], size: [1.8, 2.6],
-          metabolism: [0.8, 1.15], lifespan: [900, 1300], fertility: [110, 130],
+          metabolism: [0.8, 1.15], lifespan: [900, 1300], fertility: [1200, 1440],
         },
         balance: { maturity: 300, litter: [1, 2], catchRadius: 2.1, huntSpeed: 1.3, scavengeShare: 0.7 },
       },
@@ -398,7 +414,7 @@ window.__ModuleLoader__.load({
         flight: { burst: 2.1, burstSeconds: 0.5, tired: 1.1 },
         genes: {
           speed: [1.4, 2.6], vision: [3, 7], size: [0.55, 0.9],
-          metabolism: [0.6, 1.05], lifespan: [150, 260], fertility: [70, 100],
+          metabolism: [0.6, 1.05], lifespan: [150, 260], fertility: [500, 700],
         },
         balance: { maturity: 45, litter: [8, 14], fleeSpeed: 2.15 },
       },
@@ -899,12 +915,18 @@ window.__ModuleLoader__.load({
           const wet = 0.5 + 0.5 * world.moisture[i]
           const soil = 0.45 + 0.55 * world.fertility[i]
           world.grass[i] = clamp(PRODUCERS.grass.bmax * rank * wet * soil, 0, PRODUCERS.grass.bmax)
+          // A fresh world is not a sterile one: the detritus layer a meadow
+          // carries between seasons is what recycles its nutrients, so it starts
+          // at the steady state of its own litter fall instead of at zero (which
+          // would mine the soil for the first days of the world).
+          world.detritus[i] = world.grass[i] * 0.25
         } else if (terrain === TERRAIN.WATER) {
           const x = i % world.width
           const y = (i / world.width) | 0
           const rank = 0.3 + 0.5 * patch(x + 17, y + 29)
           const soil = 0.4 + 0.6 * world.waterFertility[i]
           world.weed[i] = clamp(PRODUCERS.weed.bmax * rank * soil, 0, PRODUCERS.weed.bmax)
+          world.detritus[i] = world.weed[i] * 0.25
         }
       }
     }
@@ -1187,7 +1209,9 @@ window.__ModuleLoader__.load({
         generation: generation ?? 1,
         // Adults do not all breed on the same tick: a staggered cooldown is what
         // keeps the first minute from being one population explosion.
-        cooldown: options?.cooldown ?? (generation === undefined || generation <= 1 ? randomBetween(world, 0, 20) : 0),
+        cooldown: options?.cooldown ?? (options?.juvenile === true || (generation !== undefined && generation > 1)
+          ? 0
+          : randomBetween(world, species.genes.fertility[0] * 0.3, species.genes.fertility[1])),
         thinkTimer: randomBetween(world, 0, 0.3),
         herdTimer: randomBetween(world, 0, 0.8),
         herdAnchor: null,
@@ -1212,9 +1236,10 @@ window.__ModuleLoader__.load({
       // A newborn (or a released animal) is energy ENTERING the system. The book
       // records it under its own name instead of pretending gestation is free.
       if (world.budget !== undefined) {
-        // Structure AND the reserve it starts with: both are energy entering the
-        // world with a new body, and both have to be on the books by name.
-        world.budget.reproduction += body.V * BIO.MEAT_ENERGY + body.E
+        // The structure is energy entering the world with a new body. The
+        // reserve that comes with it is counted by the ledger accessor itself,
+        // so it must NOT be added here as well or it would be counted twice.
+        world.budget.reproduction += body.V * BIO.MEAT_ENERGY
       }
       world.entities.push(entity)
       world.population[speciesId] = (world.population[speciesId] ?? 0) + 1
@@ -1768,14 +1793,14 @@ window.__ModuleLoader__.load({
      * considers its options again.
      */
     const STATE_PLAN = {
-      flee: { min: 1.5, duration: [2.5, 5] },
-      drink: { min: 1.5, duration: [2.5, 6] },
-      forage: { min: 5, duration: [11, 22] },
-      hunt: { min: 5, duration: [12, 24] },
-      scavenge: { min: 4, duration: [10, 20] },
-      rest: { min: 8, duration: [18, 38] },
-      socialize: { min: 4, duration: [8, 16] },
-      explore: { min: 4, duration: [10, 20] },
+      flee: { min: 2.5, duration: [4, 7] },
+      drink: { min: 3, duration: [4, 8] },
+      forage: { min: 8, duration: [14, 26] },
+      hunt: { min: 8, duration: [14, 26] },
+      scavenge: { min: 6, duration: [12, 22] },
+      rest: { min: 10, duration: [20, 40] },
+      socialize: { min: 6, duration: [10, 18] },
+      explore: { min: 8, duration: [14, 26] },
     }
 
     /** How much better a rival must score before it may cut a state short. */
@@ -1997,10 +2022,20 @@ window.__ModuleLoader__.load({
       const belief = beliefOf(entity)
       let best = null
       let bestScore = 0.04
+      const headingX = Math.cos(entity.heading)
+      const headingY = Math.sin(entity.heading)
       for (const site of belief.sites) {
         const confidence = beliefConfidence(site, now, BELIEF_LIFETIME.site)
         if (confidence <= 0) continue
-        const score = site.value * confidence - threatHeat(entity, site.x, site.y, now) * 0.4
+        const dx = site.x - entity.x
+        const dy = site.y - entity.y
+        const length = Math.hypot(dx, dy) || 1
+        // A patch behind the animal is worth less than the same patch ahead:
+        // animals track food forward, and a memory that keeps pulling them
+        // back is what turns a grazing trip into a random walk.
+        const ahead = (dx * headingX + dy * headingY) / length
+        const behind = ahead < 0 ? 0.12 * (1 - ahead) : 0
+        const score = site.value * confidence - threatHeat(entity, site.x, site.y, now) * 0.4 - behind
         if (score > bestScore) { bestScore = score; best = site }
       }
       return best
@@ -2034,6 +2069,37 @@ window.__ModuleLoader__.load({
       belief.marks.length = write
     }
 
+    /**
+     * Where to stand to drink: the nearest bank cell next to the water, not the
+     * water cell itself.
+     *
+     * A land animal that aims at the middle of the lake can never arrive, because
+     * canStand refuses the cell; it would reach the shore, fail to get closer,
+     * give up and decide to drink again. That treadmill is what made drinking
+     * take a tenth of a predator's life. Aiming at the bank removes the loop:
+     * the animal stands ON the spot and the feeding code finds water adjacent.
+     * @param {object} world - the world.
+     * @param {object} species - species row.
+     * @param {{x: number, y: number}} water - a water cell (integer coordinates).
+     * @returns {{x: number, y: number}} a standable spot beside the water.
+     */
+    function drinkSpot(world, species, water) {
+      let best = null
+      let bestDistance = Infinity
+      for (let offsetY = -1; offsetY <= 1; offsetY++) {
+        for (let offsetX = -1; offsetX <= 1; offsetX++) {
+          const cellX = water.x + offsetX
+          const cellY = water.y + offsetY
+          if (!canStand(world, species, cellX + 0.5, cellY + 0.5)) continue
+          const distance = offsetX * offsetX + offsetY * offsetY
+          if (distance < bestDistance) {
+            bestDistance = distance
+            best = { x: cellX + 0.5, y: cellY + 0.5 }
+          }
+        }
+      }
+      return best ?? { x: water.x + 0.5, y: water.y + 0.5 }
+    }
     /**
      * Scan for the nearest corpse (food for a hunter, a meal for a scavenger).
      * @param {object} world - the world.
@@ -2121,7 +2187,10 @@ window.__ModuleLoader__.load({
       // --- water: only worth looking for once the animal is actually dry -----
       if (species.habitat !== 'water' && entity.drives !== undefined && entity.drives.thirst > 0.12) {
         const water = nearestWater(world, entity.x, entity.y, genes.vision)
-        if (water !== null) belief.water = { x: water.x + 0.5, y: water.y + 0.5, t: now }
+        if (water !== null) {
+          const spot = drinkSpot(world, species, water)
+          belief.water = { x: spot.x, y: spot.y, t: now }
+        }
       }
 
       // --- company: a herd is a place as much as a crowd ---------------------
@@ -2242,7 +2311,10 @@ window.__ModuleLoader__.load({
     const SATIETY_DEADBAND = 0.12
 
     /** Seconds of normal activity that fill the thirst ledger. */
-    const THIRST_SECONDS = 110
+    const THIRST_SECONDS = 150
+
+    /** Seconds a bout of company keeps the social channel satisfied. */
+    const SOCIAL_SATIATION_SECONDS = 35
 
     /** Fatigue gained per second of walking, and cleared per second of rest. */
     const FATIGUE_PER_SECOND = 0.012
@@ -2353,11 +2425,18 @@ window.__ModuleLoader__.load({
      */
     function updateFatigue(entity, dt, effort) {
       const needs = needsOf(entity)
+      const body = entity.body
       const resting = effort < 0.5
-      const rate = resting
-        ? -FATIGUE_RECOVERY * (1 - effort * 0.4)
-        : FATIGUE_PER_SECOND * Math.max(0.4, effort)
-      needs.energy = clamp(needs.energy + rate * dt, 0, 1)
+      // 09b owns body.fatigue once the ledger exists (it charges effort in
+      // metabolise()), so the behaviour-side ledger is only a fallback for a
+      // body-less animal. Writing both would make the panel and the decision
+      // disagree by one tick.
+      if (body === undefined || !Number.isFinite(body.fatigue)) {
+        const rate = resting
+          ? -FATIGUE_RECOVERY * (1 - effort * 0.4)
+          : FATIGUE_PER_SECOND * Math.max(0.4, effort)
+        needs.energy = clamp(needs.energy + rate * dt, 0, 1)
+      }
       const belief = beliefOf(entity)
       if (belief.sites !== undefined) {
         // Habituation fades on its own: a bored animal eventually wants to look
@@ -2411,10 +2490,16 @@ window.__ModuleLoader__.load({
 
       // Social: how far the animal is from a full herd. Solitary species read
       // zero here instead of carrying a channel they can never satisfy.
+      // A bout of socialising also sates the channel for a while: otherwise
+      // company stays attractive forever and standing in the herd becomes an
+      // absorbing state instead of something an animal does and then leaves.
+      entity.socialSated = Math.max(0, (entity.socialSated ?? 0) - dt / SOCIAL_SATIATION_SECONDS)
       let social = 0
       if (species.herd !== undefined) {
         const crowd = species.herd.crowd ?? 4
-        social = clamp(1 - (entity.socialCount ?? 0) / crowd, 0, 1) * clamp(traits.social, 0, 1)
+        const lonely = clamp(1 - (entity.socialCount ?? 0) / crowd, 0, 1)
+        const sated = clamp(entity.socialSated, 0, 1)
+        social = lonely * clamp(traits.social, 0, 1) * (1 - sated * 0.75)
       }
 
       // Curiosity: only when fed, calm and not just back from a look around.
@@ -2531,6 +2616,18 @@ window.__ModuleLoader__.load({
      * entering the system rather than pretending it was always there.
      */
     let directReserveDeposits = 0
+    /**
+     * Cumulative kJ a legacy assignment took OUT of a reserve without naming a
+     * sink (breeding spends `balance.breedCost` this way). Counted as a drain so
+     * the audit stays closed instead of reporting a phantom leak.
+     */
+    let directReserveWithdrawals = 0
+    /**
+     * Non-zero while the ledger itself is moving the reserve. Writes made at
+     * depth 0 are somebody else's, and get counted; writes made inside
+     * metabolise() are already on the books as respiration, growth or overflow.
+     */
+    let ledgerWriteDepth = 0
 
     /** Taxon → [allometric coefficient, exponent] for field metabolic rate. */
     const FMR_TABLE = {
@@ -2606,8 +2703,6 @@ window.__ModuleLoader__.load({
       const phase = clamp((entity.age ?? 0) / maturity, 0, 1)
       const volume = adult * BIRTH_MASS_SHARE + (adult - adult * BIRTH_MASS_SHARE) * phase
       const body = {
-        /** Reserve, kJ. The only energy an animal can spend or starve from. */
-        E: 0,
         /** Reserve capacity, kJ: grows with the structure. */
         Emax: reserveCapacity(species, volume),
         /** Structure, kg wet. Sets metabolism, strength and what a carcass is worth. */
@@ -2633,20 +2728,37 @@ window.__ModuleLoader__.load({
         /** Handling state while eating a kill: { energy, left } in kJ / seconds. */
         handling: null,
       }
-      const seed = Number.isFinite(entity.energy) ? entity.energy : body.Emax * SPAWN_RESERVE_SHARE
-      body.E = clamp(seed, 0, body.Emax)
+      // The reserve itself lives in a closure cell behind an accessor. Any code
+      // in the bundle — including a part sim-core does not own — can therefore
+      // still write `body.E`, but it cannot do so without being counted. That is
+      // what keeps "one ledger" true even while the rest of the engine migrates.
+      let reserve = 0
+      Object.defineProperty(body, 'E', {
+        configurable: true,
+        enumerable: true,
+        get() { return reserve },
+        set(value) {
+          const next = Number.isFinite(value) ? clamp(value, 0, body.Emax) : 0
+          if (ledgerWriteDepth === 0) {
+            if (next > reserve) directReserveDeposits += next - reserve
+            else if (next < reserve) directReserveWithdrawals += reserve - next
+          }
+          reserve = next
+        },
+      })
+      // Seeding goes through the accessor on purpose: the reserve a body comes
+      // into existence with is energy entering the world, and the audit has to
+      // see it (callers restoring a save mute the ledger first).
+      body.E = Number.isFinite(entity.energy) ? entity.energy : body.Emax * SPAWN_RESERVE_SHARE
       entity.body = body
       Object.defineProperty(entity, 'energy', {
         configurable: true,
         enumerable: false,
         get() { return body.E },
         set(value) {
-          // Compatibility write (renderer, inspector, breeding code). It is
-          // clamped to the reserve ceiling and whatever it INJECTS is counted,
-          // so a legacy assignment cannot quietly open a hole in the energy book.
-          const next = Number.isFinite(value) ? clamp(value, 0, body.Emax) : 0
-          if (next > body.E) directReserveDeposits += next - body.E
-          body.E = next
+          // Compatibility write (renderer, inspector, breeding code). It goes
+          // through the ledger's own accessor, so it is clamped and counted.
+          body.E = value
         },
       })
       // The need channels belong to the behaviour layer, but hunger is not a
@@ -2698,6 +2810,24 @@ window.__ModuleLoader__.load({
      * @returns {boolean} false when the animal died during this step.
      */
     function metabolise(world, entity, dt) {
+      ledgerWriteDepth += 1
+      try {
+        return metaboliseInner(world, entity, dt)
+      } finally {
+        ledgerWriteDepth -= 1
+      }
+    }
+
+    /**
+     * The real body step. Only called from `metabolise`, which holds the
+     * ledger-write flag so the reserve moves it makes are booked as respiration,
+     * growth or overflow rather than as anonymous writes.
+     * @param {object} world - the world.
+     * @param {object} entity - the animal.
+     * @param {number} dt - step in seconds.
+     * @returns {boolean} false when the animal died during this step.
+     */
+    function metaboliseInner(world, entity, dt) {
       const species = SPECIES[entity.species]
       if (species === undefined) return false
       const body = bodyOf(entity)
@@ -2869,13 +2999,14 @@ window.__ModuleLoader__.load({
       // tissue. That is exactly the animal's entry in the world energy book, so
       // the transfer is neutral and a fat animal really does feed more.
       const structure = Math.max(0, body.V) * BIO.MEAT_ENERGY
+      body.gut = 0
       const corpse = {
         id: world.nextId++,
         x: entity.x,
         y: entity.y,
         species: entity.species,
         decay: 0,
-        energy: body.E + structure,
+        energy: body.E + (body.gut ?? 0) + structure,
         mass: Math.max(0, body.V) * BIO.MEAT_FRACTION,
         cause: body.cause,
       }
@@ -2926,7 +3057,9 @@ window.__ModuleLoader__.load({
       for (const entity of world.entities) {
         const body = entity.body
         if (body === undefined || body.dead === true) continue
-        animals += body.E + body.V * BIO.MEAT_ENERGY
+        // The gut counts too: a bite leaves the plant pool the instant it is
+        // taken, and the animal carries it until the next metabolise call.
+        animals += body.E + (body.gut ?? 0) + body.V * BIO.MEAT_ENERGY
       }
       return { plants, detritus, carcasses, animals, total: plants + detritus + carcasses + animals }
     }
@@ -2937,7 +3070,14 @@ window.__ModuleLoader__.load({
      * @returns {object} snapshot.
      */
     function snapshotEnergy(world) {
-      return { pools: energyPools(world), budget: { ...world.budget, directDeposits: directReserveDeposits } }
+      return {
+        pools: energyPools(world),
+        budget: {
+          ...world.budget,
+          directDeposits: directReserveDeposits,
+          directWithdrawals: directReserveWithdrawals,
+        },
+      }
     }
 
     /**
@@ -2961,6 +3101,7 @@ window.__ModuleLoader__.load({
         + (after.budget.animalRespired - before.budget.animalRespired)
         + (after.budget.mineralised - before.budget.mineralised)
         + (after.budget.overflow - before.budget.overflow)
+        + ((after.budget.directWithdrawals ?? 0) - (before.budget.directWithdrawals ?? 0))
       const kJ = deltaPools - injected + drained
       const scale = Math.max(1, Math.abs(before.pools.total), Math.abs(after.pools.total))
       return { kJ, relative: Math.abs(kJ) / scale, detail: { deltaPools, injected, drained } }
@@ -2986,6 +3127,8 @@ window.__ModuleLoader__.load({
         reproduction: 0,
         /** Energy injected by a direct write to a reserve, kJ. */
         directDeposits: 0,
+        /** Energy removed by a direct write to a reserve, kJ. */
+        directWithdrawals: 0,
         /** Reserve clamped away because a body was over capacity, kJ. */
         overflow: 0,
         /** Gross plant matter bitten off, kJ. */
@@ -3073,19 +3216,63 @@ window.__ModuleLoader__.load({
      * @param {number} reach - how far ahead to aim.
      * @returns {{x: number, y: number}} target.
      */
-    function wanderTarget(world, entity, reach) {
-      let best = null
-      for (let attempt = 0; attempt < 4; attempt++) {
-        const angle = entity.heading + randomBetween(world, -1.1, 1.1)
-        const x = clamp(entity.x + Math.cos(angle) * reach, 1, world.width - 2)
-        const y = clamp(entity.y + Math.sin(angle) * reach, 1, world.height - 2)
-        const index = cellIndex(world, x, y)
-        if (index >= 0 && world.terrain[index] !== TERRAIN.STONE) return { x, y }
-        if (best === null) best = { x, y }
+    function wanderTarget(world, entity, species, reach) {
+      const bearing = roamBearingOf(world, entity)
+      let fallback = null
+      for (let attempt = 0; attempt < 6; attempt++) {
+        // First tries hug the bearing, the rest fan out: a fish pointed at the
+        // bank has to be able to notice that the bank is not water, or it
+        // spends its life pushing at the shoreline.
+        const spread = attempt < 3 ? 0.35 : 1.3
+        const distance = attempt < 3 ? reach : reach * 0.5
+        const angle = bearing + randomBetween(world, -spread, spread)
+        const x = clamp(entity.x + Math.cos(angle) * distance, 1, world.width - 2)
+        const y = clamp(entity.y + Math.sin(angle) * distance, 1, world.height - 2)
+        if (canStand(world, species, x, y)) return { x, y }
+        if (fallback === null) fallback = { x, y }
       }
-      return best ?? { x: entity.x + Math.cos(entity.heading) * reach, y: entity.y + Math.sin(entity.heading) * reach }
+      // Nowhere legal in sight: stand still here rather than walk into a wall.
+      return fallback ?? { x: entity.x, y: entity.y }
     }
 
+    /**
+     * The direction an animal is roaming in, kept across bouts.
+     *
+     * A walk whose every leg is aimed with a fresh random angle is a random walk
+     * no matter how brisk it looks: the legs cancel out and the animal never
+     * gets anywhere. An animal that holds a bearing for a few bouts, and only
+     * turns a little at a time, covers ground in the direction it is facing —
+     * which is what reads as going somewhere, and what makes a home range drift
+     * with the seasons instead of wobbling around one cell.
+     * @param {object} world - the world (needed for the edge rebound).
+     * @param {object} entity - the animal.
+     * @returns {number} bearing in radians.
+     */
+    function roamBearingOf(world, entity) {
+      if (!Number.isFinite(entity.roamHeading)) entity.roamHeading = entity.heading
+      return entity.roamHeading
+    }
+
+    /**
+     * Turn the roam bearing by a small amount, and keep the animal on the map.
+     * @param {object} world - the world.
+     * @param {object} entity - the animal.
+     * @param {number} delta - radians to turn (small).
+     * @returns {void}
+     */
+    function steerRoam(world, entity, delta) {
+      const margin = Math.max(8, Math.min(world.width, world.height) * 0.12)
+      const nearEdge = entity.x < margin || entity.y < margin
+        || entity.x > world.width - margin || entity.y > world.height - margin
+      if (nearEdge) {
+        // Walking into the frame edge is not a destination: turn back toward
+        // the middle, with a little noise so a herd does not turn as one body.
+        const homeward = Math.atan2(world.height / 2 - entity.y, world.width / 2 - entity.x)
+        entity.roamHeading = homeward + randomBetween(world, -0.5, 0.5)
+        return
+      }
+      entity.roamHeading = roamBearingOf(world, entity) + delta
+    }
     /**
      * Score every action this animal could take right now.
      * @param {object} world - the world.
@@ -3162,7 +3349,7 @@ window.__ModuleLoader__.load({
           offer('forage', weights.hunger * drives.hunger * quality, food.x, food.y, 'hunger')
         } else if (drives.hunger > 0.25) {
           // Nothing edible is in sight and the reserve is draining: go look.
-          const spot = wanderTarget(world, entity, genes.vision * (1.1 + drives.hunger))
+          const spot = wanderTarget(world, entity, species, genes.vision * (1.1 + drives.hunger))
           offer('explore', weights.hunger * drives.hunger * 0.6, spot.x, spot.y, 'search')
         }
       } else if (species.role === 'hunter') {
@@ -3175,7 +3362,7 @@ window.__ModuleLoader__.load({
         if (carrion !== null && carrion !== undefined) {
           offer('scavenge', weights.hunger * drives.hunger * 0.85, carrion.x, carrion.y, 'hunger')
         } else if (drives.hunger > 0.45 && (prey === null || prey === undefined)) {
-          const spot = wanderTarget(world, entity, genes.vision * 1.3)
+          const spot = wanderTarget(world, entity, species, genes.vision * 1.3)
           offer('explore', weights.hunger * drives.hunger * 0.55, spot.x, spot.y, 'search')
         }
       } else {
@@ -3184,7 +3371,7 @@ window.__ModuleLoader__.load({
           offer('scavenge', weights.hunger * clamp(drives.hunger + 0.1, 0, 1) * (0.6 + carrion.value * 0.5),
             carrion.x, carrion.y, 'hunger')
         } else if (drives.hunger > 0.3) {
-          const spot = wanderTarget(world, entity, genes.vision * 1.4)
+          const spot = wanderTarget(world, entity, species, genes.vision * 1.4)
           offer('explore', weights.hunger * drives.hunger * 0.5, spot.x, spot.y, 'search')
         }
       }
@@ -3206,14 +3393,17 @@ window.__ModuleLoader__.load({
         const angle = (entity.id * 2.399963229728653) % (Math.PI * 2)
         const x = clamp(entity.herdAnchor.x + Math.cos(angle) * ring, 1, world.width - 2)
         const y = clamp(entity.herdAnchor.y + Math.sin(angle) * ring * 0.75, 1, world.height - 2)
-        const pull = weights.social * (drives.social * 0.9 + drives.libido * 0.7)
+        // Company is capped: a full herd satisfies the channel, and mating
+        // eagerness alone must never outbid food for a whole lifetime.
+        const pull = weights.social
+          * clamp(drives.social * 0.9 + Math.min(drives.libido, 0.6) * 0.5, 0, 0.8)
         if (pull > 0.01) offer('socialize', pull, x, y, drives.libido > drives.social ? 'libido' : 'social')
       }
 
       // --- curiosity --------------------------------------------------------
       if (drives.curiosity > 0.06) {
         const reach = genes.vision * (0.7 + drives.curiosity * 1.2)
-        const spot = wanderTarget(world, entity, reach)
+        const spot = wanderTarget(world, entity, species, reach)
         offer('explore', weights.curiosity * drives.curiosity, spot.x, spot.y, 'curiosity')
       }
 
@@ -3261,6 +3451,7 @@ window.__ModuleLoader__.load({
     function startState(world, entity, species, option, rivals) {
       const plan = STATE_PLAN[option.kind] ?? STATE_PLAN.rest
       const duration = randomBetween(world, plan.duration[0], plan.duration[1])
+      if (option.kind === 'explore') steerRoam(world, entity, randomBetween(world, -0.25, 0.25))
       entity.state = {
         id: option.kind,
         since: world.time,
@@ -3378,8 +3569,13 @@ window.__ModuleLoader__.load({
       // Hysteresis: a rival has to be clearly better, not merely ahead. This is
       // what makes the intent dwell worth watching instead of a twitch.
       const clearlyBetter = best.score > currentScore * STATE_HYSTERESIS + STATE_MARGIN
-      const mayCut = klassGap > 0 || expired
-      if (mayCut && (!committed || klassGap > 0) && (clearlyBetter || expired)) {
+      // Only survival may cut a bout short: being killed or dried out cannot
+      // wait out a nap. An OPPORTUNITY (food, a hunt) does not get to interrupt
+      // an intrinsic bout — food is always somewhere, so that permission would
+      // mean no bout ever runs its course.
+      const survivalCut = klassGap >= 2
+      const mayCut = expired || (klassGap > 0 && (survivalCut || !committed))
+      if (mayCut && (clearlyBetter || expired)) {
         startState(world, entity, species, best, rivals)
         return
       }
@@ -3447,7 +3643,7 @@ window.__ModuleLoader__.load({
       const originX = Math.round(entity.x)
       const originY = Math.round(entity.y)
       let best = null
-      let bestScore = 0.08
+      let bestScore = 0.02
       for (let offsetY = -2; offsetY <= 2; offsetY++) {
         for (let offsetX = -2; offsetX <= 2; offsetX++) {
           const cellX = originX + offsetX
@@ -3476,7 +3672,10 @@ window.__ModuleLoader__.load({
     function adoptState(world, entity) {
       const id = INTENT_IDS.includes(entity.intent) ? entity.intent : 'explore'
       const plan = STATE_PLAN[id] ?? STATE_PLAN.explore
-      const until = Math.max(entity.thinkTimer ?? 0, 1)
+      // Never shorter than the floor: a resumed bout is still a bout, and a
+      // bout that ends under its own commitment time is the twitch this whole
+      // part exists to remove.
+      const until = Math.max(entity.thinkTimer ?? 0, plan.min)
       entity.state = {
         id,
         since: world.time,
@@ -3642,7 +3841,18 @@ window.__ModuleLoader__.load({
         reaim(world, entity, species, state)
         const distance = Math.hypot(state.x - entity.x, state.y - entity.y)
         state.phase = distance > 1.2 ? 'approach' : 'do'
-        done = thirst < 0.12
+        if (state.phase === 'do') {
+          // Standing at the bank: check that drinking is actually working. An
+          // animal that cannot reach the water must abandon the attempt, not
+          // stand there until the bout timer runs out and try again.
+          if (state.thirstAtDo === undefined) {
+            state.thirstAtDo = thirst
+            state.doSince = now
+          } else if (now - state.doSince > 2 && thirst > state.thirstAtDo - 0.02) {
+            done = true
+          }
+        }
+        if (thirst < 0.12) done = true
       } else if (state.id === 'rest') {
         // Resting marks the ground as home: this is where the animal comes back
         // to, and what makes a warren a place instead of a coordinate.
@@ -3656,23 +3866,46 @@ window.__ModuleLoader__.load({
         reaim(world, entity, species, state)
         const distance = Math.hypot(state.x - entity.x, state.y - entity.y)
         state.phase = distance > 1.5 ? 'approach' : 'do'
-        // Close enough to the herd counts as satisfied company.
+        // Close enough to the herd, or arrived at its own slot: the animal got
+        // what it came for. The channel is marked sated so it goes back to its
+        // own business instead of orbiting the herd for the rest of its life.
         const herd = species.herd
         const crowd = herd === undefined ? 0 : (herd.crowd ?? 4)
-        done = (entity.socialCount ?? 0) >= crowd && distance < 3
+        if (distance <= 1.5 || (entity.socialCount ?? 0) >= crowd) {
+          entity.socialSated = 1
+          done = true
+        }
       } else if (state.id === 'explore') {
         const distance = Math.hypot(state.x - entity.x, state.y - entity.y)
         state.phase = distance > 1.5 ? 'approach' : 'do'
         if (distance <= 1.5) {
-          // Arrived: curiosity is spent for a while (habituation), so the
-          // animal does not immediately pick another random direction.
-          entity.habituation = 1
-          done = true
+          // Arrived, but the bout is not over: pick the next leg from here, in
+          // the direction the animal is already facing. A walk that re-rolls
+          // its angle on every arrival is a random walk however fast it moves;
+          // three legs of the same heading is a trip.
+          const reach = entity.genes.vision * (0.8 + (drives === undefined ? 0.2 : drives.curiosity) * 1.2)
+          const ahead = wanderTarget(world, entity, species, reach)
+          state.x = ahead.x
+          state.y = ahead.y
+          entity.targetX = ahead.x
+          entity.targetY = ahead.y
+          state.legs = (state.legs ?? 0) + 1
+          if (state.legs >= 3) {
+            // Curiosity is spent for a while (habituation), so the animal does
+            // not immediately pick another random direction.
+            entity.habituation = 1
+            done = true
+          }
         }
       }
 
       if (state.phase === 'approach' && stalledAt(world, entity, state)) done = true
       if (now >= state.until) done = true
+      // The commitment floor applies to EVERY ending, not just to rivals: a
+      // bout that starts and stops inside half a second is the twitch this
+      // whole part exists to remove. Only a predator (flee) or the end of the
+      // scheduled bout may finish before the floor.
+      if (done && now - state.since < (state.min ?? 0) && now < state.until) done = false
       if (done) {
         entity.state = undefined
         entity.thinkTimer = 0
@@ -3703,7 +3936,7 @@ window.__ModuleLoader__.load({
     // docs/10-SCALE-AND-UNITS.md — without any species row carrying it.
 
     /** Reference sward density, kg dry matter/m^2, where intake is 2/3 of max. */
-    const GRAZE_REFERENCE = 0.25
+    const GRAZE_REFERENCE = 0.12
     /** Peak intake as a multiple of the animal's own maintenance requirement. */
     const INTAKE_CEILING = 3
 
@@ -3832,8 +4065,12 @@ window.__ModuleLoader__.load({
         if (index >= 0 && world.terrain[index] === wanted) {
           const available = field[index]
           if (available > 0) {
+            // `available` is kg per SQUARE METRE and the intake curve is kg per
+            // ANIMAL per day, so the bite is divided by the cell area before it
+            // is taken off the field. Getting this wrong quietly multiplies the
+            // whole herbivore appetite by four.
             const requirement = dryMatterRequirement(species, body.V)
-            const bite = Math.min(available, grazingIntake(requirement, available) * days)
+            const bite = Math.min(available, grazingIntake(requirement, available) * days / CELL_AREA)
             if (bite > 0) {
               field[index] = available - bite
               consumeBite(world, entity, species, bite * CELL_AREA * BIO.GRASS_ENERGY)
@@ -3851,7 +4088,7 @@ window.__ModuleLoader__.load({
           const plant = nearestFoliage(world, entity, 1.6)
           if (plant !== null && plant.foliage > 0) {
             const requirement = dryMatterRequirement(species, body.V)
-            const bite = Math.min(plant.foliage, grazingIntake(requirement, plant.foliage) * days)
+            const bite = Math.min(plant.foliage, grazingIntake(requirement, plant.foliage) * days / CELL_AREA)
             if (bite > 0) {
               plant.foliage -= bite
               consumeBite(world, entity, species, bite * CELL_AREA * BIO.GRASS_ENERGY)
@@ -3922,11 +4159,14 @@ window.__ModuleLoader__.load({
       // While a predator is working through a kill it stands still: the carcass
       // is being eaten, not carried. Without this the animal is nailed to its
       // target position and jitters in place for the whole handling time.
-      if (entity.body !== undefined && entity.body.handling !== null) {
+      // intent keeps its last value (hunt/scavenge) so the panel still says what
+      // it is doing; entity.handling is the flag the renderer uses for the
+      // crouched, head-down eating pose.
+      entity.handling = entity.body !== undefined && entity.body.handling !== null
+      if (entity.handling) {
         entity.targetX = entity.x
         entity.targetY = entity.y
-        entity.intent = 'rest'
-        moveToward(world, entity, species, entity.x, entity.y, dt, 0)
+        entity.running = false
         entity.gait = (entity.gait ?? 0)
         updateFatigue(entity, dt, 0.12)
         return true
@@ -3946,8 +4186,12 @@ window.__ModuleLoader__.load({
       // 3. What the animal can actually see, on its own staggered ~1 Hz slot.
       perceive(world, entity, species, grids, dt)
       // 4. Deliberate only at a boundary or on an interrupt — not every tick.
+      // A freshly spawned animal has no intent yet, so it has to be allowed to
+      // make its first decision instead of adopting an empty bout for its
+      // spawn clock (which used to produce a fake one-second intent).
       entity.thinkTimer -= dt
-      if (entity.thinkTimer <= 0 || interruptPending(world, entity)) {
+      const firstDecision = entity.state === undefined && entity.intent === undefined
+      if (entity.thinkTimer <= 0 || firstDecision || interruptPending(world, entity)) {
         decide(world, entity, species, grids)
       }
       // 5. Run the chosen bout: aim, keep doing the thing, finish it.
@@ -4030,15 +4274,18 @@ window.__ModuleLoader__.load({
           return false
         }
       }
-      const breedReserve = hasBody ? body.E : entity.energy
-
       const territory = species.territory
       const ownGrid = species.role === 'hunter' ? grids.hunter : grids.prey
       const crowded = territory !== undefined && countNearby(ownGrid, entity.x, entity.y, territory.radius,
         candidate => candidate !== entity && candidate.fate === '' && candidate.species === entity.species) >= territory.max
-      // Juveniles are still growing: only adults reproduce.
+      // Juveniles are still growing: only adults reproduce. The gate is the
+      // reserve relative to the animal's OWN capacity, so a body that is still
+      // growing cannot be asked for an adult's absolute reserve.
+      const breedTarget = balance.maxEnergy > 0
+        ? balance.breedEnergy * clamp((hasBody ? body.Emax : balance.maxEnergy) / balance.maxEnergy, 0, 1.2)
+        : balance.breedEnergy
       const breedReserve = hasBody ? body.E : entity.energy
-      if (!crowded && entity.stage === 'adult' && breedReserve >= balance.breedEnergy && entity.cooldown <= 0) {
+      if (!crowded && entity.stage === 'adult' && breedReserve >= breedTarget && entity.cooldown <= 0) {
         // A litter, not a single pup: rabbits drop 4-7 kits at once, wolves 3-5.
         const range = balance.litter ?? [1, 1]
         const litterSize = range[0] + Math.floor(nextRandom(world) * (range[1] - range[0] + 1))
@@ -4166,7 +4413,11 @@ window.__ModuleLoader__.load({
       if (next < 0) next = 0
       // Litter is not lost: it becomes the detritus the soil will recycle.
       if (littered > 0) {
-        const cell = world.detritus[index] + littered / CELL_AREA
+        // `littered` is already kg per square metre, the same unit the detritus
+        // field holds. Dividing by CELL_AREA here used to make three quarters of
+        // the litter vanish, which is exactly the kind of leak the audit exists
+        // to catch.
+        const cell = world.detritus[index] + littered
         if (cell > DETRITUS.bmax) {
           world.budget.overflow += (cell - DETRITUS.bmax) * CELL_AREA * BIO.GRASS_ENERGY
           world.detritus[index] = DETRITUS.bmax
@@ -4989,11 +5240,36 @@ window.__ModuleLoader__.load({
     }
 
     // ---------------------------------------------------------------------
-    // Persistence
+    // Persistence (save format 2)
     // ---------------------------------------------------------------------
+    //
+    // A 1024x640 world is 655,360 cells. Five quantised fields at one byte per
+    // cell is 3.3 MB of JSON text before base64, which does not fit a
+    // localStorage quota. Three things keep the save small:
+    //
+    //  1. Only fields that carry state are written. Moisture, depth, light and
+    //     the canopy are recomputed from the terrain and the clock on load.
+    //  2. Each field is bit-packed to the precision it needs (8 bits for the
+    //     producer biomass the player actually sees, 4 for the slow indices).
+    //     The scale of every field is stored in the header, so a field that
+    //     happens to be full gets the full dynamic range of its bits.
+    //  3. The payload is gzipped with CompressionStream where the host has it,
+    //     and falls back to plain JSON with the coarser bit packing where it
+    //     does not. Either way the player is told what happened; a save is
+    //     never dropped silently (0.2.x did exactly that).
+
+    /** Save format version lives in 00-preamble (LEAD scope): one number, two files would drift. */
+    /** Marker in front of a gzipped payload, so a load can tell the two apart. */
+    const SAVE_GZIP_PREFIX = 'gz:'
+
+    /** Bits per field in each detail level: [index fields, mass fields]. */
+    const FIELD_BITS = {
+      full: { fertility: 8, waterFertility: 4, grass: 8, weed: 8, detritus: 4 },
+      low: { fertility: 4, waterFertility: 4, grass: 4, weed: 4, detritus: 4 },
+    }
 
     /**
-     * Bytes → base64, chunked so a 26 KB terrain never blows the call stack.
+     * Bytes → base64, chunked so a multi-megabyte payload never blows the stack.
      * @param {Uint8Array|Uint8ClampedArray} bytes - input.
      * @returns {string} base64 text.
      */
@@ -5020,40 +5296,93 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Quantize a 0..1 float field to bytes (1 byte per cell keeps saves small).
-     * @param {Float32Array} field - source field.
-     * @returns {Uint8Array} quantized field.
+     * Pack a float field into `bits` per cell, against an explicit scale.
+     * @param {Float32Array} field - source values.
+     * @param {number} bits - 4 or 8.
+     * @param {number} scale - value that maps to the top of the range.
+     * @returns {Uint8Array} packed bytes.
      */
-    function quantizeField(field) {
-      const out = new Uint8Array(field.length)
-      for (let i = 0; i < field.length; i++) {
-        const value = field[i] * 255
-        out[i] = value <= 0 ? 0 : value >= 255 ? 255 : value | 0
+    function packField(field, bits, scale) {
+      const levels = (1 << bits) - 1
+      const inverse = scale > 0 ? levels / scale : 0
+      if (bits === 8) {
+        const out = new Uint8Array(field.length)
+        for (let i = 0; i < field.length; i++) {
+          const value = field[i] * inverse
+          out[i] = value <= 0 ? 0 : value >= levels ? levels : value | 0
+        }
+        return out
+      }
+      const out = new Uint8Array((field.length + 1) >> 1)
+      for (let i = 0; i < field.length; i += 2) {
+        const a = field[i] * inverse
+        const hi = a <= 0 ? 0 : a >= levels ? levels : a | 0
+        let byte = hi
+        if (i + 1 < field.length) {
+          const b = field[i + 1] * inverse
+          const lo = b <= 0 ? 0 : b >= levels ? levels : b | 0
+          byte |= lo << 4
+        }
+        out[i >> 1] = byte
       }
       return out
     }
 
     /**
-     * Expand a quantized field back to floats.
+     * Unpack a field written by `packField`.
      * @param {string} text - base64 bytes.
      * @param {number} size - expected cell count.
-     * @returns {Float32Array} restored field.
+     * @param {number} bits - 4 or 8.
+     * @param {number} scale - value the top of the range stands for.
+     * @param {Float32Array} [target] - array to fill, when it already exists.
+     * @returns {Float32Array} field.
      */
-    function dequantizeField(text, size) {
+    function unpackField(text, size, bits, scale, target) {
       const bytes = decodeBytes(text, Uint8Array)
-      if (bytes.length !== size) throw new Error('bad field length in world save')
-      const out = new Float32Array(size)
-      for (let i = 0; i < size; i++) out[i] = bytes[i] / 255
+      const out = target !== undefined && target.length === size ? target : new Float32Array(size)
+      const levels = (1 << bits) - 1
+      if (bits === 8) {
+        if (bytes.length !== size) throw new Error('bad field length in world save')
+        const factor = scale / levels
+        for (let i = 0; i < size; i++) out[i] = bytes[i] * factor
+        return out
+      }
+      if (bytes.length !== (size + 1) >> 1) throw new Error('bad packed field length in world save')
+      const factor = scale / levels
+      for (let i = 0; i < size; i++) {
+        const byte = bytes[i >> 1]
+        const nibble = (i & 1) === 0 ? byte & 0x0f : byte >> 4
+        out[i] = nibble * factor
+      }
       return out
     }
 
     /**
-     * Serialize a world to a JSON-safe object.
-     * Hydrology is dropped: it is recomputed from the terrain, byte for byte.
+     * Largest value in a field, used as that field's packing scale.
+     * @param {Float32Array} field - source.
+     * @returns {number} max (never zero).
+     */
+    function fieldScale(field) {
+      let max = 0
+      for (let i = 0; i < field.length; i++) if (field[i] > max) max = field[i]
+      return max > 0 ? max : 1
+    }
+
+    /**
+     * Serialize a world to a JSON-safe object (format 2).
      * @param {object} world - the world.
+     * @param {{detail?: 'full'|'low'}} [options] - packing detail.
      * @returns {object} save payload.
      */
-    function serializeWorld(world) {
+    function serializeWorld(world, options = {}) {
+      const bits = FIELD_BITS[options.detail === 'low' ? 'low' : 'full']
+      const scales = {
+        fertility: 1,
+        waterFertility: 1,
+        grass: fieldScale(world.grass),
+        weed: fieldScale(world.weed),
+        detritus: fieldScale(world.detritus),
+      }
       return {
         version: SAVE_VERSION,
         seed: world.seed,
@@ -5064,32 +5393,83 @@ window.__ModuleLoader__.load({
         rngState: world.rngState,
         nextId: world.nextId,
         immigration: world.immigration !== false,
+        immigrationTimer: world.immigrationTimer ?? null,
+        budget: world.budget === undefined ? null : { ...world.budget },
+        deaths: { ...(world.deaths ?? {}) },
+        bits,
+        scales,
         terrain: encodeBytes(world.terrain),
-        fertility: encodeBytes(quantizeField(world.fertility)),
-        grass: encodeBytes(quantizeField(world.grass)),
-        weed: encodeBytes(quantizeField(world.weed)),
+        fertility: encodeBytes(packField(world.fertility, bits.fertility, scales.fertility)),
+        waterFertility: encodeBytes(packField(world.waterFertility, bits.waterFertility, scales.waterFertility)),
+        grass: encodeBytes(packField(world.grass, bits.grass, scales.grass)),
+        weed: encodeBytes(packField(world.weed, bits.weed, scales.weed)),
+        detritus: encodeBytes(packField(world.detritus, bits.detritus, scales.detritus)),
         trees: world.trees.map(plant => ({ ...plant })),
-        entities: world.entities.map(entity => ({
-          id: entity.id,
-          species: entity.species,
-          x: entity.x,
-          y: entity.y,
-          heading: entity.heading,
-          energy: entity.energy,
-          age: entity.age,
-          generation: entity.generation,
-          cooldown: entity.cooldown,
-          thinkTimer: entity.thinkTimer,
-          targetX: entity.targetX,
-          targetY: entity.targetY,
-          fleeing: entity.fleeing === true,
-          children: entity.children ?? 0,
-          phase: entity.phase,
-          genes: { ...entity.genes },
-        })),
+        entities: world.entities.map(entity => serializeEntity(entity)),
         corpses: world.corpses.map(corpse => ({ ...corpse })),
         history: world.history.slice(-200),
       }
+    }
+
+    /**
+     * One animal as JSON. The body is written in full — reserve, structure,
+     * maturity, health, fatigue, death cause — because those are the values the
+     * gate "save round-trips including body fat / maturity / state" is about.
+     * @param {object} entity - the animal.
+     * @returns {object} save record.
+     */
+    function serializeEntity(entity) {
+      const body = entity.body
+      const record = {
+        id: entity.id,
+        species: entity.species,
+        x: entity.x,
+        y: entity.y,
+        heading: entity.heading,
+        age: entity.age,
+        generation: entity.generation,
+        cooldown: entity.cooldown,
+        thinkTimer: entity.thinkTimer,
+        herdTimer: entity.herdTimer ?? 0,
+        alarm: entity.alarm ?? 0,
+        targetX: entity.targetX,
+        targetY: entity.targetY,
+        fleeing: entity.fleeing === true,
+        children: entity.children ?? 0,
+        phase: entity.phase,
+        intent: entity.intent ?? null,
+        intentScore: entity.intentScore ?? null,
+        genes: { ...entity.genes },
+        needs: entity.needs === undefined ? null : {
+          hunger: entity.needs.hunger,
+          thirst: entity.needs.thirst,
+          energy: entity.needs.energy,
+          safety: entity.needs.safety,
+          social: entity.needs.social,
+        },
+        drives: entity.drives === undefined ? null : { ...entity.drives },
+        state: entity.state === undefined ? null : JSON.parse(JSON.stringify(entity.state)),
+        plan: entity.plan === undefined ? null : JSON.parse(JSON.stringify(entity.plan)),
+        belief: entity.belief === undefined ? null : JSON.parse(JSON.stringify(entity.belief)),
+      }
+      if (body !== undefined) {
+        record.body = {
+          E: body.E,
+          Emax: body.Emax,
+          V: body.V,
+          M: body.M,
+          health: body.health,
+          fatigue: body.fatigue,
+          dead: body.dead === true,
+          cause: body.cause ?? '',
+          gut: body.gut ?? 0,
+          injury: body.injury ?? 0,
+          handlingCorpse: body.handling === null || body.handling === undefined
+            ? null
+            : (body.handling.corpse === undefined ? null : body.handling.corpse.id),
+        }
+      }
+      return record
     }
 
     /**
@@ -5118,13 +5498,20 @@ window.__ModuleLoader__.load({
      * @throws {Error} when the payload is not a save this build understands.
      */
     function deserializeWorld(data) {
-      if (data === null || typeof data !== 'object' || data.version !== SAVE_VERSION) {
-        throw new Error('unsupported world save')
+      if (data === null || typeof data !== 'object') throw saveError('corrupt', 'world save is not an object')
+      if (data.version !== SAVE_VERSION) {
+        // A mismatch is not "no save": the player must be told their world is
+        // from another build, and the old payload must be left alone (docs/20 §5).
+        throw saveError('unsupported_version',
+          'world save version ' + String(data.version) + ' cannot be read by build ' + SAVE_VERSION)
       }
       const width = data.width | 0
       const height = data.height | 0
-      if (!(width > 0 && height > 0)) throw new Error('bad world size in save')
+      if (!(width > 0 && height > 0)) throw saveError('corrupt', 'bad world size in save')
       const size = width * height
+      const bits = typeof data.bits === 'object' && data.bits !== null ? data.bits : FIELD_BITS.full
+      const scales = typeof data.scales === 'object' && data.scales !== null ? data.scales : {}
+      const scaleOf = (name, fallback) => (Number.isFinite(scales[name]) && scales[name] > 0 ? scales[name] : fallback)
       const world = {
         version: SAVE_VERSION,
         seed: (data.seed ?? 1) >>> 0,
@@ -5134,13 +5521,20 @@ window.__ModuleLoader__.load({
         time: Number.isFinite(data.time) ? data.time : 0,
         rngState: (data.rngState ?? 1) >>> 0 || 1,
         immigration: data.immigration !== false,
+        immigrationTimer: Number.isFinite(data.immigrationTimer) ? data.immigrationTimer : undefined,
+        budget: data.budget === null || data.budget === undefined ? createBudget() : { ...createBudget(), ...data.budget },
+        deaths: { ...(data.deaths ?? {}) },
         terrain: decodeBytes(data.terrain, Uint8Array),
         moisture: new Float32Array(size),
         depth: new Float32Array(size),
         waterFertility: new Float32Array(size),
-        fertility: dequantizeField(data.fertility, size),
-        grass: dequantizeField(data.grass, size),
-        weed: dequantizeField(data.weed, size),
+        fertility: new Float32Array(size),
+        grass: new Float32Array(size),
+        weed: new Float32Array(size),
+        detritus: new Float32Array(size),
+        light: new Float32Array(size),
+        canopy: new Float32Array(size),
+        canopyDirty: true,
         trees: [],
         entities: [],
         corpses: [],
@@ -5149,8 +5543,15 @@ window.__ModuleLoader__.load({
         stats: { day: 1, clock: '06:00', grass: 0, weed: 0, counts: {}, corpses: 0 },
         history: [],
       }
-      if (world.terrain.length !== size) throw new Error('bad terrain in save')
-      computeHydrology(world)
+      if (world.terrain.length !== size) throw saveError('corrupt', 'bad terrain length in save')
+      world.climate = createClimate(world.time)
+      world.nutrient = world.fertility
+      unpackField(data.fertility, size, bits.fertility ?? 8, scaleOf('fertility', 1), world.fertility)
+      unpackField(data.grass, size, bits.grass ?? 8, scaleOf('grass', 1), world.grass)
+      unpackField(data.weed, size, bits.weed ?? 8, scaleOf('weed', 1), world.weed)
+      unpackField(data.detritus, size, bits.detritus ?? 4, scaleOf('detritus', 1), world.detritus)
+      unpackField(data.waterFertility, size, bits.waterFertility ?? 4, scaleOf('waterFertility', 1), world.waterFertility)
+      computeHydrology(world, false)
       for (const plant of Array.isArray(data.trees) ? data.trees : []) {
         if (!Number.isFinite(plant?.x) || !Number.isFinite(plant?.y)) continue
         world.trees.push({
@@ -5164,32 +5565,6 @@ window.__ModuleLoader__.load({
           seedTimer: Number.isFinite(plant.seedTimer) ? plant.seedTimer : 45,
         })
       }
-      for (const entity of Array.isArray(data.entities) ? data.entities : []) {
-        if (SPECIES[entity?.species] === undefined) continue
-        if (!Number.isFinite(entity.x) || !Number.isFinite(entity.y)) continue
-        world.entities.push({
-          id: Number.isFinite(entity.id) ? entity.id : world.nextId++,
-          species: entity.species,
-          x: entity.x,
-          y: entity.y,
-          heading: Number.isFinite(entity.heading) ? entity.heading : 0,
-          energy: Number.isFinite(entity.energy) ? entity.energy : SPECIES[entity.species].balance.startEnergy,
-          age: Number.isFinite(entity.age) ? entity.age : 0,
-          generation: Number.isFinite(entity.generation) ? entity.generation : 1,
-          cooldown: Number.isFinite(entity.cooldown) ? entity.cooldown : 0,
-          thinkTimer: Number.isFinite(entity.thinkTimer) ? entity.thinkTimer : 0,
-          herdTimer: 0,
-          herdAnchor: null,
-          alarm: 0,
-          targetX: Number.isFinite(entity.targetX) ? entity.targetX : entity.x,
-          targetY: Number.isFinite(entity.targetY) ? entity.targetY : entity.y,
-          fleeing: entity.fleeing === true,
-          fate: '',
-          children: Number.isFinite(entity.children) ? entity.children : 0,
-          phase: Number.isFinite(entity.phase) ? entity.phase : 0,
-          genes: restoreGenes(world, entity.species, entity.genes),
-        })
-      }
       for (const corpse of Array.isArray(data.corpses) ? data.corpses : []) {
         if (!Number.isFinite(corpse?.x) || !Number.isFinite(corpse?.y)) continue
         world.corpses.push({
@@ -5199,11 +5574,185 @@ window.__ModuleLoader__.load({
           species: SPECIES[corpse.species] === undefined ? null : corpse.species,
           decay: clamp(Number.isFinite(corpse.decay) ? corpse.decay : 0, 0, 1),
           energy: Number.isFinite(corpse.energy) ? corpse.energy : 20,
+          mass: Number.isFinite(corpse.mass) ? corpse.mass : undefined,
+          cause: typeof corpse.cause === 'string' ? corpse.cause : 'unknown',
         })
+      }
+      const pendingHandling = []
+      // Restoring is not "energy being created": the saved budget already
+      // accounts for these bodies, so the ledger accessor is muted while the
+      // records are put back.
+      ledgerWriteDepth += 1
+      try {
+      for (const saved of Array.isArray(data.entities) ? data.entities : []) {
+        if (SPECIES[saved?.species] === undefined) continue
+        if (!Number.isFinite(saved.x) || !Number.isFinite(saved.y)) continue
+        const entity = {
+          id: Number.isFinite(saved.id) ? saved.id : world.nextId++,
+          species: saved.species,
+          x: saved.x,
+          y: saved.y,
+          heading: Number.isFinite(saved.heading) ? saved.heading : 0,
+          age: Number.isFinite(saved.age) ? saved.age : 0,
+          generation: Number.isFinite(saved.generation) ? saved.generation : 1,
+          cooldown: Number.isFinite(saved.cooldown) ? saved.cooldown : 0,
+          thinkTimer: Number.isFinite(saved.thinkTimer) ? saved.thinkTimer : 0,
+          herdTimer: 0,
+          herdAnchor: null,
+          alarm: 0,
+          targetX: Number.isFinite(saved.targetX) ? saved.targetX : saved.x,
+          targetY: Number.isFinite(saved.targetY) ? saved.targetY : saved.y,
+          fleeing: saved.fleeing === true,
+          fate: '',
+          children: Number.isFinite(saved.children) ? saved.children : 0,
+          phase: Number.isFinite(saved.phase) ? saved.phase : 0,
+          genes: restoreGenes(world, saved.species, saved.genes),
+        }
+        if (typeof saved.intent === 'string') {
+          entity.intent = saved.intent
+          entity.intentScore = Number.isFinite(saved.intentScore) ? saved.intentScore : 0
+        }
+        const body = installLedger(entity)
+        if (saved.body !== undefined && saved.body !== null) {
+          const savedBody = saved.body
+          if (Number.isFinite(savedBody.V) && savedBody.V > 0) body.V = savedBody.V
+          if (Number.isFinite(savedBody.Emax) && savedBody.Emax > 0) body.Emax = savedBody.Emax
+          if (Number.isFinite(savedBody.E)) body.E = clamp(savedBody.E, 0, body.Emax)
+          if (Number.isFinite(savedBody.M)) body.M = clamp(savedBody.M, 0, 1)
+          if (Number.isFinite(savedBody.health)) body.health = clamp(savedBody.health, 0, 1)
+          if (Number.isFinite(savedBody.fatigue)) body.fatigue = clamp(savedBody.fatigue, 0, 1)
+          if (Number.isFinite(savedBody.gut)) body.gut = savedBody.gut
+          if (Number.isFinite(savedBody.injury)) body.injury = savedBody.injury
+          body.cause = typeof savedBody.cause === 'string' ? savedBody.cause : ''
+          if (Number.isFinite(savedBody.handlingCorpse)) pendingHandling.push({ body, id: savedBody.handlingCorpse })
+        }
+        if (saved.needs !== null && typeof saved.needs === 'object') {
+          const needs = needsOf(entity)
+          for (const key of ['thirst', 'energy', 'safety', 'social']) {
+            const value = saved.needs[key]
+            if (Number.isFinite(value)) needs[key] = clamp(value, 0, 1)
+          }
+        }
+        if (saved.drives !== null && typeof saved.drives === 'object') entity.drives = { ...saved.drives }
+        if (saved.state !== null && typeof saved.state === 'object') entity.state = saved.state
+        if (saved.plan !== null && typeof saved.plan === 'object') entity.plan = saved.plan
+        if (saved.belief !== null && typeof saved.belief === 'object') entity.belief = saved.belief
+        world.entities.push(entity)
+      }
+      } finally {
+        ledgerWriteDepth -= 1
+      }
+      // A predator that was mid-meal keeps eating after the reload.
+      for (const pending of pendingHandling) {
+        const corpse = world.corpses.find(candidate => candidate.id === pending.id)
+        if (corpse !== undefined && corpse.energy > 0) pending.body.handling = { corpse }
       }
       world.history = Array.isArray(data.history) ? data.history.slice(-200) : []
       world.population = countPopulations(world)
+      rebuildCanopy(world)
       return world
+    }
+
+    /**
+     * gzip (or gunzip) a byte array with the Web CompressionStream API.
+     * @param {Uint8Array} bytes - input.
+     * @param {'gzip'|'gunzip'} mode - direction.
+     * @returns {Promise<Uint8Array|null>} output, or null when unsupported.
+     */
+    async function transformBytes(bytes, mode) {
+      const Ctor = mode === 'gzip' ? globalThis.CompressionStream : globalThis.DecompressionStream
+      if (typeof Ctor !== 'function') return null
+      const stream = new Ctor('gzip')
+      const writer = stream.writable.getWriter()
+      writer.write(bytes)
+      writer.close()
+      const reader = stream.readable.getReader()
+      const chunks = []
+      let length = 0
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        chunks.push(value)
+        length += value.length
+      }
+      const out = new Uint8Array(length)
+      let offset = 0
+      for (const chunk of chunks) {
+        out.set(chunk, offset)
+        offset += chunk.length
+      }
+      return out
+    }
+
+    /**
+     * Build a load failure the UI can branch on.
+     *
+     * A save is never thrown away quietly: the caller gets `code` (one of
+     * `unsupported_version`, `corrupt`, `no_decompressor`) plus a message it can
+     * put in front of the player, and the stored payload is left untouched.
+     * @param {string} code - machine-readable reason.
+     * @param {string} message - human-readable detail.
+     * @returns {Error} tagged error.
+     */
+    function saveError(code, message) {
+      const error = new Error(message)
+      error.name = 'WorldSaveError'
+      error.code = code
+      return error
+    }
+
+    /**
+     * Pack a world into a storage string.
+     *
+     * gzip where the host supports it (every current browser, and Node), plain
+     * JSON with the coarser packing where it does not. The caller only has to
+     * store the returned string; `unpackWorld` understands both.
+     * @param {object} world - the world.
+     * @returns {Promise<{text: string, compressed: boolean, detail: string, bytes: number}>} payload.
+     */
+    async function packWorld(world) {
+      const compressed = typeof globalThis.CompressionStream === 'function'
+      const detail = compressed ? 'full' : 'low'
+      const json = JSON.stringify(serializeWorld(world, { detail }))
+      if (!compressed) return { text: json, compressed: false, detail, bytes: json.length }
+      const bytes = new TextEncoder().encode(json)
+      const packed = await transformBytes(bytes, 'gzip')
+      if (packed === null) return { text: json, compressed: false, detail: 'low', bytes: json.length }
+      return { text: SAVE_GZIP_PREFIX + encodeBytes(packed), compressed: true, detail, bytes: packed.length }
+    }
+
+    /**
+     * Unpack a string produced by `packWorld` (or a legacy plain-JSON save).
+     * @param {string} text - stored payload.
+     * @returns {Promise<object>} the save object.
+     * @throws {Error} when the payload is corrupt or from another format.
+     */
+    async function unpackWorld(text) {
+      const raw = String(text ?? '')
+      try {
+        if (raw.startsWith(SAVE_GZIP_PREFIX)) {
+          const packed = decodeBytes(raw.slice(SAVE_GZIP_PREFIX.length), Uint8Array)
+          const bytes = await transformBytes(packed, 'gunzip')
+          if (bytes === null) throw saveError('no_decompressor', 'this host cannot decompress a world save')
+          return JSON.parse(new TextDecoder().decode(bytes))
+        }
+        return JSON.parse(raw)
+      } catch (error) {
+        if (error !== null && typeof error === 'object' && typeof error.code === 'string') throw error
+        throw saveError('corrupt', 'world save could not be decoded: ' + (error?.message ?? 'unknown'))
+      }
+    }
+
+    /**
+     * Human-readable size of a save, for the panel's "saved" note.
+     * @param {number} bytes - size.
+     * @returns {string} e.g. "812 KB".
+     */
+    function formatSaveSize(bytes) {
+      if (!(bytes > 0)) return '0 KB'
+      if (bytes < 1024) return bytes + ' B'
+      if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB'
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
     }
 
     // ---------------------------------------------------------------------
@@ -5335,13 +5884,13 @@ window.__ModuleLoader__.load({
         bare: 0.35,
       },
       winter: {
-        grassDry: [166, 158, 128],
-        grassLush: [122, 126, 96],
+        grassDry: [182, 176, 150],
+        grassLush: [136, 140, 108],
         leaf: { dark: rgb(80, 72, 64), mid: rgb(108, 100, 86), light: rgb(146, 138, 122), outline: rgb(48, 42, 38) },
         weed: [rgb(120, 128, 104), rgb(154, 160, 136)],
         water: {
-          surface: rgb(176, 214, 234), shallow: rgb(140, 186, 214), mid: rgb(94, 148, 190),
-          deep: rgb(68, 116, 162), caustic: rgb(200, 234, 246), foam: rgb(238, 250, 254),
+          surface: rgb(196, 228, 246), shallow: rgb(162, 204, 230), mid: rgb(116, 168, 210),
+          deep: rgb(86, 134, 180), caustic: rgb(210, 238, 250), foam: rgb(244, 252, 255),
         },
         snow: 1,
         bare: 1,
@@ -5881,6 +6430,8 @@ window.__ModuleLoader__.load({
       // Flight.
       flee: { role: 'run', speed: 1.2 },
       fight: { role: 'run', speed: 1.1, shake: 1, tilt: 3, shadow: 1.1 },
+      // A kill being worked through: crouched over the carcass, head down.
+      feast: { role: 'idle', nod: 0.9, tilt: 4, squash: 0.9, sink: 0.9, shadow: 0.8 },
       // Social and reproductive.
       court: { role: 'walk', speed: 0.8, nod: 0.6 },
       socialize: { role: 'walk', speed: 0.9 },
@@ -5933,13 +6484,47 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Poses that only make sense standing at the target.
+     *
+     * `state.phase` is 'approach' while the animal is still walking to the
+     * patch/carcass/water and 'do' once it is there (contract from
+     * 10b-execution). A head-down grazing loop played while the animal is
+     * crossing the meadow reads as an animal eating while it walks, so the
+     * approach phase falls back to the moving pose.
+     */
+    const DO_POSES = new Set(['graze', 'eat', 'forage', 'browse', 'drink', 'bury',
+      'feast', 'bask', 'huddle', 'mate', 'birth', 'socialize', 'court'])
+
+    /**
      * The pose one animal is showing this frame.
      * @param {object} animal - the animal.
      * @returns {object} normalised pose.
      */
     function poseFor(animal) {
       if (animal.fleeing === true) return POSES.flee
-      return poseForId(stateIdOf(animal))
+      // A predator working through a kill stands still with its head down; the
+      // execution state machine flags that with `handling` (12-step-entity), and
+      // "intent" still says hunt/scavenge, which would otherwise show a run.
+      if (animal.handling === true) return POSES.feast
+      const pose = poseForId(stateIdOf(animal))
+      const state = animal.state
+      if (state === null || state === undefined || typeof state !== 'object') return pose
+      // An ambusher does not pursue: for a stalk-and-strike hunter a crouched
+      // approach and a short strike read as an ambush, a full run reads as a
+      // chase across the meadow.
+      if (pose === POSES.hunt) {
+        const species = SPECIES[animal.species]
+        if (species !== undefined && species.ambush !== undefined) {
+          return state.phase === 'do' ? POSES.strike : POSES.stalk
+        }
+      }
+      // Courtship only when the animal is actually receptive.
+      if (pose === POSES.socialize) {
+        const drives = animal.drives
+        if (drives !== undefined && drives !== null && drives.libido > 0.5) return POSES.court
+      }
+      if (state.phase === 'approach' && DO_POSES.has(pose.id)) return POSES.walk
+      return pose
     }
 
     /**
@@ -6806,9 +7391,9 @@ window.__ModuleLoader__.load({
         // letting the bank end at a colour change.
         if (d < 0.055) color = blendColor(color, water.foam, 0.72)
         else if (d < 0.11) color = blendColor(color, water.foam, 0.3)
-        base[bucket * 3] = nudgeColor(color, -6)
+        base[bucket * 3] = nudgeColor(color, -4)
         base[bucket * 3 + 1] = color
-        base[bucket * 3 + 2] = nudgeColor(color, 6)
+        base[bucket * 3 + 2] = nudgeColor(color, 4)
       }
       const caustic = new Int32Array(steps * 3 * CAUSTIC_STEPS)
       const ripple = new Int32Array(steps * 3)
@@ -6941,6 +7526,9 @@ window.__ModuleLoader__.load({
             if (d > 0.1 && ((worldX * 3 + worldY * 5 + ripplePhase) & 15) < 2) {
               color = waterRipple[tableIndex]
             }
+            // Icy shallows: in deep winter the rim of the lake freezes before the
+            // middle does, and that white edge is most of what says "frozen".
+            if (snow > 0.4 && d < 0.22) color = blendColor(color, SNOW_COLORS.light, snow * (0.22 - d) * 2.2)
             const cover = weed[index]
             if (cover > 0.05) {
               const lush = cover > 0.55
@@ -6959,10 +7547,12 @@ window.__ModuleLoader__.load({
             // like nothing happened.
             const damp = weed[index]
             if (damp > 0.3) color = blendColor(color, weedColors[1], Math.min(0.5, damp * 0.55))
-            if (snow > 0.15 && ditherAt(worldX + 5, worldY + 3) < snow * 190) color = snowed(color, 0.55 + snow * 0.4)
+            // Snow settles in patches, not per-pixel: the dither is sampled in
+            // 2x2 blocks, which at 6x reads as banks of snow instead of static.
+            if (snow > 0.15 && ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3) < snow * 190) color = snowed(color, 0.55 + snow * 0.4)
           } else if (surface === TERRAIN.STONE) {
             color = nudgeColor(PALETTE.stone[noise > 198 ? 2 : 1], noiseAt(noise))
-            if (snow > 0.15 && ditherAt(worldX + 5, worldY + 3) < snow * 150) color = snowed(color, 0.6 + snow * 0.35)
+            if (snow > 0.15 && ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3) < snow * 150) color = snowed(color, 0.6 + snow * 0.35)
           } else {
             const cover = grass[index]
             const step = cover <= 0 ? 0 : Math.min(7, (cover * 8) | 0)
@@ -6985,8 +7575,12 @@ window.__ModuleLoader__.load({
             // which is the difference between "winter" and "white paint".
             if (snow > 0.15) {
               const settle = snow * 205 - cover * 70
-              const flake = ditherAt(worldX + 5, worldY + 3)
-              if (flake < settle) color = (flake & 1) === 0 ? SNOW_COLORS.light : SNOW_COLORS.mid
+              const flake = ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3)
+              // Two snow tones, chosen on a coarser (4x4) sample so the cover
+              // reads as banks with shading rather than a checkerboard.
+              if (flake < settle) {
+                color = ditherAt((worldX >> 2) + 11, (worldY >> 2) + 7) > 120 ? SNOW_COLORS.light : SNOW_COLORS.mid
+              }
             }
           }
           out[outBase + col] = color
@@ -7827,26 +8421,67 @@ window.__ModuleLoader__.load({
       const listeners = new Set()
       /** First-run flag; null means "not read from storage yet". */
       let onboardingFlag = null
+      /** One-shot message about the save file: legacy format or a failed read. */
+      let notice = null
 
       /** Load the saved world, or create a fresh one. */
       function ensureWorld() {
         if (world !== null) return world
-        world = load() ?? createWorld()
+        const stored = readStored()
+        notice = stored.notice
+        world = stored.world ?? createWorld()
         world.hydrologyDirty = false
         minimap = null
         return world
       }
 
+      /**
+       * Read the stored world and say what happened to it.
+       *
+       * 0.2.x swallowed every load failure, so a corrupted or version-mismatched
+       * save looked exactly like a first run. G5 (failure must be explainable)
+       * needs the opposite: the reason travels with the result and the panel
+       * shows it instead of quietly starting over.
+       * @returns {{world: object|null, notice: object|null}} world and notice.
+       */
+      function readStored() {
+        const result = { world: null, notice: null }
+        if (storage === null) return result
+        let raw = null
+        try {
+          raw = storage.getItem(STORAGE_KEY)
+        } catch {
+          return result
+        }
+        if (raw === null || raw === undefined || raw === '') {
+          // Nothing to resume. An old build's world may still sit in the v1 key:
+          // report it and leave it exactly where it is (this build never writes
+          // it), rather than letting the first autosave look like a clean slate.
+          let legacy = null
+          try {
+            legacy = storage.getItem(LEGACY_STORAGE_KEY)
+          } catch {
+            legacy = null
+          }
+          if (legacy !== null && legacy !== undefined && legacy !== '') {
+            result.notice = { kind: 'legacy', detail: null }
+          }
+          return result
+        }
+        try {
+          result.world = deserializeWorld(JSON.parse(raw))
+        } catch (error) {
+          const detail = error !== null && error !== undefined && error.message !== undefined
+            ? String(error.message)
+            : String(error)
+          result.notice = { kind: 'load', detail }
+        }
+        return result
+      }
+
       /** Read and parse the saved world, ignoring anything unusable. */
       function load() {
-        if (storage === null) return null
-        try {
-          const raw = storage.getItem(STORAGE_KEY)
-          if (raw === null || raw === undefined) return null
-          return deserializeWorld(JSON.parse(raw))
-        } catch {
-          return null
-        }
+        return readStored().world
       }
 
       /** Persist the world; a full or missing storage is not fatal. */
@@ -7891,6 +8526,12 @@ window.__ModuleLoader__.load({
         publish()
       }
 
+      /** Dismiss the save-file notice for this session. */
+      function dismissNotice() {
+        notice = null
+        publish()
+      }
+
       /** Show the guide again ("How to play" -> start over). */
       function resetOnboarding() {
         onboardingFlag = false
@@ -7930,6 +8571,8 @@ window.__ModuleLoader__.load({
       let eventSeq = 0
       const causeTally = {}
       const deathCount = {}
+      /** How many death causes came from a carcass and how many were inferred. */
+      const causeSource = { exact: 0, inferred: 0 }
       const placedIds = new Set()
       const corpseSeen = new Set()
       const rateIntake = {}
@@ -7948,6 +8591,8 @@ window.__ModuleLoader__.load({
         corpseSeen.clear()
         for (const key of Object.keys(causeTally)) delete causeTally[key]
         for (const key of Object.keys(deathCount)) delete deathCount[key]
+        causeSource.exact = 0
+        causeSource.inferred = 0
         for (const key of Object.keys(rateIntake)) delete rateIntake[key]
         rates.gpp = 0
         rates.herbs = 0
@@ -8136,6 +8781,10 @@ window.__ModuleLoader__.load({
             const pool = explained.get(rec.species)
             const hit = pool === undefined || pool.length === 0 ? null : pool.pop()
             const cause = hit === null ? classifyDeath(rec, previous.hunters) : hit.cause
+            // The panel marks the difference: a carcass carries the cause the
+            // engine wrote, everything else is this layer's inference.
+            if (hit === null) causeSource.inferred += 1
+            else causeSource.exact += 1
             const atX = hit === null ? rec.x : hit.x
             const atY = hit === null ? rec.y : hit.y
             const causes = causeBucket(rec.species)
@@ -8482,6 +9131,8 @@ window.__ModuleLoader__.load({
             plants: { grass: 0, weed: 0, energy: 0 },
             climate: { temperature: null, sunlight: 1, dayPhase: 0.26, yearPhase: null, season: null },
             onboarding: onboardingSeen(),
+            notice,
+            causeSource: { exact: 0, inferred: 0 },
           }
         }
         const stats = sampleStats(world)
@@ -8510,6 +9161,8 @@ window.__ModuleLoader__.load({
           plants: observation === null ? { grass: 0, weed: 0, energy: 0 } : observation.plants,
           climate: climateView(world),
           onboarding: onboardingSeen(),
+          notice,
+          causeSource: { exact: causeSource.exact, inferred: causeSource.inferred },
         }
       }
 
@@ -8852,9 +9505,11 @@ window.__ModuleLoader__.load({
         restock,
         markOnboardingSeen,
         resetOnboarding,
+        dismissNotice,
         save,
         peekSave() {
-          return load()
+          // Peeking must not consume the notice that the panel has not shown yet.
+          return readStored().world
         },
         dispose() {
           detach()
@@ -9200,6 +9855,18 @@ window.__ModuleLoader__.load({
     // ---------------------------------------------------------------------
     // Panel UI
     // ---------------------------------------------------------------------
+    //
+    // Three ideas hold this file together:
+    //
+    //  1. Every panel answers a question a player would ask out loud: what is
+    //     left, what is it doing, why, and where did the energy go. A number
+    //     with no sentence next to it does not ship.
+    //  2. Anything the engine does not publish yet is drawn as derived and
+    //     labelled, never invented. The panels get richer for free as the
+    //     simulation starts reporting (see docs/80-UI.md).
+    //  3. All three side tabs are mounted and hidden with CSS rather than
+    //     unmounted, so every panel is exercised by the render test instead of
+    //     only the tab that happens to be active.
 
     /**
      * Error boundary around the panel.
@@ -9248,12 +9915,98 @@ window.__ModuleLoader__.load({
     const MIN_SCALE = 1
     const MAX_SCALE = 16
 
+    /** Side-panel tabs, in reading order. */
+    const SIDE_TABS = ['tools', 'species', 'energy']
+
+    /** Ticker filter chips: everything, then one per event kind. */
+    const EVENT_FILTERS = ['all', ...EVENT_KINDS]
+
     /**
-     * The one and only camera → viewport conversion.
+     * Colour per death cause, shared by the species bar, the inspector chip and
+     * the ticker, so a red kill reads red everywhere.
+     */
+    const CAUSE_COLORS = {
+      predation: '#d9534f',
+      starved: '#c98a2b',
+      frozen: '#4f8fd0',
+      old: '#8a8f99',
+      disease: '#9a6bd0',
+      unknown: '#5d6470',
+    }
+
+    /** Stage colours for the energy cascade. */
+    const FLOW_COLORS = {
+      sun: '#e0a13a',
+      plants: '#4a9d54',
+      herbs: '#c9a97b',
+      carns: '#d2733c',
+      respire: '#5d6470',
+    }
+
+    /**
+     * Translation for a state id. A state behaviour adds later still renders, as
+     * its raw id, instead of as a blank chip.
+     * @param {Function} t - translator.
+     * @param {string} id - state or intent id.
+     * @returns {string} label.
+     */
+    function intentLabel(t, id) {
+      if (typeof id !== 'string' || id === '') return ''
+      return INTENT_IDS.includes(id) ? t('intent.' + id) : id
+    }
+
+    /**
+     * Translation for the drive code a decision says it acted on.
+     * @param {Function} t - translator.
+     * @param {string} code - why code from the decision record.
+     * @returns {string} label.
+     */
+    function whyLabel(t, code) {
+      if (typeof code !== 'string' || code === '') return ''
+      if (DRIVE_KEYS.includes(code)) return t('drive.' + code)
+      if (code === 'search') return t('reason.search')
+      if (code === 'idle') return t('reason.idle')
+      return code
+    }
+
+    /**
+     * A duration as a compact chip value.
+     * @param {number} seconds - in-world seconds.
+     * @returns {string} e.g. '3.4s', '48s', '2:05'.
+     */
+    function shortTime(seconds) {
+      if (!Number.isFinite(seconds) || seconds < 0) return '—'
+      if (seconds < 10) return (Math.round(seconds * 10) / 10) + 's'
+      if (seconds < 120) return Math.round(seconds) + 's'
+      return Math.floor(seconds / 60) + ':' + String(Math.round(seconds % 60)).padStart(2, '0')
+    }
+
+    /**
+     * Energy with a unit prefix, in kJ.
+     * @param {number} kilojoules - energy.
+     * @returns {string} e.g. '820', '12.4k', '2.31M'.
+     */
+    function formatEnergy(kilojoules) {
+      const value = Number.isFinite(kilojoules) ? kilojoules : 0
+      if (Math.abs(value) >= 1000000) return (value / 1000000).toFixed(2) + 'M'
+      if (Math.abs(value) >= 1000) return (value / 1000).toFixed(1) + 'k'
+      return String(Math.round(value))
+    }
+
+    /**
+     * 0..1 as a whole percentage.
+     * @param {number} ratio - fraction.
+     * @returns {number} 0..100.
+     */
+    function percentOf(ratio) {
+      return Math.round(clamp(Number.isFinite(ratio) ? ratio : 0, 0, 1) * 100)
+    }
+
+    /**
+     * The one and only camera to viewport conversion.
      *
      * The render path and the input path both call this. Two separate copies of
-     * this maths is exactly how zoom-to-cursor and hit-testing drift apart, which
-     * is what made the canvas feel broken.
+     * this maths is exactly how zoom-to-cursor and hit-testing drift apart.
      * @param {{cx: number, cy: number, scale: number}} camera - camera state.
      * @param {{width: number, height: number}} stage - stage size in CSS px.
      * @param {{width: number, height: number}} world - world size in cells.
@@ -9272,8 +10025,8 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Stage-relative client coordinates → world cell coordinates.
-     * @param {object} view - result of `viewFromCamera`.
+     * Stage-relative client coordinates to world cell coordinates.
+     * @param {object} view - result of viewFromCamera.
      * @param {{left: number, top: number}} stageRect - stage bounding rect.
      * @param {number} clientX - pointer x.
      * @param {number} clientY - pointer y.
@@ -9322,12 +10075,49 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Inspector card: species, energy, genes, lineage, follow and deselect.
-     * @param {object} props - `{ selected, t, onFollow, onClear, following }`.
+     * One label of a key/value block.
+     * @param {object} props - props.label, props.title.
+     * @returns {object} React element.
+     */
+    function KeyValue(props) {
+      return h('span', { className: 'pe-kv-key', title: props.title }, props.label)
+    }
+
+    /**
+     * Death-cause bar: one segment per cause, in a fixed cause order so the same
+     * cause sits in the same place on every row and rows can be compared.
+     * @param {object} props - props.deaths, props.t.
+     * @returns {object} React element.
+     */
+    function CauseBar(props) {
+      const deaths = props.deaths ?? {}
+      const t = props.t
+      let total = 0
+      for (const key of CAUSE_KEYS) total += deaths[key] ?? 0
+      if (total === 0) return h('span', { className: 'pe-note' }, '—')
+      const segments = []
+      for (const key of CAUSE_KEYS) {
+        const value = deaths[key] ?? 0
+        if (value === 0) continue
+        segments.push(h('span', {
+          key,
+          className: 'pe-cause',
+          style: { width: percentOf(value / total) + '%', background: CAUSE_COLORS[key] },
+          title: t('cause.' + key) + ' ' + value,
+        }))
+      }
+      return h('div', { className: 'pe-causes' }, segments)
+    }
+
+    /**
+     * Inspector v2: what the animal is, what it is doing right now, why, and
+     * what is most likely to kill it.
+     * @param {object} props - props.selected, props.t, props.onFollow, props.onClear, props.following.
      * @returns {object} React element.
      */
     function Inspector(props) {
-      const { selected, t, onFollow, onClear, following } = props
+      const selected = props.selected
+      const t = props.t
       if (selected === null || selected === undefined) {
         return h('div', { className: 'pe-empty' },
           h('div', { className: 'pe-empty-icon' }, h(PixelGlyph, { name: 'target', size: 22 })),
@@ -9335,61 +10125,351 @@ window.__ModuleLoader__.load({
           h('div', { className: 'pe-empty-hint' }, t('inspect.emptyHint')))
       }
       const species = SPECIES[selected.species]
-      const energyRatio = clamp(selected.energy / Math.max(1, selected.maxEnergy), 0, 1)
+      const color = species === undefined ? '#999' : species.color
+      const body = selected.body ?? null
+      const drives = selected.drives ?? {}
+      const state = selected.state ?? null
+      const reason = selected.reason ?? null
+      const cause = selected.cause ?? { predicted: null, actual: null }
+      const ratio = clamp(selected.energy / Math.max(1, selected.maxEnergy), 0, 1)
+      // Gene bars: where this animal sits inside its species' range.
       const genes = species === undefined ? [] : GENE_KEYS.map((key) => {
         const range = species.genes[key]
-        const ratio = clamp((selected.genes[key] - range[0]) / Math.max(1e-6, range[1] - range[0]), 0, 1)
+        const value = selected.genes[key]
+        const geneRatio = clamp((value - range[0]) / Math.max(1e-6, range[1] - range[0]), 0, 1)
         return h('div', { className: 'pe-gene', key },
-          h('span', { className: 'pe-gene-label' }, t(`inspect.gene.${key}`)),
+          h('span', { className: 'pe-gene-label' }, t('inspect.gene.' + key)),
           h('span', { className: 'pe-gene-track' }, h('span', {
             className: 'pe-gene-fill',
-            style: { width: `${Math.round(ratio * 100)}%`, background: species.color },
+            style: { width: percentOf(geneRatio) + '%', background: color },
           })),
-          h('span', { className: 'pe-gene-value' }, selected.genes[key].toFixed(1)))
+          h('span', { className: 'pe-gene-value' }, value.toFixed(1)))
       })
+      const driveBars = DRIVE_KEYS.map((key) => {
+        const value = clamp(Number(drives[key]) || 0, 0, 1)
+        return h('div', { className: 'pe-drive' + (value >= 0.7 ? ' is-high' : ''), key },
+          h('span', { className: 'pe-drive-label' }, t('drive.' + key)),
+          h('span', { className: 'pe-drive-track' }, h('span', {
+            className: 'pe-drive-fill',
+            style: { width: percentOf(value) + '%' },
+          })),
+          h('span', { className: 'pe-drive-value' }, String(percentOf(value))))
+      })
+      // The "why": the decision record when behaviour published one, otherwise
+      // the loudest drive, and the card says which of the two it is showing.
+      const whyText = reason === null
+        ? t('inspect.decisionNone')
+        : reason.derived === true
+          ? t('inspect.decisionWhy', { why: whyLabel(t, reason.drive) })
+          : t('inspect.decisionWhy', { why: whyLabel(t, reason.why) })
+      const rivals = reason === null || reason.rivals === undefined || reason.rivals.length === 0
+        ? null
+        : h('span', { className: 'pe-quote-meta' },
+            reason.rivals.map(rival => t('inspect.decisionBeat', {
+              kind: intentLabel(t, rival.kind),
+              score: rival.score.toFixed(2),
+            })).join(' · '))
+      const predicted = cause.predicted === null || cause.predicted === undefined
+        ? h('span', null, t('inspect.causeNone'))
+        : h('span', null, t('cause.' + cause.predicted))
+      const goalLine = selected.goal === null || selected.goal === undefined
+        ? h('span', null, '—')
+        : h('span', null, Math.round(selected.goal.x) + ', ' + Math.round(selected.goal.y) + ' · ' +
+            t('inspect.goalDistance', { n: Math.round(selected.goal.distance) }))
+      const planLine = selected.plan === null || selected.plan === undefined || selected.plan.steps.length === 0
+        ? h('span', null, '—')
+        : h('span', null, t('inspect.planStep', {
+            x: Math.round(selected.plan.steps[0].x),
+            y: Math.round(selected.plan.steps[0].y),
+            act: intentLabel(t, selected.plan.steps[0].act),
+          }))
       return h('div', { className: 'pe-card' },
         h('div', { className: 'pe-card-head' },
-          h('span', { className: 'pe-swatch', style: { background: species?.color } }),
-          h('span', { className: 'pe-card-title' }, t(`species.${selected.species}`)),
-          h('span', { className: 'pe-tag' }, t(`stage.${selected.stage ?? 'adult'}`)),
-          selected.intent === 'flee'
+          h(PixelGlyph, { name: speciesGlyph(selected.species), color, size: 16 }),
+          h('span', { className: 'pe-card-title' }, t('species.' + selected.species)),
+          h('span', { className: 'pe-tag' }, t('stage.' + (selected.stage ?? 'adult'))),
+          selected.fleeing === true
             ? h('span', { className: 'pe-tag pe-tag-alert' }, t('intent.flee'))
-            : h('span', { className: 'pe-tag pe-tag-intent' }, t(`intent.${selected.intent ?? 'explore'}`)),
+            : h('span', { className: 'pe-tag pe-tag-intent' }, intentLabel(t, state === null ? selected.intent : state.id)),
           h('button', {
             type: 'button', className: 'pe-icon-btn', title: t('action.deselect'),
-            'aria-label': t('action.deselect'), onClick: onClear,
+            'aria-label': t('action.deselect'), onClick: props.onClear,
           }, h(PixelGlyph, { name: 'close', size: 12 }))),
         h('div', { className: 'pe-meter' },
-          h('span', { className: 'pe-meter-fill', style: { width: `${Math.round(energyRatio * 100)}%` } })),
+          h('span', { className: 'pe-meter-fill', style: { width: percentOf(ratio) + '%' } })),
+        // The first two rows are the two numbers every version of this panel has
+        // shown; the render test pins that order.
         h('div', { className: 'pe-rows' },
-          h('div', { className: 'pe-row' }, h('span', null, t('inspect.age')), h('b', null, `${Math.round(selected.age)}s`)),
-          h('div', { className: 'pe-row' }, h('span', null, t('inspect.energy')), h('b', null, `${Math.round(selected.energy)} / ${Math.round(selected.maxEnergy)}`))),
+          h('div', { className: 'pe-row' }, h('span', null, t('inspect.age')),
+            h('b', null, t('inspect.seconds', { n: Math.round(selected.age) }))),
+          h('div', { className: 'pe-row' }, h('span', null, t('inspect.energy')),
+            h('b', null, formatEnergy(selected.energy) + ' / ' + formatEnergy(selected.maxEnergy)))),
+        h('div', { className: 'pe-kv' },
+          h(KeyValue, { label: t('inspect.structure') }),
+          h('span', { className: 'pe-kv-value' },
+            body === null || body.structure === null || body.structure === undefined
+              ? '—'
+              : body.structureUnit === 'kg'
+                ? t('inspect.kg', { n: body.structure.toFixed(2) })
+                : body.structure.toFixed(2)),
+          h(KeyValue, { label: t('inspect.maturity') }),
+          h('span', { className: 'pe-kv-value' },
+            body === null || body.maturity === null || body.maturity === undefined ? '—' : percentOf(body.maturity) + '%'),
+          h(KeyValue, { label: t('inspect.health') }),
+          h('span', { className: 'pe-kv-value' },
+            body === null || body.health === null || body.health === undefined ? '—' : percentOf(body.health) + '%'),
+          h(KeyValue, { label: t('inspect.fatigue') }),
+          h('span', { className: 'pe-kv-value' },
+            body === null || body.fatigue === null || body.fatigue === undefined ? '—' : percentOf(body.fatigue) + '%')),
+        h('div', { className: 'pe-kv' },
+          h(KeyValue, { label: t('inspect.state') }),
+          h('span', { className: 'pe-kv-value' },
+            intentLabel(t, state === null ? selected.intent : state.id) +
+            (state === null || state.phase === null ? '' : ' · ' + t('phase.' + state.phase))),
+          h(KeyValue, { label: t('inspect.remaining') }),
+          h('span', { className: 'pe-kv-value' },
+            state === null || state.remaining === null || state.remaining === undefined
+              ? '—'
+              : t('inspect.seconds', { n: Math.round(state.remaining) })),
+          h(KeyValue, { label: t('inspect.nextDecision') }),
+          h('span', { className: 'pe-kv-value' },
+            state === null || state.nextDecision === null || state.nextDecision === undefined
+              ? '—'
+              : t('inspect.seconds', { n: Math.round(state.nextDecision) })),
+          h(KeyValue, { label: t('inspect.goal') }),
+          h('span', { className: 'pe-kv-value' }, goalLine),
+          h(KeyValue, { label: t('inspect.plan') }),
+          h('span', { className: 'pe-kv-value' }, planLine)),
+        h('div', { className: 'pe-quote' },
+          h('span', null, t('inspect.decision') + ' · ' + whyText),
+          reason === null || reason.at === null || reason.at === undefined
+            ? null
+            : h('span', { className: 'pe-quote-meta' },
+                t('inspect.decisionAgo', { n: Math.max(0, Math.round(selected.decisionAge ?? 0)) })),
+          rivals),
         h('div', { className: 'pe-chipline' },
           h('span', { className: 'pe-tag' }, t('inspect.generation', { n: selected.generation })),
-          h('span', { className: 'pe-tag' }, t('inspect.children', { n: selected.children }))),
-        h('div', { className: 'pe-needs' },
-          NEED_KEYS.map(key => h('div', { className: 'pe-need', key },
-            h('span', { className: 'pe-need-label' }, t(`needs.${key}`)),
-            h('span', { className: 'pe-need-track' }, h('span', {
-              className: 'pe-need-fill',
-              style: { width: `${Math.round((selected.needs?.[key] ?? 0) * 100)}%` },
-            })),
-            h('span', { className: 'pe-need-value' }, String(Math.round((selected.needs?.[key] ?? 0) * 100)))))),
+          h('span', { className: 'pe-tag' }, t('inspect.children', { n: selected.children })),
+          selected.threats > 0
+            ? h('span', { className: 'pe-tag pe-tag-alert' }, t('inspect.threats', { n: selected.threats }))
+            : null),
+        h('div', { className: 'pe-panel-title' }, t('inspect.drives') +
+          (selected.drivesDerived === true ? ' · ' + t('inspect.drivesDerived') : '')),
+        h('div', { className: 'pe-drives' }, driveBars),
+        h('div', { className: 'pe-kv' },
+          h(KeyValue, { label: t('inspect.cause') + ' · ' + t('inspect.causePredicted') }),
+          h('span', { className: 'pe-kv-value' }, predicted)),
         h('div', { className: 'pe-genes' }, genes),
         h('button', {
           type: 'button',
-          className: `pe-btn pe-btn-block${following ? ' pe-btn-active' : ''}`,
-          onClick: onFollow,
-        }, following ? t('inspect.unfollow') : t('inspect.follow')))
+          className: 'pe-btn pe-btn-block' + (props.following ? ' pe-btn-active' : ''),
+          onClick: props.onFollow,
+        }, props.following ? t('inspect.unfollow') : t('inspect.follow')))
+    }
+
+    /**
+     * Species table: counts, reserve, age and the cause breakdown, with a row
+     * click that flies to a living member.
+     * @param {object} props - props.rows, props.t, props.onLocate.
+     * @returns {object} React element.
+     */
+    function SpeciesPanel(props) {
+      const rows = props.rows ?? []
+      const t = props.t
+      if (rows.length === 0) return h('div', { className: 'pe-blank' }, t('species.empty'))
+      const header = h('div', { className: 'pe-srow pe-srow-head' },
+        h('span', null, ''),
+        h('span', { className: 'pe-srow-name' }, t('budget.species')),
+        h('span', { className: 'pe-srow-num' }, t('metric.count')),
+        h('span', { className: 'pe-srow-num' }, t('metric.energy')),
+        h('span', { className: 'pe-srow-num' }, t('metric.age')))
+      const body = rows.map((row) => {
+        const species = SPECIES[row.id]
+        const color = species === undefined ? '#999' : species.color
+        return h('div', {
+          key: row.id,
+          className: 'pe-srow' + (row.count === 0 ? ' is-gone' : ''),
+          onClick: () => props.onLocate(row.id),
+          title: row.count === 0 ? t('species.extinct') : t('species.deadTotal', { n: row.dead }),
+        },
+          h(PixelGlyph, { name: speciesGlyph(row.id), color, size: 12 }),
+          h('span', { className: 'pe-srow-name' }, t('species.' + row.id)),
+          h('span', { className: 'pe-srow-num' }, String(row.count)),
+          h('span', { className: 'pe-sbar' }, h('span', {
+            className: 'pe-sbar-fill',
+            style: { width: percentOf(row.meanRatio) + '%', background: color },
+          })),
+          h('span', { className: 'pe-srow-num' }, row.count === 0 ? '—' : shortTime(row.meanAge)))
+      })
+      const deadRows = rows.filter(row => row.dead > 0).map((row) => {
+        const species = SPECIES[row.id]
+        const color = species === undefined ? '#999' : species.color
+        return h('div', { className: 'pe-srow', key: 'dead-' + row.id, title: t('metric.causes') },
+          h(PixelGlyph, { name: speciesGlyph(row.id), color, size: 12 }),
+          h('span', { className: 'pe-srow-name' }, t('species.' + row.id)),
+          h('span', { className: 'pe-srow-num' }, String(row.dead)),
+          h('span', { style: { gridColumn: '4 / span 2' } }, h(CauseBar, { deaths: row.deaths, t })))
+      })
+      // Deaths whose cause came from the engine's own carcass record are facts;
+      // the rest were inferred here, and the header says how many.
+      const inferred = props.inferred ?? 0
+      const causesTitle = deadRows.length === 0
+        ? null
+        : h('div', { className: 'pe-panel-title' },
+            t('metric.causes') + (inferred > 0 ? ' · ' + t('inspect.causeInferred') + ' ' + inferred : ''))
+      return h('div', { className: 'pe-rows' },
+        header,
+        body,
+        causesTitle,
+        deadRows)
+    }
+
+    /**
+     * Energy flow: the cascade sun to plants to herbivores to carnivores, then
+     * the per-species budget that produced it.
+     * @param {object} props - props.flows, props.rows, props.t.
+     * @returns {object} React element.
+     */
+    function EnergyFlowPanel(props) {
+      const t = props.t
+      const flows = props.flows ?? { gpp: 0, herbs: 0, carns: 0, respire: 0, plantStock: 0, animalStock: 0 }
+      const rows = props.rows ?? []
+      const peak = Math.max(flows.gpp, flows.herbs, flows.carns, 1)
+      const stage = (key, label, value, color) => h('div', {
+        className: 'pe-flow-row',
+        key,
+        title: key === 'sun' ? t('flow.gpp') : label,
+      },
+        h('span', { className: 'pe-flow-label' }, label),
+        h('span', { className: 'pe-flow-track' }, h('span', {
+          className: 'pe-flow-fill',
+          style: { width: Math.max(value > 0 ? 2 : 0, percentOf(Math.min(1, value / peak))) + '%', background: color },
+        })),
+        h('span', { className: 'pe-flow-value' }, formatEnergy(value)))
+      const running = flows.gpp > 0 || flows.herbs > 0 || flows.carns > 0
+      const cascade = running
+        ? h('div', { className: 'pe-flow' },
+            stage('sun', t('flow.sun'), flows.gpp, FLOW_COLORS.sun),
+            stage('plants', t('flow.plants'), flows.herbs, FLOW_COLORS.plants),
+            stage('herbs', t('flow.herbivores'), flows.carns, FLOW_COLORS.herbs),
+            stage('carns', t('flow.respire'), flows.respire, FLOW_COLORS.respire))
+        : h('div', { className: 'pe-blank' }, t('flow.waiting'))
+      const budget = rows.filter(row => row.count > 0).map(row => h('div', { className: 'pe-srow', key: 'budget-' + row.id },
+        h(PixelGlyph, { name: speciesGlyph(row.id), color: SPECIES[row.id]?.color, size: 12 }),
+        h('span', { className: 'pe-srow-name' }, t('species.' + row.id)),
+        h('span', { className: 'pe-srow-num' }, formatEnergy(row.intake)),
+        h('span', { className: 'pe-srow-num' }, formatEnergy(row.respire)),
+        h('span', { className: 'pe-srow-num' }, formatEnergy(row.intake - row.respire))))
+      return h('div', { className: 'pe-rows' },
+        h('div', { className: 'pe-panel-title' }, t('flow.panelTitle')),
+        cascade,
+        h('div', { className: 'pe-kv' },
+          h(KeyValue, { label: t('flow.stock') + ' · ' + t('flow.plants') }),
+          h('span', { className: 'pe-kv-value' }, formatEnergy(flows.plantStock) + ' ' + t('flow.unit')),
+          h(KeyValue, { label: t('flow.stock') + ' · ' + t('flow.animals') }),
+          h('span', { className: 'pe-kv-value' }, formatEnergy(flows.animalStock) + ' ' + t('flow.unit')),
+          h(KeyValue, { label: t('flow.respire') }),
+          h('span', { className: 'pe-kv-value' }, formatEnergy(flows.respire) + ' ' + t('flow.unit'))),
+        h('div', { className: 'pe-panel-title' }, t('budget.title')),
+        h('div', { className: 'pe-srow pe-srow-head' },
+          h('span', null, ''),
+          h('span', { className: 'pe-srow-name' }, t('budget.species')),
+          h('span', { className: 'pe-srow-num' }, t('budget.intake')),
+          h('span', { className: 'pe-srow-num' }, t('budget.respire')),
+          h('span', { className: 'pe-srow-num' }, t('budget.net'))),
+        budget,
+        h('div', { className: 'pe-note' }, t('flow.note') + ' ' + t('flow.unit')))
+    }
+
+    /**
+     * Event ticker: one chip per event, newest first, with the species icon, the
+     * count and the coordinates. Clicking one flies the camera there.
+     * @param {object} props - props.events, props.t, props.filter, props.onFilter, props.onLocate, props.now.
+     * @returns {object} React element.
+     */
+    function EventBar(props) {
+      const t = props.t
+      const now = Number.isFinite(props.now) ? props.now : 0
+      const filters = EVENT_FILTERS.map(kind => h('button', {
+        key: kind,
+        type: 'button',
+        className: 'pe-eventfilter' + (props.filter === kind ? ' is-active' : ''),
+        onClick: () => props.onFilter(kind),
+      }, kind === 'all' ? t('event.all') : t('event.' + kind)))
+      const all = props.events ?? []
+      const shown = props.filter === undefined || props.filter === 'all'
+        ? all
+        : all.filter(event => event.kind === props.filter)
+      const items = shown.slice(0, 16).map((event) => {
+        const species = SPECIES[event.species]
+        const color = species === undefined ? '#999' : species.color
+        const age = Math.max(0, now - event.t)
+        return h('button', {
+          key: event.seq,
+          type: 'button',
+          className: 'pe-event pe-event-' + event.kind,
+          title: t('event.' + event.kind) + ' · ' + t('species.' + event.species) + ' · ' +
+            Math.round(event.x) + ', ' + Math.round(event.y),
+          'aria-label': t('events.locate'),
+          onClick: () => props.onLocate(event),
+        },
+          h(PixelGlyph, { name: EVENT_GLYPHS[event.kind] ?? 'target', color, size: 12 }),
+          h('span', null, t('species.' + event.species)),
+          event.count > 1 ? h('span', { className: 'pe-event-count' }, t('events.count', { n: event.count })) : null,
+          event.cause === null || event.cause === undefined
+            ? null
+            : h('span', { className: 'pe-event-count' }, t('cause.' + event.cause)),
+          h('span', { className: 'pe-event-where' }, Math.round(event.x) + ',' + Math.round(event.y)),
+          h('span', { className: 'pe-event-time' },
+            age < 3 ? t('events.justNow') : t('events.secondsAgo', { n: Math.round(age) })))
+      })
+      return h('div', { className: 'pe-eventbar' },
+        h('span', { className: 'pe-eventbar-title' }, t('events.title')),
+        h('div', { className: 'pe-events-filters', title: t('events.filter') }, filters),
+        h('div', { className: 'pe-events' },
+          items.length > 0 ? items : h('span', { className: 'pe-events-empty' }, t('events.empty'))))
+    }
+
+    /**
+     * First-run guide: three steps, one button, remembered in the store.
+     * @param {object} props - props.t, props.onDismiss.
+     * @returns {object} React element.
+     */
+    function OnboardingOverlay(props) {
+      const t = props.t
+      return h('div', { className: 'pe-onboard', role: 'dialog', 'aria-label': t('onboard.title') },
+        h('div', { className: 'pe-onboard-title' }, t('onboard.title')),
+        h('ol', { className: 'pe-onboard-steps' },
+          h('li', null, t('onboard.step1')),
+          h('li', null, t('onboard.step2')),
+          h('li', null, t('onboard.step3'))),
+        h('div', { className: 'pe-onboard-actions' },
+          h('button', { type: 'button', className: 'pe-btn pe-btn-active', onClick: props.onDismiss },
+            t('onboard.dismiss'))))
+    }
+
+    /**
+     * The world went quiet: say so and offer the restock button instead of
+     * leaving the player with an empty meadow and no idea what to do.
+     * @param {object} props - props.t, props.onRestock.
+     * @returns {object} React element.
+     */
+    function EmptyWorldOverlay(props) {
+      const t = props.t
+      return h('div', { className: 'pe-emptyworld' },
+        h('div', { className: 'pe-emptyworld-title' }, t('status.emptyWorld')),
+        h('div', { className: 'pe-emptyworld-hint' }, t('status.emptyWorldHint')),
+        h('button', { type: 'button', className: 'pe-btn', onClick: props.onRestock }, t('status.restock')))
     }
 
     /**
      * Population chart with filled areas and a legend.
-     * @param {object} props - `{ history, t }`.
+     * @param {object} props - props.history, props.t.
      * @returns {object} React element.
      */
     function PopulationChart(props) {
-      const { history, t } = props
+      const history = props.history
+      const t = props.t
       const canvasRef = React.useRef(null)
       React.useEffect(() => {
         const canvas = canvasRef.current
@@ -9445,17 +10525,19 @@ window.__ModuleLoader__.load({
         h('div', { className: 'pe-panel-title' }, t('chart.title')),
         h('canvas', { ref: canvasRef, width: 240, height: 64, className: 'pe-chart' }),
         h('div', { className: 'pe-legend' }, SPECIES_IDS.map(id => h('span', { className: 'pe-legend-item', key: id },
-          h('span', { className: 'pe-swatch pe-swatch-sm', style: { background: SPECIES[id].color } }),
-          h('span', null, t(`species.${id}`))))))
+          h(PixelGlyph, { name: speciesGlyph(id), color: SPECIES[id].color, size: 10 }),
+          h('span', null, t('species.' + id))))))
     }
 
     /**
      * Minimap with the current viewport rectangle; click to jump.
-     * @param {object} props - `{ store, snapshot, onJump }`.
+     * @param {object} props - props.store, props.snapshot, props.onJump.
      * @returns {object} React element.
      */
     function Minimap(props) {
-      const { store, snapshot, onJump } = props
+      const store = props.store
+      const snapshot = props.snapshot
+      const onJump = props.onJump
       const canvasRef = React.useRef(null)
       const MAP_W = 168
       const MAP_H = 105
@@ -9499,11 +10581,13 @@ window.__ModuleLoader__.load({
 
     /**
      * The whole panel.
-     * @param {object} props - slot props plus `{ store, locale, layout }`.
+     * @param {object} props - slot props plus props.store, props.locale, props.layout.
      * @returns {object} React element.
      */
     function TerrariumPanel(props) {
-      const { store, locale, layout } = props
+      const store = props.store
+      const locale = props.locale
+      const layout = props.layout
       const t = useTranslate(locale)
       const snapshot = useStore(store)
       const worldSize = snapshot.world ?? { width: GRID_W, height: GRID_H }
@@ -9511,9 +10595,11 @@ window.__ModuleLoader__.load({
       const [brushIndex, setBrushIndex] = React.useState(1)
       const [helpOpen, setHelpOpen] = React.useState(false)
       const [confirmNew, setConfirmNew] = React.useState(false)
+      const [tab, setTab] = React.useState('tools')
+      const [eventFilter, setEventFilter] = React.useState('all')
       const [cameraTick, setCameraTick] = React.useState(0)
       const [toast, setToast] = React.useState(null)
-      const [hoverCell, setHoverCell] = React.useState(null)
+      const [hover, setHover] = React.useState(null)
       const toastTimer = React.useRef(0)
       const stageRef = React.useRef(null)
       const canvasRef = React.useRef(null)
@@ -9574,6 +10660,14 @@ window.__ModuleLoader__.load({
 
       const bumpCamera = React.useCallback(() => setCameraTick(value => value + 1), [])
 
+      /** Show a short message above the map. */
+      const showToast = React.useCallback((message) => {
+        if (message === null || message === undefined) return
+        setToast(message)
+        if (toastTimer.current !== 0) clearTimeout(toastTimer.current)
+        toastTimer.current = setTimeout(() => setToast(null), 1800)
+      }, [])
+
       /** Centre the camera on a world point. */
       const lookAt = React.useCallback((x, y) => {
         cameraRef.current.cx = clamp(x, 0, worldSize.width)
@@ -9591,6 +10685,37 @@ window.__ModuleLoader__.load({
         cameraRef.current.fitted = true
         bumpCamera()
       }, [stageSize, worldSize, bumpCamera])
+
+      /**
+       * Fly to the place an event happened, and open the animal when it is still
+       * alive. This is what makes the ticker a way to *watch* the world.
+       */
+      const locateEvent = React.useCallback((event) => {
+        lookAt(event.x, event.y)
+        if (event.id > 0) store.select(event.id)
+      }, [store, lookAt])
+
+      /** Fly to the first living member of a species (species table row). */
+      const locateSpecies = React.useCallback((id) => {
+        const world = store.getWorld()
+        if (world === null || world === undefined) return
+        const entity = world.entities.find(candidate => candidate.species === id)
+        if (entity === undefined) return
+        lookAt(entity.x, entity.y)
+        store.select(entity.id)
+      }, [store, lookAt])
+
+      /** Put a starter population back into an empty world. */
+      const restockWorld = React.useCallback(() => {
+        const released = store.restock()
+        showToast(t('toast.placed', { n: released }))
+      }, [store, showToast, t])
+
+      /** Close the help sheet and show the first-run guide again. */
+      const replayGuide = React.useCallback(() => {
+        setHelpOpen(false)
+        store.resetOnboarding()
+      }, [store])
 
       // ---------------------------------------------------------------------
       // Input: pointer mode pans and selects; the brush tools paint.
@@ -9611,10 +10736,15 @@ window.__ModuleLoader__.load({
         const stageRect = () => stage.getBoundingClientRect()
         const cellAt = (clientX, clientY) => worldFromPoint(viewRef.current, stageRect(), clientX, clientY)
 
-        const report = (released) => {
-          if (SPECIES[toolRef.current] === undefined) return
+        const report = (released, erased) => {
           const translate = translateRef.current
-          setToast(released > 0 ? translate('toast.placed', { n: released }) : translate('toast.blocked'))
+          let message = null
+          if (erased === true) message = translate('toast.erased')
+          else if (SPECIES[toolRef.current] !== undefined) {
+            message = released > 0 ? translate('toast.placed', { n: released }) : translate('toast.blocked')
+          }
+          if (message === null) return
+          setToast(message)
           if (toastTimer.current !== 0) clearTimeout(toastTimer.current)
           toastTimer.current = setTimeout(() => setToast(null), 1800)
         }
@@ -9633,8 +10763,9 @@ window.__ModuleLoader__.load({
           drag.lastCell = ''
           const point = cellAt(event.clientX, event.clientY)
           if (drag.mode === 'paint') {
-            drag.lastCell = `${Math.round(point.x)},${Math.round(point.y)}`
-            report(store.paintAt(point.x, point.y, event.button === 2))
+            drag.lastCell = Math.round(point.x) + ',' + Math.round(point.y)
+            const erasing = event.button === 2
+            report(store.paintAt(point.x, point.y, erasing), erasing)
           }
           if (typeof stage.setPointerCapture === 'function' && typeof event.pointerId === 'number') {
             try { stage.setPointerCapture(event.pointerId) } catch { /* capture is optional */ }
@@ -9644,8 +10775,8 @@ window.__ModuleLoader__.load({
 
         const handleMove = (event) => {
           const point = cellAt(event.clientX, event.clientY)
-          const cell = `${Math.round(point.x)},${Math.round(point.y)}`
-          setHoverCell(cell)
+          const cell = Math.round(point.x) + ',' + Math.round(point.y)
+          setHover({ x: point.x, y: point.y })
           store.setHover(point)
           const drag = dragRef.current
           if (drag.mode === 'none') return
@@ -9707,7 +10838,7 @@ window.__ModuleLoader__.load({
 
         const handleLeave = () => {
           store.setHover(null)
-          setHoverCell(null)
+          setHover(null)
           dragRef.current.mode = 'none'
         }
 
@@ -9730,7 +10861,6 @@ window.__ModuleLoader__.load({
           stage.removeEventListener('contextmenu', handleContext)
         }
       }, [store, bumpCamera])
-
 
       React.useEffect(() => {
         const onKey = (event) => {
@@ -9761,35 +10891,62 @@ window.__ModuleLoader__.load({
       }, [confirmNew])
 
       const selected = snapshot.selected ?? null
+      const climate = snapshot.climate ?? { temperature: 0 }
+      const pulse = snapshot.pulse ?? { births: 0, deaths: 0, predations: 0 }
+      const bag = { width: worldSize.width, height: worldSize.height }
 
       const speciesChips = SPECIES_IDS.map((id) => h('span', {
-        className: 'pe-chip', key: id, title: t(`species.${id}`),
+        className: 'pe-chip', key: id, title: t('species.' + id),
       },
-        h('span', { className: 'pe-swatch pe-swatch-sm', style: { background: SPECIES[id].color } }),
+        h(PixelGlyph, { name: speciesGlyph(id), color: SPECIES[id].color, size: 11 }),
         h('span', { className: 'pe-chip-count' }, String(snapshot.stats?.counts?.[id] ?? 0))))
+
+      const labelFor = (id) => (SPECIES[id] === undefined ? t('tool.' + id) : t('species.' + id))
 
       const toolButton = (id) => {
         const isSpecies = SPECIES[id] !== undefined
         const color = isSpecies ? SPECIES[id].color : undefined
-        const label = isSpecies ? t(`species.${id}`) : t(`tool.${id}`)
+        const label = labelFor(id)
         return h('button', {
           type: 'button', key: id,
-          className: `pe-tool${tool === id ? ' is-active' : ''}`,
+          className: 'pe-tool' + (tool === id ? ' is-active' : ''),
           onClick: () => setTool(id),
           title: label,
           'aria-pressed': tool === id,
           'aria-label': label,
         },
-          h(PixelGlyph, { name: isSpecies ? 'creature' : id, color, size: 18 }),
+          h(PixelGlyph, { name: isSpecies ? speciesGlyph(id) : id, color, size: 18 }),
           h('span', { className: 'pe-tool-label' }, label))
       }
 
       const speedButton = (value) => h('button', {
         type: 'button', key: value,
-        className: `pe-seg-btn${snapshot.speed === value && !snapshot.paused ? ' is-active' : ''}`,
+        className: 'pe-seg-btn' + (snapshot.speed === value && !snapshot.paused ? ' is-active' : ''),
         onClick: () => store.setSpeed(value),
-        'aria-label': t(`speed.${value}`),
-      }, t(`speed.${value}`))
+        'aria-label': t('speed.' + value),
+      }, t('speed.' + value))
+
+      const tabButton = (id) => h('button', {
+        type: 'button', key: id,
+        className: 'pe-tab' + (tab === id ? ' is-active' : ''),
+        'aria-selected': tab === id,
+        onClick: () => setTab(id),
+      }, t('tab.' + id))
+
+      const showTab = id => (tab === id ? 'flex' : 'none')
+
+      const brushRadius = BRUSH_RADIUS[brushIndex]
+      const brushPreview = hover === null || tool === 'pointer'
+        ? null
+        : h('span', {
+            className: 'pe-brushpreview',
+            style: {
+              left: ((hover.x - view.x) * view.scale + view.offsetX) + 'px',
+              top: ((hover.y - view.y) * view.scale + view.offsetY) + 'px',
+              width: Math.max(4, (brushRadius * 2 + 1) * view.scale) + 'px',
+              height: Math.max(4, (brushRadius * 2 + 1) * view.scale) + 'px',
+            },
+          })
 
       return h('div', { className: 'pe-root' },
         h('header', { className: 'pe-head' },
@@ -9798,7 +10955,12 @@ window.__ModuleLoader__.load({
             h('div', null,
               h('div', { className: 'pe-title' }, t('panel.title')),
               h('div', { className: 'pe-sub' },
-                `${t('stat.day', { day: snapshot.stats?.day ?? 1 })} · ${snapshot.stats?.clock ?? '06:00'}`))),
+                t('stat.day', { day: snapshot.stats?.day ?? 1 }) + ' · ' + (snapshot.stats?.clock ?? '06:00') +
+                ' · ' + t('status.temperature', { n: Math.round(climate.temperature ?? 0) })))),
+          h('div', { className: 'pe-statusbar' },
+            h('span', { className: 'pe-pill' + (snapshot.paused ? '' : ' pe-pill-live') },
+              snapshot.paused ? t('speed.paused') : t('status.pulse', { births: pulse.births, deaths: pulse.deaths })),
+            h('span', { className: 'pe-pill' }, t('stat.corpses') + ' ' + (snapshot.stats?.corpses ?? 0))),
           h('div', { className: 'pe-chips' }, speciesChips),
           h('div', { className: 'pe-controls' },
             h('button', {
@@ -9815,7 +10977,7 @@ window.__ModuleLoader__.load({
             h('span', { className: 'pe-divider' }),
             h('button', {
               type: 'button',
-              className: `pe-btn${confirmNew ? ' pe-btn-danger' : ''}`,
+              className: 'pe-btn' + (confirmNew ? ' pe-btn-danger' : ''),
               onClick: () => {
                 if (!confirmNew) { setConfirmNew(true); return }
                 setConfirmNew(false)
@@ -9825,53 +10987,97 @@ window.__ModuleLoader__.load({
             }, confirmNew ? t('action.newWorldConfirm') : t('action.newWorld')),
             h('button', { type: 'button', className: 'pe-btn', onClick: fitAll }, t('action.fit')),
             h('button', {
-              type: 'button', className: `pe-btn${helpOpen ? ' pe-btn-active' : ''}`,
+              type: 'button', className: 'pe-btn' + (helpOpen ? ' pe-btn-active' : ''),
               onClick: () => setHelpOpen(open => !open),
             }, t('action.help')),
             layout !== undefined && typeof layout.selectPanel === 'function'
               ? h('button', { type: 'button', className: 'pe-btn pe-btn-ghost', onClick: () => layout.selectPanel('conversation') }, t('action.back'))
               : null)),
         h('div', { className: 'pe-body' },
-          h('div', {
-            className: 'pe-stage',
-            ref: stageRef,
-            style: { cursor: tool === 'pointer' ? 'grab' : 'crosshair' },
-          },
-            h('canvas', {
-              ref: canvasRef,
-              className: 'pe-canvas',
-              width: view.width * view.scale,
-              height: view.height * view.scale,
-              style: {
-                width: `${view.width * view.scale}px`,
-                height: `${view.height * view.scale}px`,
-              },
-            }),
-            h('div', { className: 'pe-hud pe-hud-bl' },
-              h('span', { className: 'pe-hud-item' }, hoverCell === null ? '—' : hoverCell),
-              h('span', { className: 'pe-hud-item' }, `${view.x},${view.y}`),
-              h('span', { className: 'pe-hud-item' }, `${view.width}×${view.height}`),
-              h('span', { className: 'pe-hud-item' }, `${view.scale}×`)),
-            h('div', { className: 'pe-hud pe-hud-br' },
-              h(Minimap, { store, snapshot, onJump: lookAt })),
-            toast === null ? null : h('div', { className: 'pe-toast' }, toast)),
+          h('div', { className: 'pe-stagewrap' },
+            h('div', {
+              className: 'pe-stage',
+              ref: stageRef,
+              style: { cursor: tool === 'pointer' ? 'grab' : 'crosshair' },
+            },
+              h('canvas', {
+                ref: canvasRef,
+                className: 'pe-canvas',
+                width: view.width * view.scale,
+                height: view.height * view.scale,
+                style: {
+                  width: (view.width * view.scale) + 'px',
+                  height: (view.height * view.scale) + 'px',
+                },
+              }),
+              brushPreview,
+              h('div', { className: 'pe-hud pe-hud-bl' },
+                h('span', { className: 'pe-hud-item' },
+                  hover === null ? '—' : t('brush.cell', { x: Math.round(hover.x), y: Math.round(hover.y) })),
+                h('span', { className: 'pe-hud-item' }, t('brush.preview', { tool: labelFor(tool) })),
+                h('span', { className: 'pe-hud-item' }, view.scale + '×')),
+              h('div', { className: 'pe-hud pe-hud-br' },
+                h(Minimap, { store, snapshot, onJump: lookAt })),
+              snapshot.ready === false
+                ? h('div', { className: 'pe-blank' }, t('status.ready'))
+                : null,
+              snapshot.world !== undefined && snapshot.world.empty === true
+                ? h(EmptyWorldOverlay, { t, onRestock: restockWorld })
+                : null,
+              snapshot.onboarding === true
+                ? null
+                : h(OnboardingOverlay, { t, onDismiss: () => store.markOnboardingSeen() }),
+              snapshot.notice === null || snapshot.notice === undefined
+                ? null
+                : h('div', { className: 'pe-notice' },
+                    h('div', { className: 'pe-notice-title' },
+                      snapshot.notice.kind === 'legacy' ? t('notice.legacyTitle') : t('notice.loadTitle')),
+                    h('div', { className: 'pe-notice-body' },
+                      snapshot.notice.kind === 'legacy'
+                        ? t('notice.legacyBody')
+                        : t('notice.loadBody', { reason: snapshot.notice.detail ?? '' })),
+                    h('div', { className: 'pe-notice-actions' },
+                      h('button', { type: 'button', className: 'pe-btn', onClick: () => store.dismissNotice() },
+                        t('notice.dismiss')))),
+              toast === null ? null : h('div', { className: 'pe-toast' }, toast)),
+            h(EventBar, {
+              events: snapshot.events ?? [],
+              t,
+              filter: eventFilter,
+              onFilter: setEventFilter,
+              onLocate: locateEvent,
+              now: snapshot.time ?? 0,
+            })),
           h('aside', { className: 'pe-side' },
-            h('section', { className: 'pe-panel' },
-              h('div', { className: 'pe-panel-title' }, t('tool.group.life')),
-              h('div', { className: 'pe-tools' }, LIFE_TOOLS.map(toolButton))),
-            h('section', { className: 'pe-panel' },
-              h('div', { className: 'pe-panel-title' }, t('tool.group.terrain')),
-              h('div', { className: 'pe-tools' }, TERRAIN_TOOL_IDS.map(toolButton))),
-            h('section', { className: 'pe-panel pe-panel-row' },
-              h('div', { className: 'pe-panel-title' }, t('brush.label')),
-              h('div', { className: 'pe-seg' }, BRUSHES.map((radius, index) => h('button', {
-                type: 'button', key: radius,
-                className: `pe-seg-btn${brushIndex === index ? ' is-active' : ''}`,
-                onClick: () => setBrushIndex(index),
-                'aria-label': t(index === 0 ? 'brush.small' : index === 1 ? 'brush.medium' : 'brush.large'),
-              }, t(index === 0 ? 'brush.small' : index === 1 ? 'brush.medium' : 'brush.large'))))),
-            h(PopulationChart, { history: snapshot.history ?? [], t }),
-            h('section', { className: 'pe-panel pe-panel-grow' },
+            h('div', { className: 'pe-tabs' }, SIDE_TABS.map(tabButton)),
+            h('div', { className: 'pe-tabbody' },
+              h('section', { className: 'pe-panel', style: { display: showTab('tools') } },
+                h('div', { className: 'pe-panel-title' }, t('tool.group.life')),
+                h('div', { className: 'pe-tools' }, LIFE_TOOLS.map(toolButton))),
+              h('section', { className: 'pe-panel', style: { display: showTab('tools') } },
+                h('div', { className: 'pe-panel-title' }, t('tool.group.terrain')),
+                h('div', { className: 'pe-tools' }, TERRAIN_TOOL_IDS.map(toolButton))),
+              h('section', { className: 'pe-panel pe-panel-row', style: { display: showTab('tools') } },
+                h('div', { className: 'pe-panel-title' }, t('brush.label')),
+                h('div', { className: 'pe-seg' }, BRUSHES.map((radius, index) => h('button', {
+                  type: 'button', key: radius,
+                  className: 'pe-seg-btn' + (brushIndex === index ? ' is-active' : ''),
+                  onClick: () => setBrushIndex(index),
+                  'aria-label': t(index === 0 ? 'brush.small' : index === 1 ? 'brush.medium' : 'brush.large'),
+                }, t(index === 0 ? 'brush.small' : index === 1 ? 'brush.medium' : 'brush.large'))))),
+              h('section', { className: 'pe-panel', style: { display: showTab('species') } },
+                h('div', { className: 'pe-panel-title' }, t('species.panelTitle')),
+                h(SpeciesPanel, {
+                  rows: snapshot.species ?? [],
+                  t,
+                  onLocate: locateSpecies,
+                  inferred: snapshot.causeSource === undefined ? 0 : snapshot.causeSource.inferred,
+                })),
+              h('div', { style: { display: showTab('species') } },
+                h(PopulationChart, { history: snapshot.history ?? [], t })),
+              h('section', { className: 'pe-panel', style: { display: showTab('energy') } },
+                h(EnergyFlowPanel, { flows: snapshot.flows, rows: snapshot.species ?? [], t }))),
+            h('div', { className: 'pe-dock' },
               h('div', { className: 'pe-panel-title' }, t('inspect.title')),
               h(Inspector, {
                 selected,
@@ -9887,10 +11093,11 @@ window.__ModuleLoader__.load({
                 h('span', { className: 'pe-title' }, t('help.title')),
                 h('button', { type: 'button', className: 'pe-btn pe-btn-ghost', onClick: () => setHelpOpen(false) }, t('action.close'))),
               h('ul', { className: 'pe-modal-body' },
-                [1, 2, 3, 4, 5, 6, 7, 8].map(index => h('li', { key: index }, t(`help.${index}`))))))
+                [1, 2, 3, 4, 5, 6, 7, 8, 9].map(index => h('li', { key: index }, t('help.' + index)))),
+              h('div', { className: 'pe-onboard-actions' },
+                h('button', { type: 'button', className: 'pe-btn', onClick: replayGuide }, t('onboard.again')))))
           : null)
     }
-
 
     // ---------------------------------------------------------------------
     // Extra palette entries and locale keys used by the panel chrome
@@ -9953,12 +11160,6 @@ window.__ModuleLoader__.load({
       'phase.done': '已完成',
 
       // --- needs (legacy channels, still shown) ----------------------------
-      'needs.title': '需求',
-      'needs.hunger': '饥饿',
-      'needs.thirst': '口渴',
-      'needs.energy': '体力',
-      'needs.safety': '安全',
-      'needs.social': '社交',
 
       // --- the eight drives -------------------------------------------------
       'drive.hunger': '饥饿',
@@ -10034,7 +11235,6 @@ window.__ModuleLoader__.load({
       'metric.energy': '储能',
       'metric.age': '年龄',
       'metric.causes': '死因',
-      'metric.hungry': '缺食 {n}',
 
       // --- energy panel ------------------------------------------------------
       'flow.panelTitle': '能量流',
@@ -10045,6 +11245,7 @@ window.__ModuleLoader__.load({
       'flow.respire': '呼吸消耗',
       'flow.gpp': '净初级生产',
       'flow.stock': '现存',
+      'flow.animals': '动物',
       'flow.unit': 'kJ/日',
       'flow.note': '宽度按每日能量比例；数字是每游戏日千焦。',
       'flow.waiting': '世界跑起来之后才有流量数据。',
@@ -10068,10 +11269,12 @@ window.__ModuleLoader__.load({
       'status.restock': '补充生物',
       'status.temperature': '{n} °C',
       'status.pulse': '近 60 秒 出生 {births} · 死亡 {deaths}',
-      'status.noStorage': '这个环境不能保存世界',
-      'status.saving': '自动保存',
       'status.ready': '正在生成世界…',
-      'status.paused': '已暂停',
+      'notice.legacyTitle': '发现旧版存档',
+      'notice.legacyBody': '0.3 的存档格式和旧版不兼容，已经为你开了新世界。旧存档原样保留，没被覆盖。',
+      'notice.loadTitle': '读档失败',
+      'notice.loadBody': '存档读不出来，已经开了新世界。原因：{reason}',
+      'notice.dismiss': '知道了',
       'brush.preview': '放置 {tool}',
       'brush.cell': '格子 {x}, {y}',
       'toast.erased': '擦除了这一片',
@@ -10105,12 +11308,6 @@ window.__ModuleLoader__.load({
       'phase.approach': 'Approach',
       'phase.execute': 'Doing',
       'phase.done': 'Done',
-      'needs.title': 'Needs',
-      'needs.hunger': 'Hunger',
-      'needs.thirst': 'Thirst',
-      'needs.energy': 'Energy',
-      'needs.safety': 'Safety',
-      'needs.social': 'Social',
       'drive.hunger': 'Hunger',
       'drive.thirst': 'Thirst',
       'drive.cold': 'Cold',
@@ -10174,7 +11371,6 @@ window.__ModuleLoader__.load({
       'metric.energy': 'Reserve',
       'metric.age': 'Age',
       'metric.causes': 'Causes',
-      'metric.hungry': '{n} hungry',
       'flow.panelTitle': 'Energy flow',
       'flow.sun': 'Sun',
       'flow.plants': 'Plants',
@@ -10183,6 +11379,7 @@ window.__ModuleLoader__.load({
       'flow.respire': 'Respiration',
       'flow.gpp': 'Primary production',
       'flow.stock': 'Standing',
+      'flow.animals': 'Animals',
       'flow.unit': 'kJ/day',
       'flow.note': 'Width is the daily energy share; numbers are kJ per in-world day.',
       'flow.waiting': 'Flows appear once the world runs.',
@@ -10202,10 +11399,12 @@ window.__ModuleLoader__.load({
       'status.restock': 'Restock',
       'status.temperature': '{n} °C',
       'status.pulse': 'last 60s  born {births} · died {deaths}',
-      'status.noStorage': 'This environment cannot save the world',
-      'status.saving': 'Autosaving',
       'status.ready': 'Building the world…',
-      'status.paused': 'Paused',
+      'notice.legacyTitle': 'Older save found',
+      'notice.legacyBody': 'The 0.3 save format cannot read the old world, so a fresh one was started. Your old save is untouched and was not overwritten.',
+      'notice.loadTitle': 'Could not load the save',
+      'notice.loadBody': 'The saved world could not be read, so a fresh one was started. Reason: {reason}',
+      'notice.dismiss': 'Got it',
       'brush.preview': 'Place {tool}',
       'brush.cell': 'cell {x}, {y}',
       'toast.erased': 'Cleared that patch',
@@ -10218,7 +11417,6 @@ window.__ModuleLoader__.load({
     // Styles
     // ---------------------------------------------------------------------
 
-    /** Every class is `pe-` prefixed; colours come from theme tokens. */
     const CSS = `
 .pe-root{position:relative;display:flex;flex-direction:column;height:100%;min-height:0;box-sizing:border-box;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12px;line-height:18px;-webkit-font-smoothing:antialiased}
 .pe-head{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}
@@ -10258,7 +11456,7 @@ window.__ModuleLoader__.load({
 .pe-hud-item{padding:2px 7px;border-radius:7px;background:rgba(20,22,28,.55);color:#fff;font-size:10.5px;line-height:15px;font-variant-numeric:tabular-nums;backdrop-filter:blur(4px)}
 .pe-minimap{padding:5px;border-radius:10px;background:rgba(20,22,28,.6);backdrop-filter:blur(6px);box-shadow:0 6px 18px rgba(0,0,0,.28)}
 .pe-minimap-canvas{display:block;border-radius:6px;cursor:pointer;image-rendering:pixelated}
-.pe-side{width:290px;flex:none;display:flex;flex-direction:column;gap:10px;padding:12px;overflow:auto;border-left:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);box-sizing:border-box}
+.pe-side{width:320px;flex:none;display:flex;flex-direction:column;gap:10px;padding:12px;overflow:auto;border-left:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);box-sizing:border-box}
 .pe-panel{display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:11px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base)}
 .pe-panel-grow{flex:1;min-height:0}
 .pe-panel-row{flex-direction:row;align-items:center;justify-content:space-between}
@@ -10307,8 +11505,7 @@ window.__ModuleLoader__.load({
 .pe-need-track{height:6px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);overflow:hidden;border:1px solid var(--dsw-alias-border-l1)}
 .pe-need-fill{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--dsw-alias-state-warn-primary),var(--dsw-alias-state-error-primary))}
 .pe-need-value{text-align:right;font-size:10px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
-.pe-tag-intent{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary)}@media (max-width: 980px){.pe-side{width:250px}.pe-tools{grid-template-columns:repeat(3,1fr)}}
-/* --- stage column: map above, event feed below ------------------------- */
+.pe-tag-intent{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary)}@media (max-width: 980px){.pe-side{width:270px}.pe-tools{grid-template-columns:repeat(3,1fr)}}
 .pe-stagewrap{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0}
 .pe-eventbar{display:flex;align-items:center;gap:8px;flex:none;height:46px;padding:0 10px;border-top:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);overflow:hidden}
 .pe-eventbar-title{flex:none;color:var(--dsw-alias-label-secondary);font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
@@ -10325,9 +11522,9 @@ window.__ModuleLoader__.load({
 .pe-event-death{border-style:dashed}
 .pe-event-count{color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
 .pe-event-time{color:var(--dsw-alias-label-secondary);font-size:10px;font-variant-numeric:tabular-nums}
+.pe-event-where{color:var(--dsw-alias-label-secondary);font-size:10px;font-variant-numeric:tabular-nums;opacity:.8}
 .pe-events-empty{color:var(--dsw-alias-label-secondary);font-size:11px;white-space:nowrap}
 
-/* --- side tabs and the docked inspector -------------------------------- */
 .pe-tabs{display:flex;gap:4px;padding:3px;flex:none;border-radius:10px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1)}
 .pe-tab{appearance:none;flex:1;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;font-weight:600;line-height:16px;padding:4px 6px;border-radius:7px;cursor:pointer}
 .pe-tab:hover{color:var(--dsw-alias-label-primary)}
@@ -10339,7 +11536,6 @@ window.__ModuleLoader__.load({
 .pe-muted{color:var(--dsw-alias-label-secondary)}
 .pe-mono{font-variant-numeric:tabular-nums}
 
-/* --- species table ----------------------------------------------------- */
 .pe-srow{display:grid;grid-template-columns:13px 1fr 40px 52px 46px;align-items:center;gap:6px;font-size:11px;line-height:16px;cursor:pointer;border-radius:6px;padding:1px 3px}
 .pe-srow:hover{background:var(--dsw-alias-bg-layer-2)}
 .pe-srow-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -10351,7 +11547,6 @@ window.__ModuleLoader__.load({
 .pe-causes{display:flex;height:6px;border-radius:999px;overflow:hidden;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1)}
 .pe-cause{display:block;height:100%}
 
-/* --- inspector v2 ------------------------------------------------------ */
 .pe-drive{display:grid;grid-template-columns:50px 1fr 28px;align-items:center;gap:6px}
 .pe-drive-label{color:var(--dsw-alias-label-secondary);font-size:10.5px;line-height:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pe-drive-track{height:6px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);overflow:hidden;border:1px solid var(--dsw-alias-border-l1)}
@@ -10364,7 +11559,6 @@ window.__ModuleLoader__.load({
 .pe-quote{padding:6px 8px;border-radius:8px;border-left:2px solid var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2);font-size:11px;line-height:16px}
 .pe-quote-meta{display:block;color:var(--dsw-alias-label-secondary);font-size:10px;line-height:14px;margin-top:2px}
 
-/* --- energy flow ------------------------------------------------------- */
 .pe-flow{display:flex;flex-direction:column;gap:4px}
 .pe-flow-row{display:grid;grid-template-columns:64px 1fr 60px;align-items:center;gap:6px;font-size:11px;line-height:15px}
 .pe-flow-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -10372,7 +11566,6 @@ window.__ModuleLoader__.load({
 .pe-flow-fill{display:block;height:100%;border-radius:4px;transition:width .25s ease}
 .pe-flow-value{text-align:right;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary)}
 
-/* --- first-run guide and status overlays -------------------------------- */
 .pe-onboard{position:absolute;left:50%;top:14px;transform:translateX(-50%);width:min(430px,calc(100% - 24px));padding:12px 14px;border-radius:12px;background:var(--dsw-alias-bg-overlay);border:1px solid var(--dsw-alias-border-l2);box-shadow:0 14px 34px rgba(0,0,0,.32);z-index:5}
 .pe-onboard-title{font-weight:650;font-size:12.5px;line-height:18px;margin-bottom:6px}
 .pe-onboard-steps{margin:0;padding-left:16px;display:flex;flex-direction:column;gap:4px;color:var(--dsw-alias-label-secondary);font-size:11.5px;line-height:16px}
@@ -10383,6 +11576,11 @@ window.__ModuleLoader__.load({
 .pe-pill{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-secondary);font-size:10.5px;line-height:16px;font-variant-numeric:tabular-nums}
 .pe-pill-warn{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-primary)}
 .pe-pill-live{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary)}
+.pe-brushpreview{position:absolute;transform:translate(-50%,-50%);border:1px dashed rgba(255,255,255,.85);border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.35);pointer-events:none;z-index:3}
+.pe-notice{position:absolute;left:50%;top:14px;transform:translateX(-50%);width:min(460px,calc(100% - 24px));padding:10px 12px;border-radius:11px;background:var(--dsw-alias-bg-overlay);border:1px solid var(--dsw-alias-state-warn-primary);box-shadow:0 12px 28px rgba(0,0,0,.3);z-index:6}
+.pe-notice-title{font-weight:650;font-size:12px;line-height:17px;color:var(--dsw-alias-state-warn-primary)}
+.pe-notice-body{margin-top:3px;font-size:11.5px;line-height:16px;color:var(--dsw-alias-label-secondary)}
+.pe-notice-actions{display:flex;justify-content:flex-end;margin-top:7px}
 @media (max-width: 760px){.pe-eventbar{height:38px}}
 `
 

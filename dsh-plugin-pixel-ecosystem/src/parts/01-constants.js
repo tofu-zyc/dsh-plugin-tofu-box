@@ -108,7 +108,7 @@
         /** Dry mass at which the cell is treated as "full", kg/m^2. */
         bmax: 1.2,
         /** Potential relative growth, per in-world day. */
-        mu: 6.0,
+        mu: 26.0,
         /** Seed bank / basal meristem floor, kg/m^2: what regrows from bare soil. */
         seed: 0.04,
         /** Respiration loss, per in-world day, fraction of standing crop. */
@@ -122,7 +122,7 @@
       },
       weed: {
         bmax: 0.9,
-        mu: 5.0,
+        mu: 18.0,
         seed: 0.03,
         resp: 0.30,
         litter: 0.40,

@@ -36,6 +36,22 @@ window.__ModuleLoader__.load({
     /** Sidebar entry id and `main` panel key. The two must be the same string. */
     const PANEL_ID = 'pixel-ecosystem'
     /** localStorage key for the autosaved world. */
-    const STORAGE_KEY = 'dsh-pixel-ecosystem:v1'
-    /** Serialized world format version; a mismatch starts a fresh world. */
-    const SAVE_VERSION = 1
+    const STORAGE_KEY = 'dsh-pixel-ecosystem:v2'
+    /**
+     * Key the 0.2.x build used. v2 never writes it, so an old world survives a
+     * version bump instead of being overwritten by the first autosave; the store
+     * reads it once to tell the player why their old world is gone.
+     */
+    const LEGACY_STORAGE_KEY = 'dsh-pixel-ecosystem:v1'
+    /**
+     * Serialized world format version.
+     *
+     * 1 = the 0.2.x format (a 0..1 biomass scalar, a single `energy` number per
+     * animal and no psychology). 2 = the energy ledger: `body` (reserve,
+     * structure, maturity), drives, the behaviour state machine, belief, the
+     * climate and the per-cell nutrient / detritus pools (docs/20-CORE-LOOP.md
+     * section 5). There is no v1 -> v2 migration: a v2 build reads a v1 save as
+     * unsupported and starts a fresh world, which the store must report to the
+     * player instead of silently discarding it.
+     */
+    const SAVE_VERSION = 2

@@ -54,7 +54,7 @@
         flight: { burst: 1.85, burstSeconds: 1.4, tired: 1.12 },
         genes: {
           speed: [2.6, 4.3], vision: [5, 13], size: [0.75, 1.35],
-          metabolism: [0.75, 1.3], lifespan: [140, 240], fertility: [20, 30],
+          metabolism: [0.75, 1.3], lifespan: [140, 240], fertility: [70, 110],
         },
         balance: { maturity: 36, litter: [4, 7], fleeSpeed: 1.9 },
       },
@@ -67,7 +67,7 @@
         flight: { burst: 1.5, burstSeconds: 2.2, tired: 1.15 },
         genes: {
           speed: [2.6, 3.8], vision: [8, 16], size: [1.4, 2.2],
-          metabolism: [1.05, 1.5], lifespan: [1100, 1600], fertility: [110, 130],
+          metabolism: [1.05, 1.5], lifespan: [1100, 1600], fertility: [600, 720],
         },
         balance: { maturity: 150, litter: [1, 3], fleeSpeed: 1.85 },
       },
@@ -78,7 +78,7 @@
         activity: { dawn: 1, day: 0.6, dusk: 1, night: 0.9 },
         genes: {
           speed: [3.9, 5.7], vision: [9, 19], size: [0.85, 1.55],
-          metabolism: [0.85, 1.35], lifespan: [300, 420], fertility: [110, 130],
+          metabolism: [0.85, 1.35], lifespan: [300, 420], fertility: [600, 720],
         },
         balance: { maturity: 96, litter: [3, 6], catchRadius: 1.15, huntSpeed: 1.5, scavengeShare: 0.6 },
       },
@@ -90,7 +90,7 @@
         activity: { dawn: 1, day: 0.75, dusk: 1, night: 0.85 },
         genes: {
           speed: [4.3, 6.0], vision: [11, 22], size: [1.3, 2.1],
-          metabolism: [1.25, 1.9], lifespan: [700, 900], fertility: [110, 130],
+          metabolism: [1.25, 1.9], lifespan: [700, 900], fertility: [600, 720],
         },
         balance: { maturity: 240, litter: [3, 5], catchRadius: 1.3, huntSpeed: 1.45, scavengeShare: 0.55 },
       },
@@ -101,7 +101,7 @@
         activity: { dawn: 1, day: 1, dusk: 0.9, night: 0.15 },
         genes: {
           speed: [5.2, 7.6], vision: [14, 26], size: [0.8, 1.2],
-          metabolism: [0.85, 1.3], lifespan: [500, 700], fertility: [110, 130],
+          metabolism: [0.85, 1.3], lifespan: [500, 700], fertility: [360, 600],
         },
         balance: { maturity: 200, litter: [3, 5], scavengeRadius: 1.7, corpseShare: 0.8 },
       },
@@ -114,7 +114,7 @@
         flight: { burst: 1.6, burstSeconds: 0.8, tired: 1.1 },
         genes: {
           speed: [2.2, 4.0], vision: [5, 11], size: [0.7, 1.3],
-          metabolism: [0.7, 1.2], lifespan: [420, 560], fertility: [110, 130],
+          metabolism: [0.7, 1.2], lifespan: [420, 560], fertility: [500, 700],
         },
         balance: { maturity: 90, litter: [6, 10], fleeSpeed: 1.9 },
       },
@@ -126,7 +126,7 @@
         activity: { dawn: 1, day: 0.8, dusk: 1, night: 0.7 },
         genes: {
           speed: [4.4, 6.2], vision: [8, 16], size: [1.1, 1.9],
-          metabolism: [0.95, 1.4], lifespan: [1000, 1300], fertility: [110, 130],
+          metabolism: [0.95, 1.4], lifespan: [1000, 1300], fertility: [600, 720],
         },
         balance: { maturity: 260, litter: [2, 4], catchRadius: 1.8, huntSpeed: 1.5, scavengeShare: 0.4 },
       },
@@ -144,7 +144,7 @@
         activity: { dawn: 1, day: 0.95, dusk: 1, night: 0.25 },
         genes: {
           speed: [3.2, 5.0], vision: [12, 22], size: [0.9, 1.3],
-          metabolism: [0.8, 1.2], lifespan: [420, 620], fertility: [110, 130],
+          metabolism: [0.8, 1.2], lifespan: [420, 620], fertility: [500, 700],
         },
         balance: { maturity: 150, litter: [2, 4], catchRadius: 2.4, huntSpeed: 1.25, scavengeShare: 0.5 },
       },
@@ -156,7 +156,7 @@
         activity: { dawn: 1, day: 0.85, dusk: 1, night: 0.6 },
         genes: {
           speed: [3.6, 5.4], vision: [10, 18], size: [0.9, 1.3],
-          metabolism: [0.95, 1.35], lifespan: [380, 560], fertility: [110, 130],
+          metabolism: [0.95, 1.35], lifespan: [380, 560], fertility: [500, 700],
         },
         balance: { maturity: 130, litter: [2, 4], catchRadius: 1.7, huntSpeed: 1.55, scavengeShare: 0.5 },
       },
@@ -168,7 +168,7 @@
         activity: { dawn: 0.9, day: 0.8, dusk: 1, night: 0.7 },
         genes: {
           speed: [3.0, 4.4], vision: [10, 18], size: [1.8, 2.6],
-          metabolism: [0.8, 1.15], lifespan: [900, 1300], fertility: [110, 130],
+          metabolism: [0.8, 1.15], lifespan: [900, 1300], fertility: [1200, 1440],
         },
         balance: { maturity: 300, litter: [1, 2], catchRadius: 2.1, huntSpeed: 1.3, scavengeShare: 0.7 },
       },
@@ -184,7 +184,7 @@
         flight: { burst: 2.1, burstSeconds: 0.5, tired: 1.1 },
         genes: {
           speed: [1.4, 2.6], vision: [3, 7], size: [0.55, 0.9],
-          metabolism: [0.6, 1.05], lifespan: [150, 260], fertility: [70, 100],
+          metabolism: [0.6, 1.05], lifespan: [150, 260], fertility: [500, 700],
         },
         balance: { maturity: 45, litter: [8, 14], fleeSpeed: 2.15 },
       },

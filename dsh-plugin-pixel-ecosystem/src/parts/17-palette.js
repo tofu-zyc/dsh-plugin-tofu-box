@@ -127,13 +127,13 @@
         bare: 0.35,
       },
       winter: {
-        grassDry: [166, 158, 128],
-        grassLush: [122, 126, 96],
+        grassDry: [182, 176, 150],
+        grassLush: [136, 140, 108],
         leaf: { dark: rgb(80, 72, 64), mid: rgb(108, 100, 86), light: rgb(146, 138, 122), outline: rgb(48, 42, 38) },
         weed: [rgb(120, 128, 104), rgb(154, 160, 136)],
         water: {
-          surface: rgb(176, 214, 234), shallow: rgb(140, 186, 214), mid: rgb(94, 148, 190),
-          deep: rgb(68, 116, 162), caustic: rgb(200, 234, 246), foam: rgb(238, 250, 254),
+          surface: rgb(196, 228, 246), shallow: rgb(162, 204, 230), mid: rgb(116, 168, 210),
+          deep: rgb(86, 134, 180), caustic: rgb(210, 238, 250), foam: rgb(244, 252, 255),
         },
         snow: 1,
         bare: 1,

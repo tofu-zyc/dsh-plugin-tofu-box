@@ -53,10 +53,16 @@ test('no identifier is declared by two parts', () => {
     const text = readPart(part)
     for (const match of text.matchAll(DECLARATION)) {
       const name = match[1]
+      const key = part.file + '\u0000' + name
+      if (seen.has(key)) clashes.push(name + ' declared twice in ' + part.file)
+      seen.set(key, part.file)
       const owner = seen.get(name)
       if (owner === undefined) seen.set(name, part.file)
       else if (owner !== part.file) clashes.push(name + ': ' + owner + ' + ' + part.file)
     }
   }
   assert.deepEqual(clashes, [], 'duplicate top-level declarations across parts')
+})
+test('the bundle parses (a SyntaxError takes the whole panel down)', () => {
+  assert.doesNotThrow(() => new Function(shipped), 'client.js does not parse')
 })

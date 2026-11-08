@@ -65,7 +65,10 @@
     const SATIETY_DEADBAND = 0.12
 
     /** Seconds of normal activity that fill the thirst ledger. */
-    const THIRST_SECONDS = 110
+    const THIRST_SECONDS = 150
+
+    /** Seconds a bout of company keeps the social channel satisfied. */
+    const SOCIAL_SATIATION_SECONDS = 35
 
     /** Fatigue gained per second of walking, and cleared per second of rest. */
     const FATIGUE_PER_SECOND = 0.012
@@ -176,11 +179,18 @@
      */
     function updateFatigue(entity, dt, effort) {
       const needs = needsOf(entity)
+      const body = entity.body
       const resting = effort < 0.5
-      const rate = resting
-        ? -FATIGUE_RECOVERY * (1 - effort * 0.4)
-        : FATIGUE_PER_SECOND * Math.max(0.4, effort)
-      needs.energy = clamp(needs.energy + rate * dt, 0, 1)
+      // 09b owns body.fatigue once the ledger exists (it charges effort in
+      // metabolise()), so the behaviour-side ledger is only a fallback for a
+      // body-less animal. Writing both would make the panel and the decision
+      // disagree by one tick.
+      if (body === undefined || !Number.isFinite(body.fatigue)) {
+        const rate = resting
+          ? -FATIGUE_RECOVERY * (1 - effort * 0.4)
+          : FATIGUE_PER_SECOND * Math.max(0.4, effort)
+        needs.energy = clamp(needs.energy + rate * dt, 0, 1)
+      }
       const belief = beliefOf(entity)
       if (belief.sites !== undefined) {
         // Habituation fades on its own: a bored animal eventually wants to look
@@ -234,10 +244,16 @@
 
       // Social: how far the animal is from a full herd. Solitary species read
       // zero here instead of carrying a channel they can never satisfy.
+      // A bout of socialising also sates the channel for a while: otherwise
+      // company stays attractive forever and standing in the herd becomes an
+      // absorbing state instead of something an animal does and then leaves.
+      entity.socialSated = Math.max(0, (entity.socialSated ?? 0) - dt / SOCIAL_SATIATION_SECONDS)
       let social = 0
       if (species.herd !== undefined) {
         const crowd = species.herd.crowd ?? 4
-        social = clamp(1 - (entity.socialCount ?? 0) / crowd, 0, 1) * clamp(traits.social, 0, 1)
+        const lonely = clamp(1 - (entity.socialCount ?? 0) / crowd, 0, 1)
+        const sated = clamp(entity.socialSated, 0, 1)
+        social = lonely * clamp(traits.social, 0, 1) * (1 - sated * 0.75)
       }
 
       // Curiosity: only when fed, calm and not just back from a look around.

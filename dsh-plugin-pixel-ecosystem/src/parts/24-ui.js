@@ -1,6 +1,18 @@
     // ---------------------------------------------------------------------
     // Panel UI
     // ---------------------------------------------------------------------
+    //
+    // Three ideas hold this file together:
+    //
+    //  1. Every panel answers a question a player would ask out loud: what is
+    //     left, what is it doing, why, and where did the energy go. A number
+    //     with no sentence next to it does not ship.
+    //  2. Anything the engine does not publish yet is drawn as derived and
+    //     labelled, never invented. The panels get richer for free as the
+    //     simulation starts reporting (see docs/80-UI.md).
+    //  3. All three side tabs are mounted and hidden with CSS rather than
+    //     unmounted, so every panel is exercised by the render test instead of
+    //     only the tab that happens to be active.
 
     /**
      * Error boundary around the panel.
@@ -49,12 +61,98 @@
     const MIN_SCALE = 1
     const MAX_SCALE = 16
 
+    /** Side-panel tabs, in reading order. */
+    const SIDE_TABS = ['tools', 'species', 'energy']
+
+    /** Ticker filter chips: everything, then one per event kind. */
+    const EVENT_FILTERS = ['all', ...EVENT_KINDS]
+
     /**
-     * The one and only camera → viewport conversion.
+     * Colour per death cause, shared by the species bar, the inspector chip and
+     * the ticker, so a red kill reads red everywhere.
+     */
+    const CAUSE_COLORS = {
+      predation: '#d9534f',
+      starved: '#c98a2b',
+      frozen: '#4f8fd0',
+      old: '#8a8f99',
+      disease: '#9a6bd0',
+      unknown: '#5d6470',
+    }
+
+    /** Stage colours for the energy cascade. */
+    const FLOW_COLORS = {
+      sun: '#e0a13a',
+      plants: '#4a9d54',
+      herbs: '#c9a97b',
+      carns: '#d2733c',
+      respire: '#5d6470',
+    }
+
+    /**
+     * Translation for a state id. A state behaviour adds later still renders, as
+     * its raw id, instead of as a blank chip.
+     * @param {Function} t - translator.
+     * @param {string} id - state or intent id.
+     * @returns {string} label.
+     */
+    function intentLabel(t, id) {
+      if (typeof id !== 'string' || id === '') return ''
+      return INTENT_IDS.includes(id) ? t('intent.' + id) : id
+    }
+
+    /**
+     * Translation for the drive code a decision says it acted on.
+     * @param {Function} t - translator.
+     * @param {string} code - why code from the decision record.
+     * @returns {string} label.
+     */
+    function whyLabel(t, code) {
+      if (typeof code !== 'string' || code === '') return ''
+      if (DRIVE_KEYS.includes(code)) return t('drive.' + code)
+      if (code === 'search') return t('reason.search')
+      if (code === 'idle') return t('reason.idle')
+      return code
+    }
+
+    /**
+     * A duration as a compact chip value.
+     * @param {number} seconds - in-world seconds.
+     * @returns {string} e.g. '3.4s', '48s', '2:05'.
+     */
+    function shortTime(seconds) {
+      if (!Number.isFinite(seconds) || seconds < 0) return '—'
+      if (seconds < 10) return (Math.round(seconds * 10) / 10) + 's'
+      if (seconds < 120) return Math.round(seconds) + 's'
+      return Math.floor(seconds / 60) + ':' + String(Math.round(seconds % 60)).padStart(2, '0')
+    }
+
+    /**
+     * Energy with a unit prefix, in kJ.
+     * @param {number} kilojoules - energy.
+     * @returns {string} e.g. '820', '12.4k', '2.31M'.
+     */
+    function formatEnergy(kilojoules) {
+      const value = Number.isFinite(kilojoules) ? kilojoules : 0
+      if (Math.abs(value) >= 1000000) return (value / 1000000).toFixed(2) + 'M'
+      if (Math.abs(value) >= 1000) return (value / 1000).toFixed(1) + 'k'
+      return String(Math.round(value))
+    }
+
+    /**
+     * 0..1 as a whole percentage.
+     * @param {number} ratio - fraction.
+     * @returns {number} 0..100.
+     */
+    function percentOf(ratio) {
+      return Math.round(clamp(Number.isFinite(ratio) ? ratio : 0, 0, 1) * 100)
+    }
+
+    /**
+     * The one and only camera to viewport conversion.
      *
      * The render path and the input path both call this. Two separate copies of
-     * this maths is exactly how zoom-to-cursor and hit-testing drift apart, which
-     * is what made the canvas feel broken.
+     * this maths is exactly how zoom-to-cursor and hit-testing drift apart.
      * @param {{cx: number, cy: number, scale: number}} camera - camera state.
      * @param {{width: number, height: number}} stage - stage size in CSS px.
      * @param {{width: number, height: number}} world - world size in cells.
@@ -73,8 +171,8 @@
     }
 
     /**
-     * Stage-relative client coordinates → world cell coordinates.
-     * @param {object} view - result of `viewFromCamera`.
+     * Stage-relative client coordinates to world cell coordinates.
+     * @param {object} view - result of viewFromCamera.
      * @param {{left: number, top: number}} stageRect - stage bounding rect.
      * @param {number} clientX - pointer x.
      * @param {number} clientY - pointer y.
@@ -123,12 +221,49 @@
     }
 
     /**
-     * Inspector card: species, energy, genes, lineage, follow and deselect.
-     * @param {object} props - `{ selected, t, onFollow, onClear, following }`.
+     * One label of a key/value block.
+     * @param {object} props - props.label, props.title.
+     * @returns {object} React element.
+     */
+    function KeyValue(props) {
+      return h('span', { className: 'pe-kv-key', title: props.title }, props.label)
+    }
+
+    /**
+     * Death-cause bar: one segment per cause, in a fixed cause order so the same
+     * cause sits in the same place on every row and rows can be compared.
+     * @param {object} props - props.deaths, props.t.
+     * @returns {object} React element.
+     */
+    function CauseBar(props) {
+      const deaths = props.deaths ?? {}
+      const t = props.t
+      let total = 0
+      for (const key of CAUSE_KEYS) total += deaths[key] ?? 0
+      if (total === 0) return h('span', { className: 'pe-note' }, '—')
+      const segments = []
+      for (const key of CAUSE_KEYS) {
+        const value = deaths[key] ?? 0
+        if (value === 0) continue
+        segments.push(h('span', {
+          key,
+          className: 'pe-cause',
+          style: { width: percentOf(value / total) + '%', background: CAUSE_COLORS[key] },
+          title: t('cause.' + key) + ' ' + value,
+        }))
+      }
+      return h('div', { className: 'pe-causes' }, segments)
+    }
+
+    /**
+     * Inspector v2: what the animal is, what it is doing right now, why, and
+     * what is most likely to kill it.
+     * @param {object} props - props.selected, props.t, props.onFollow, props.onClear, props.following.
      * @returns {object} React element.
      */
     function Inspector(props) {
-      const { selected, t, onFollow, onClear, following } = props
+      const selected = props.selected
+      const t = props.t
       if (selected === null || selected === undefined) {
         return h('div', { className: 'pe-empty' },
           h('div', { className: 'pe-empty-icon' }, h(PixelGlyph, { name: 'target', size: 22 })),
@@ -136,61 +271,351 @@
           h('div', { className: 'pe-empty-hint' }, t('inspect.emptyHint')))
       }
       const species = SPECIES[selected.species]
-      const energyRatio = clamp(selected.energy / Math.max(1, selected.maxEnergy), 0, 1)
+      const color = species === undefined ? '#999' : species.color
+      const body = selected.body ?? null
+      const drives = selected.drives ?? {}
+      const state = selected.state ?? null
+      const reason = selected.reason ?? null
+      const cause = selected.cause ?? { predicted: null, actual: null }
+      const ratio = clamp(selected.energy / Math.max(1, selected.maxEnergy), 0, 1)
+      // Gene bars: where this animal sits inside its species' range.
       const genes = species === undefined ? [] : GENE_KEYS.map((key) => {
         const range = species.genes[key]
-        const ratio = clamp((selected.genes[key] - range[0]) / Math.max(1e-6, range[1] - range[0]), 0, 1)
+        const value = selected.genes[key]
+        const geneRatio = clamp((value - range[0]) / Math.max(1e-6, range[1] - range[0]), 0, 1)
         return h('div', { className: 'pe-gene', key },
-          h('span', { className: 'pe-gene-label' }, t(`inspect.gene.${key}`)),
+          h('span', { className: 'pe-gene-label' }, t('inspect.gene.' + key)),
           h('span', { className: 'pe-gene-track' }, h('span', {
             className: 'pe-gene-fill',
-            style: { width: `${Math.round(ratio * 100)}%`, background: species.color },
+            style: { width: percentOf(geneRatio) + '%', background: color },
           })),
-          h('span', { className: 'pe-gene-value' }, selected.genes[key].toFixed(1)))
+          h('span', { className: 'pe-gene-value' }, value.toFixed(1)))
       })
+      const driveBars = DRIVE_KEYS.map((key) => {
+        const value = clamp(Number(drives[key]) || 0, 0, 1)
+        return h('div', { className: 'pe-drive' + (value >= 0.7 ? ' is-high' : ''), key },
+          h('span', { className: 'pe-drive-label' }, t('drive.' + key)),
+          h('span', { className: 'pe-drive-track' }, h('span', {
+            className: 'pe-drive-fill',
+            style: { width: percentOf(value) + '%' },
+          })),
+          h('span', { className: 'pe-drive-value' }, String(percentOf(value))))
+      })
+      // The "why": the decision record when behaviour published one, otherwise
+      // the loudest drive, and the card says which of the two it is showing.
+      const whyText = reason === null
+        ? t('inspect.decisionNone')
+        : reason.derived === true
+          ? t('inspect.decisionWhy', { why: whyLabel(t, reason.drive) })
+          : t('inspect.decisionWhy', { why: whyLabel(t, reason.why) })
+      const rivals = reason === null || reason.rivals === undefined || reason.rivals.length === 0
+        ? null
+        : h('span', { className: 'pe-quote-meta' },
+            reason.rivals.map(rival => t('inspect.decisionBeat', {
+              kind: intentLabel(t, rival.kind),
+              score: rival.score.toFixed(2),
+            })).join(' · '))
+      const predicted = cause.predicted === null || cause.predicted === undefined
+        ? h('span', null, t('inspect.causeNone'))
+        : h('span', null, t('cause.' + cause.predicted))
+      const goalLine = selected.goal === null || selected.goal === undefined
+        ? h('span', null, '—')
+        : h('span', null, Math.round(selected.goal.x) + ', ' + Math.round(selected.goal.y) + ' · ' +
+            t('inspect.goalDistance', { n: Math.round(selected.goal.distance) }))
+      const planLine = selected.plan === null || selected.plan === undefined || selected.plan.steps.length === 0
+        ? h('span', null, '—')
+        : h('span', null, t('inspect.planStep', {
+            x: Math.round(selected.plan.steps[0].x),
+            y: Math.round(selected.plan.steps[0].y),
+            act: intentLabel(t, selected.plan.steps[0].act),
+          }))
       return h('div', { className: 'pe-card' },
         h('div', { className: 'pe-card-head' },
-          h('span', { className: 'pe-swatch', style: { background: species?.color } }),
-          h('span', { className: 'pe-card-title' }, t(`species.${selected.species}`)),
-          h('span', { className: 'pe-tag' }, t(`stage.${selected.stage ?? 'adult'}`)),
-          selected.intent === 'flee'
+          h(PixelGlyph, { name: speciesGlyph(selected.species), color, size: 16 }),
+          h('span', { className: 'pe-card-title' }, t('species.' + selected.species)),
+          h('span', { className: 'pe-tag' }, t('stage.' + (selected.stage ?? 'adult'))),
+          selected.fleeing === true
             ? h('span', { className: 'pe-tag pe-tag-alert' }, t('intent.flee'))
-            : h('span', { className: 'pe-tag pe-tag-intent' }, t(`intent.${selected.intent ?? 'explore'}`)),
+            : h('span', { className: 'pe-tag pe-tag-intent' }, intentLabel(t, state === null ? selected.intent : state.id)),
           h('button', {
             type: 'button', className: 'pe-icon-btn', title: t('action.deselect'),
-            'aria-label': t('action.deselect'), onClick: onClear,
+            'aria-label': t('action.deselect'), onClick: props.onClear,
           }, h(PixelGlyph, { name: 'close', size: 12 }))),
         h('div', { className: 'pe-meter' },
-          h('span', { className: 'pe-meter-fill', style: { width: `${Math.round(energyRatio * 100)}%` } })),
+          h('span', { className: 'pe-meter-fill', style: { width: percentOf(ratio) + '%' } })),
+        // The first two rows are the two numbers every version of this panel has
+        // shown; the render test pins that order.
         h('div', { className: 'pe-rows' },
-          h('div', { className: 'pe-row' }, h('span', null, t('inspect.age')), h('b', null, `${Math.round(selected.age)}s`)),
-          h('div', { className: 'pe-row' }, h('span', null, t('inspect.energy')), h('b', null, `${Math.round(selected.energy)} / ${Math.round(selected.maxEnergy)}`))),
+          h('div', { className: 'pe-row' }, h('span', null, t('inspect.age')),
+            h('b', null, t('inspect.seconds', { n: Math.round(selected.age) }))),
+          h('div', { className: 'pe-row' }, h('span', null, t('inspect.energy')),
+            h('b', null, formatEnergy(selected.energy) + ' / ' + formatEnergy(selected.maxEnergy)))),
+        h('div', { className: 'pe-kv' },
+          h(KeyValue, { label: t('inspect.structure') }),
+          h('span', { className: 'pe-kv-value' },
+            body === null || body.structure === null || body.structure === undefined
+              ? '—'
+              : body.structureUnit === 'kg'
+                ? t('inspect.kg', { n: body.structure.toFixed(2) })
+                : body.structure.toFixed(2)),
+          h(KeyValue, { label: t('inspect.maturity') }),
+          h('span', { className: 'pe-kv-value' },
+            body === null || body.maturity === null || body.maturity === undefined ? '—' : percentOf(body.maturity) + '%'),
+          h(KeyValue, { label: t('inspect.health') }),
+          h('span', { className: 'pe-kv-value' },
+            body === null || body.health === null || body.health === undefined ? '—' : percentOf(body.health) + '%'),
+          h(KeyValue, { label: t('inspect.fatigue') }),
+          h('span', { className: 'pe-kv-value' },
+            body === null || body.fatigue === null || body.fatigue === undefined ? '—' : percentOf(body.fatigue) + '%')),
+        h('div', { className: 'pe-kv' },
+          h(KeyValue, { label: t('inspect.state') }),
+          h('span', { className: 'pe-kv-value' },
+            intentLabel(t, state === null ? selected.intent : state.id) +
+            (state === null || state.phase === null ? '' : ' · ' + t('phase.' + state.phase))),
+          h(KeyValue, { label: t('inspect.remaining') }),
+          h('span', { className: 'pe-kv-value' },
+            state === null || state.remaining === null || state.remaining === undefined
+              ? '—'
+              : t('inspect.seconds', { n: Math.round(state.remaining) })),
+          h(KeyValue, { label: t('inspect.nextDecision') }),
+          h('span', { className: 'pe-kv-value' },
+            state === null || state.nextDecision === null || state.nextDecision === undefined
+              ? '—'
+              : t('inspect.seconds', { n: Math.round(state.nextDecision) })),
+          h(KeyValue, { label: t('inspect.goal') }),
+          h('span', { className: 'pe-kv-value' }, goalLine),
+          h(KeyValue, { label: t('inspect.plan') }),
+          h('span', { className: 'pe-kv-value' }, planLine)),
+        h('div', { className: 'pe-quote' },
+          h('span', null, t('inspect.decision') + ' · ' + whyText),
+          reason === null || reason.at === null || reason.at === undefined
+            ? null
+            : h('span', { className: 'pe-quote-meta' },
+                t('inspect.decisionAgo', { n: Math.max(0, Math.round(selected.decisionAge ?? 0)) })),
+          rivals),
         h('div', { className: 'pe-chipline' },
           h('span', { className: 'pe-tag' }, t('inspect.generation', { n: selected.generation })),
-          h('span', { className: 'pe-tag' }, t('inspect.children', { n: selected.children }))),
-        h('div', { className: 'pe-needs' },
-          NEED_KEYS.map(key => h('div', { className: 'pe-need', key },
-            h('span', { className: 'pe-need-label' }, t(`needs.${key}`)),
-            h('span', { className: 'pe-need-track' }, h('span', {
-              className: 'pe-need-fill',
-              style: { width: `${Math.round((selected.needs?.[key] ?? 0) * 100)}%` },
-            })),
-            h('span', { className: 'pe-need-value' }, String(Math.round((selected.needs?.[key] ?? 0) * 100)))))),
+          h('span', { className: 'pe-tag' }, t('inspect.children', { n: selected.children })),
+          selected.threats > 0
+            ? h('span', { className: 'pe-tag pe-tag-alert' }, t('inspect.threats', { n: selected.threats }))
+            : null),
+        h('div', { className: 'pe-panel-title' }, t('inspect.drives') +
+          (selected.drivesDerived === true ? ' · ' + t('inspect.drivesDerived') : '')),
+        h('div', { className: 'pe-drives' }, driveBars),
+        h('div', { className: 'pe-kv' },
+          h(KeyValue, { label: t('inspect.cause') + ' · ' + t('inspect.causePredicted') }),
+          h('span', { className: 'pe-kv-value' }, predicted)),
         h('div', { className: 'pe-genes' }, genes),
         h('button', {
           type: 'button',
-          className: `pe-btn pe-btn-block${following ? ' pe-btn-active' : ''}`,
-          onClick: onFollow,
-        }, following ? t('inspect.unfollow') : t('inspect.follow')))
+          className: 'pe-btn pe-btn-block' + (props.following ? ' pe-btn-active' : ''),
+          onClick: props.onFollow,
+        }, props.following ? t('inspect.unfollow') : t('inspect.follow')))
+    }
+
+    /**
+     * Species table: counts, reserve, age and the cause breakdown, with a row
+     * click that flies to a living member.
+     * @param {object} props - props.rows, props.t, props.onLocate.
+     * @returns {object} React element.
+     */
+    function SpeciesPanel(props) {
+      const rows = props.rows ?? []
+      const t = props.t
+      if (rows.length === 0) return h('div', { className: 'pe-blank' }, t('species.empty'))
+      const header = h('div', { className: 'pe-srow pe-srow-head' },
+        h('span', null, ''),
+        h('span', { className: 'pe-srow-name' }, t('budget.species')),
+        h('span', { className: 'pe-srow-num' }, t('metric.count')),
+        h('span', { className: 'pe-srow-num' }, t('metric.energy')),
+        h('span', { className: 'pe-srow-num' }, t('metric.age')))
+      const body = rows.map((row) => {
+        const species = SPECIES[row.id]
+        const color = species === undefined ? '#999' : species.color
+        return h('div', {
+          key: row.id,
+          className: 'pe-srow' + (row.count === 0 ? ' is-gone' : ''),
+          onClick: () => props.onLocate(row.id),
+          title: row.count === 0 ? t('species.extinct') : t('species.deadTotal', { n: row.dead }),
+        },
+          h(PixelGlyph, { name: speciesGlyph(row.id), color, size: 12 }),
+          h('span', { className: 'pe-srow-name' }, t('species.' + row.id)),
+          h('span', { className: 'pe-srow-num' }, String(row.count)),
+          h('span', { className: 'pe-sbar' }, h('span', {
+            className: 'pe-sbar-fill',
+            style: { width: percentOf(row.meanRatio) + '%', background: color },
+          })),
+          h('span', { className: 'pe-srow-num' }, row.count === 0 ? '—' : shortTime(row.meanAge)))
+      })
+      const deadRows = rows.filter(row => row.dead > 0).map((row) => {
+        const species = SPECIES[row.id]
+        const color = species === undefined ? '#999' : species.color
+        return h('div', { className: 'pe-srow', key: 'dead-' + row.id, title: t('metric.causes') },
+          h(PixelGlyph, { name: speciesGlyph(row.id), color, size: 12 }),
+          h('span', { className: 'pe-srow-name' }, t('species.' + row.id)),
+          h('span', { className: 'pe-srow-num' }, String(row.dead)),
+          h('span', { style: { gridColumn: '4 / span 2' } }, h(CauseBar, { deaths: row.deaths, t })))
+      })
+      // Deaths whose cause came from the engine's own carcass record are facts;
+      // the rest were inferred here, and the header says how many.
+      const inferred = props.inferred ?? 0
+      const causesTitle = deadRows.length === 0
+        ? null
+        : h('div', { className: 'pe-panel-title' },
+            t('metric.causes') + (inferred > 0 ? ' · ' + t('inspect.causeInferred') + ' ' + inferred : ''))
+      return h('div', { className: 'pe-rows' },
+        header,
+        body,
+        causesTitle,
+        deadRows)
+    }
+
+    /**
+     * Energy flow: the cascade sun to plants to herbivores to carnivores, then
+     * the per-species budget that produced it.
+     * @param {object} props - props.flows, props.rows, props.t.
+     * @returns {object} React element.
+     */
+    function EnergyFlowPanel(props) {
+      const t = props.t
+      const flows = props.flows ?? { gpp: 0, herbs: 0, carns: 0, respire: 0, plantStock: 0, animalStock: 0 }
+      const rows = props.rows ?? []
+      const peak = Math.max(flows.gpp, flows.herbs, flows.carns, 1)
+      const stage = (key, label, value, color) => h('div', {
+        className: 'pe-flow-row',
+        key,
+        title: key === 'sun' ? t('flow.gpp') : label,
+      },
+        h('span', { className: 'pe-flow-label' }, label),
+        h('span', { className: 'pe-flow-track' }, h('span', {
+          className: 'pe-flow-fill',
+          style: { width: Math.max(value > 0 ? 2 : 0, percentOf(Math.min(1, value / peak))) + '%', background: color },
+        })),
+        h('span', { className: 'pe-flow-value' }, formatEnergy(value)))
+      const running = flows.gpp > 0 || flows.herbs > 0 || flows.carns > 0
+      const cascade = running
+        ? h('div', { className: 'pe-flow' },
+            stage('sun', t('flow.sun'), flows.gpp, FLOW_COLORS.sun),
+            stage('plants', t('flow.plants'), flows.herbs, FLOW_COLORS.plants),
+            stage('herbs', t('flow.herbivores'), flows.carns, FLOW_COLORS.herbs),
+            stage('carns', t('flow.respire'), flows.respire, FLOW_COLORS.respire))
+        : h('div', { className: 'pe-blank' }, t('flow.waiting'))
+      const budget = rows.filter(row => row.count > 0).map(row => h('div', { className: 'pe-srow', key: 'budget-' + row.id },
+        h(PixelGlyph, { name: speciesGlyph(row.id), color: SPECIES[row.id]?.color, size: 12 }),
+        h('span', { className: 'pe-srow-name' }, t('species.' + row.id)),
+        h('span', { className: 'pe-srow-num' }, formatEnergy(row.intake)),
+        h('span', { className: 'pe-srow-num' }, formatEnergy(row.respire)),
+        h('span', { className: 'pe-srow-num' }, formatEnergy(row.intake - row.respire))))
+      return h('div', { className: 'pe-rows' },
+        h('div', { className: 'pe-panel-title' }, t('flow.panelTitle')),
+        cascade,
+        h('div', { className: 'pe-kv' },
+          h(KeyValue, { label: t('flow.stock') + ' · ' + t('flow.plants') }),
+          h('span', { className: 'pe-kv-value' }, formatEnergy(flows.plantStock) + ' ' + t('flow.unit')),
+          h(KeyValue, { label: t('flow.stock') + ' · ' + t('flow.animals') }),
+          h('span', { className: 'pe-kv-value' }, formatEnergy(flows.animalStock) + ' ' + t('flow.unit')),
+          h(KeyValue, { label: t('flow.respire') }),
+          h('span', { className: 'pe-kv-value' }, formatEnergy(flows.respire) + ' ' + t('flow.unit'))),
+        h('div', { className: 'pe-panel-title' }, t('budget.title')),
+        h('div', { className: 'pe-srow pe-srow-head' },
+          h('span', null, ''),
+          h('span', { className: 'pe-srow-name' }, t('budget.species')),
+          h('span', { className: 'pe-srow-num' }, t('budget.intake')),
+          h('span', { className: 'pe-srow-num' }, t('budget.respire')),
+          h('span', { className: 'pe-srow-num' }, t('budget.net'))),
+        budget,
+        h('div', { className: 'pe-note' }, t('flow.note') + ' ' + t('flow.unit')))
+    }
+
+    /**
+     * Event ticker: one chip per event, newest first, with the species icon, the
+     * count and the coordinates. Clicking one flies the camera there.
+     * @param {object} props - props.events, props.t, props.filter, props.onFilter, props.onLocate, props.now.
+     * @returns {object} React element.
+     */
+    function EventBar(props) {
+      const t = props.t
+      const now = Number.isFinite(props.now) ? props.now : 0
+      const filters = EVENT_FILTERS.map(kind => h('button', {
+        key: kind,
+        type: 'button',
+        className: 'pe-eventfilter' + (props.filter === kind ? ' is-active' : ''),
+        onClick: () => props.onFilter(kind),
+      }, kind === 'all' ? t('event.all') : t('event.' + kind)))
+      const all = props.events ?? []
+      const shown = props.filter === undefined || props.filter === 'all'
+        ? all
+        : all.filter(event => event.kind === props.filter)
+      const items = shown.slice(0, 16).map((event) => {
+        const species = SPECIES[event.species]
+        const color = species === undefined ? '#999' : species.color
+        const age = Math.max(0, now - event.t)
+        return h('button', {
+          key: event.seq,
+          type: 'button',
+          className: 'pe-event pe-event-' + event.kind,
+          title: t('event.' + event.kind) + ' · ' + t('species.' + event.species) + ' · ' +
+            Math.round(event.x) + ', ' + Math.round(event.y),
+          'aria-label': t('events.locate'),
+          onClick: () => props.onLocate(event),
+        },
+          h(PixelGlyph, { name: EVENT_GLYPHS[event.kind] ?? 'target', color, size: 12 }),
+          h('span', null, t('species.' + event.species)),
+          event.count > 1 ? h('span', { className: 'pe-event-count' }, t('events.count', { n: event.count })) : null,
+          event.cause === null || event.cause === undefined
+            ? null
+            : h('span', { className: 'pe-event-count' }, t('cause.' + event.cause)),
+          h('span', { className: 'pe-event-where' }, Math.round(event.x) + ',' + Math.round(event.y)),
+          h('span', { className: 'pe-event-time' },
+            age < 3 ? t('events.justNow') : t('events.secondsAgo', { n: Math.round(age) })))
+      })
+      return h('div', { className: 'pe-eventbar' },
+        h('span', { className: 'pe-eventbar-title' }, t('events.title')),
+        h('div', { className: 'pe-events-filters', title: t('events.filter') }, filters),
+        h('div', { className: 'pe-events' },
+          items.length > 0 ? items : h('span', { className: 'pe-events-empty' }, t('events.empty'))))
+    }
+
+    /**
+     * First-run guide: three steps, one button, remembered in the store.
+     * @param {object} props - props.t, props.onDismiss.
+     * @returns {object} React element.
+     */
+    function OnboardingOverlay(props) {
+      const t = props.t
+      return h('div', { className: 'pe-onboard', role: 'dialog', 'aria-label': t('onboard.title') },
+        h('div', { className: 'pe-onboard-title' }, t('onboard.title')),
+        h('ol', { className: 'pe-onboard-steps' },
+          h('li', null, t('onboard.step1')),
+          h('li', null, t('onboard.step2')),
+          h('li', null, t('onboard.step3'))),
+        h('div', { className: 'pe-onboard-actions' },
+          h('button', { type: 'button', className: 'pe-btn pe-btn-active', onClick: props.onDismiss },
+            t('onboard.dismiss'))))
+    }
+
+    /**
+     * The world went quiet: say so and offer the restock button instead of
+     * leaving the player with an empty meadow and no idea what to do.
+     * @param {object} props - props.t, props.onRestock.
+     * @returns {object} React element.
+     */
+    function EmptyWorldOverlay(props) {
+      const t = props.t
+      return h('div', { className: 'pe-emptyworld' },
+        h('div', { className: 'pe-emptyworld-title' }, t('status.emptyWorld')),
+        h('div', { className: 'pe-emptyworld-hint' }, t('status.emptyWorldHint')),
+        h('button', { type: 'button', className: 'pe-btn', onClick: props.onRestock }, t('status.restock')))
     }
 
     /**
      * Population chart with filled areas and a legend.
-     * @param {object} props - `{ history, t }`.
+     * @param {object} props - props.history, props.t.
      * @returns {object} React element.
      */
     function PopulationChart(props) {
-      const { history, t } = props
+      const history = props.history
+      const t = props.t
       const canvasRef = React.useRef(null)
       React.useEffect(() => {
         const canvas = canvasRef.current
@@ -246,17 +671,19 @@
         h('div', { className: 'pe-panel-title' }, t('chart.title')),
         h('canvas', { ref: canvasRef, width: 240, height: 64, className: 'pe-chart' }),
         h('div', { className: 'pe-legend' }, SPECIES_IDS.map(id => h('span', { className: 'pe-legend-item', key: id },
-          h('span', { className: 'pe-swatch pe-swatch-sm', style: { background: SPECIES[id].color } }),
-          h('span', null, t(`species.${id}`))))))
+          h(PixelGlyph, { name: speciesGlyph(id), color: SPECIES[id].color, size: 10 }),
+          h('span', null, t('species.' + id))))))
     }
 
     /**
      * Minimap with the current viewport rectangle; click to jump.
-     * @param {object} props - `{ store, snapshot, onJump }`.
+     * @param {object} props - props.store, props.snapshot, props.onJump.
      * @returns {object} React element.
      */
     function Minimap(props) {
-      const { store, snapshot, onJump } = props
+      const store = props.store
+      const snapshot = props.snapshot
+      const onJump = props.onJump
       const canvasRef = React.useRef(null)
       const MAP_W = 168
       const MAP_H = 105
@@ -300,11 +727,13 @@
 
     /**
      * The whole panel.
-     * @param {object} props - slot props plus `{ store, locale, layout }`.
+     * @param {object} props - slot props plus props.store, props.locale, props.layout.
      * @returns {object} React element.
      */
     function TerrariumPanel(props) {
-      const { store, locale, layout } = props
+      const store = props.store
+      const locale = props.locale
+      const layout = props.layout
       const t = useTranslate(locale)
       const snapshot = useStore(store)
       const worldSize = snapshot.world ?? { width: GRID_W, height: GRID_H }
@@ -312,9 +741,11 @@
       const [brushIndex, setBrushIndex] = React.useState(1)
       const [helpOpen, setHelpOpen] = React.useState(false)
       const [confirmNew, setConfirmNew] = React.useState(false)
+      const [tab, setTab] = React.useState('tools')
+      const [eventFilter, setEventFilter] = React.useState('all')
       const [cameraTick, setCameraTick] = React.useState(0)
       const [toast, setToast] = React.useState(null)
-      const [hoverCell, setHoverCell] = React.useState(null)
+      const [hover, setHover] = React.useState(null)
       const toastTimer = React.useRef(0)
       const stageRef = React.useRef(null)
       const canvasRef = React.useRef(null)
@@ -375,6 +806,14 @@
 
       const bumpCamera = React.useCallback(() => setCameraTick(value => value + 1), [])
 
+      /** Show a short message above the map. */
+      const showToast = React.useCallback((message) => {
+        if (message === null || message === undefined) return
+        setToast(message)
+        if (toastTimer.current !== 0) clearTimeout(toastTimer.current)
+        toastTimer.current = setTimeout(() => setToast(null), 1800)
+      }, [])
+
       /** Centre the camera on a world point. */
       const lookAt = React.useCallback((x, y) => {
         cameraRef.current.cx = clamp(x, 0, worldSize.width)
@@ -392,6 +831,37 @@
         cameraRef.current.fitted = true
         bumpCamera()
       }, [stageSize, worldSize, bumpCamera])
+
+      /**
+       * Fly to the place an event happened, and open the animal when it is still
+       * alive. This is what makes the ticker a way to *watch* the world.
+       */
+      const locateEvent = React.useCallback((event) => {
+        lookAt(event.x, event.y)
+        if (event.id > 0) store.select(event.id)
+      }, [store, lookAt])
+
+      /** Fly to the first living member of a species (species table row). */
+      const locateSpecies = React.useCallback((id) => {
+        const world = store.getWorld()
+        if (world === null || world === undefined) return
+        const entity = world.entities.find(candidate => candidate.species === id)
+        if (entity === undefined) return
+        lookAt(entity.x, entity.y)
+        store.select(entity.id)
+      }, [store, lookAt])
+
+      /** Put a starter population back into an empty world. */
+      const restockWorld = React.useCallback(() => {
+        const released = store.restock()
+        showToast(t('toast.placed', { n: released }))
+      }, [store, showToast, t])
+
+      /** Close the help sheet and show the first-run guide again. */
+      const replayGuide = React.useCallback(() => {
+        setHelpOpen(false)
+        store.resetOnboarding()
+      }, [store])
 
       // ---------------------------------------------------------------------
       // Input: pointer mode pans and selects; the brush tools paint.
@@ -412,10 +882,15 @@
         const stageRect = () => stage.getBoundingClientRect()
         const cellAt = (clientX, clientY) => worldFromPoint(viewRef.current, stageRect(), clientX, clientY)
 
-        const report = (released) => {
-          if (SPECIES[toolRef.current] === undefined) return
+        const report = (released, erased) => {
           const translate = translateRef.current
-          setToast(released > 0 ? translate('toast.placed', { n: released }) : translate('toast.blocked'))
+          let message = null
+          if (erased === true) message = translate('toast.erased')
+          else if (SPECIES[toolRef.current] !== undefined) {
+            message = released > 0 ? translate('toast.placed', { n: released }) : translate('toast.blocked')
+          }
+          if (message === null) return
+          setToast(message)
           if (toastTimer.current !== 0) clearTimeout(toastTimer.current)
           toastTimer.current = setTimeout(() => setToast(null), 1800)
         }
@@ -434,8 +909,9 @@
           drag.lastCell = ''
           const point = cellAt(event.clientX, event.clientY)
           if (drag.mode === 'paint') {
-            drag.lastCell = `${Math.round(point.x)},${Math.round(point.y)}`
-            report(store.paintAt(point.x, point.y, event.button === 2))
+            drag.lastCell = Math.round(point.x) + ',' + Math.round(point.y)
+            const erasing = event.button === 2
+            report(store.paintAt(point.x, point.y, erasing), erasing)
           }
           if (typeof stage.setPointerCapture === 'function' && typeof event.pointerId === 'number') {
             try { stage.setPointerCapture(event.pointerId) } catch { /* capture is optional */ }
@@ -445,8 +921,8 @@
 
         const handleMove = (event) => {
           const point = cellAt(event.clientX, event.clientY)
-          const cell = `${Math.round(point.x)},${Math.round(point.y)}`
-          setHoverCell(cell)
+          const cell = Math.round(point.x) + ',' + Math.round(point.y)
+          setHover({ x: point.x, y: point.y })
           store.setHover(point)
           const drag = dragRef.current
           if (drag.mode === 'none') return
@@ -508,7 +984,7 @@
 
         const handleLeave = () => {
           store.setHover(null)
-          setHoverCell(null)
+          setHover(null)
           dragRef.current.mode = 'none'
         }
 
@@ -531,7 +1007,6 @@
           stage.removeEventListener('contextmenu', handleContext)
         }
       }, [store, bumpCamera])
-
 
       React.useEffect(() => {
         const onKey = (event) => {
@@ -562,35 +1037,62 @@
       }, [confirmNew])
 
       const selected = snapshot.selected ?? null
+      const climate = snapshot.climate ?? { temperature: 0 }
+      const pulse = snapshot.pulse ?? { births: 0, deaths: 0, predations: 0 }
+      const bag = { width: worldSize.width, height: worldSize.height }
 
       const speciesChips = SPECIES_IDS.map((id) => h('span', {
-        className: 'pe-chip', key: id, title: t(`species.${id}`),
+        className: 'pe-chip', key: id, title: t('species.' + id),
       },
-        h('span', { className: 'pe-swatch pe-swatch-sm', style: { background: SPECIES[id].color } }),
+        h(PixelGlyph, { name: speciesGlyph(id), color: SPECIES[id].color, size: 11 }),
         h('span', { className: 'pe-chip-count' }, String(snapshot.stats?.counts?.[id] ?? 0))))
+
+      const labelFor = (id) => (SPECIES[id] === undefined ? t('tool.' + id) : t('species.' + id))
 
       const toolButton = (id) => {
         const isSpecies = SPECIES[id] !== undefined
         const color = isSpecies ? SPECIES[id].color : undefined
-        const label = isSpecies ? t(`species.${id}`) : t(`tool.${id}`)
+        const label = labelFor(id)
         return h('button', {
           type: 'button', key: id,
-          className: `pe-tool${tool === id ? ' is-active' : ''}`,
+          className: 'pe-tool' + (tool === id ? ' is-active' : ''),
           onClick: () => setTool(id),
           title: label,
           'aria-pressed': tool === id,
           'aria-label': label,
         },
-          h(PixelGlyph, { name: isSpecies ? 'creature' : id, color, size: 18 }),
+          h(PixelGlyph, { name: isSpecies ? speciesGlyph(id) : id, color, size: 18 }),
           h('span', { className: 'pe-tool-label' }, label))
       }
 
       const speedButton = (value) => h('button', {
         type: 'button', key: value,
-        className: `pe-seg-btn${snapshot.speed === value && !snapshot.paused ? ' is-active' : ''}`,
+        className: 'pe-seg-btn' + (snapshot.speed === value && !snapshot.paused ? ' is-active' : ''),
         onClick: () => store.setSpeed(value),
-        'aria-label': t(`speed.${value}`),
-      }, t(`speed.${value}`))
+        'aria-label': t('speed.' + value),
+      }, t('speed.' + value))
+
+      const tabButton = (id) => h('button', {
+        type: 'button', key: id,
+        className: 'pe-tab' + (tab === id ? ' is-active' : ''),
+        'aria-selected': tab === id,
+        onClick: () => setTab(id),
+      }, t('tab.' + id))
+
+      const showTab = id => (tab === id ? 'flex' : 'none')
+
+      const brushRadius = BRUSH_RADIUS[brushIndex]
+      const brushPreview = hover === null || tool === 'pointer'
+        ? null
+        : h('span', {
+            className: 'pe-brushpreview',
+            style: {
+              left: ((hover.x - view.x) * view.scale + view.offsetX) + 'px',
+              top: ((hover.y - view.y) * view.scale + view.offsetY) + 'px',
+              width: Math.max(4, (brushRadius * 2 + 1) * view.scale) + 'px',
+              height: Math.max(4, (brushRadius * 2 + 1) * view.scale) + 'px',
+            },
+          })
 
       return h('div', { className: 'pe-root' },
         h('header', { className: 'pe-head' },
@@ -599,7 +1101,12 @@
             h('div', null,
               h('div', { className: 'pe-title' }, t('panel.title')),
               h('div', { className: 'pe-sub' },
-                `${t('stat.day', { day: snapshot.stats?.day ?? 1 })} · ${snapshot.stats?.clock ?? '06:00'}`))),
+                t('stat.day', { day: snapshot.stats?.day ?? 1 }) + ' · ' + (snapshot.stats?.clock ?? '06:00') +
+                ' · ' + t('status.temperature', { n: Math.round(climate.temperature ?? 0) })))),
+          h('div', { className: 'pe-statusbar' },
+            h('span', { className: 'pe-pill' + (snapshot.paused ? '' : ' pe-pill-live') },
+              snapshot.paused ? t('speed.paused') : t('status.pulse', { births: pulse.births, deaths: pulse.deaths })),
+            h('span', { className: 'pe-pill' }, t('stat.corpses') + ' ' + (snapshot.stats?.corpses ?? 0))),
           h('div', { className: 'pe-chips' }, speciesChips),
           h('div', { className: 'pe-controls' },
             h('button', {
@@ -616,7 +1123,7 @@
             h('span', { className: 'pe-divider' }),
             h('button', {
               type: 'button',
-              className: `pe-btn${confirmNew ? ' pe-btn-danger' : ''}`,
+              className: 'pe-btn' + (confirmNew ? ' pe-btn-danger' : ''),
               onClick: () => {
                 if (!confirmNew) { setConfirmNew(true); return }
                 setConfirmNew(false)
@@ -626,53 +1133,97 @@
             }, confirmNew ? t('action.newWorldConfirm') : t('action.newWorld')),
             h('button', { type: 'button', className: 'pe-btn', onClick: fitAll }, t('action.fit')),
             h('button', {
-              type: 'button', className: `pe-btn${helpOpen ? ' pe-btn-active' : ''}`,
+              type: 'button', className: 'pe-btn' + (helpOpen ? ' pe-btn-active' : ''),
               onClick: () => setHelpOpen(open => !open),
             }, t('action.help')),
             layout !== undefined && typeof layout.selectPanel === 'function'
               ? h('button', { type: 'button', className: 'pe-btn pe-btn-ghost', onClick: () => layout.selectPanel('conversation') }, t('action.back'))
               : null)),
         h('div', { className: 'pe-body' },
-          h('div', {
-            className: 'pe-stage',
-            ref: stageRef,
-            style: { cursor: tool === 'pointer' ? 'grab' : 'crosshair' },
-          },
-            h('canvas', {
-              ref: canvasRef,
-              className: 'pe-canvas',
-              width: view.width * view.scale,
-              height: view.height * view.scale,
-              style: {
-                width: `${view.width * view.scale}px`,
-                height: `${view.height * view.scale}px`,
-              },
-            }),
-            h('div', { className: 'pe-hud pe-hud-bl' },
-              h('span', { className: 'pe-hud-item' }, hoverCell === null ? '—' : hoverCell),
-              h('span', { className: 'pe-hud-item' }, `${view.x},${view.y}`),
-              h('span', { className: 'pe-hud-item' }, `${view.width}×${view.height}`),
-              h('span', { className: 'pe-hud-item' }, `${view.scale}×`)),
-            h('div', { className: 'pe-hud pe-hud-br' },
-              h(Minimap, { store, snapshot, onJump: lookAt })),
-            toast === null ? null : h('div', { className: 'pe-toast' }, toast)),
+          h('div', { className: 'pe-stagewrap' },
+            h('div', {
+              className: 'pe-stage',
+              ref: stageRef,
+              style: { cursor: tool === 'pointer' ? 'grab' : 'crosshair' },
+            },
+              h('canvas', {
+                ref: canvasRef,
+                className: 'pe-canvas',
+                width: view.width * view.scale,
+                height: view.height * view.scale,
+                style: {
+                  width: (view.width * view.scale) + 'px',
+                  height: (view.height * view.scale) + 'px',
+                },
+              }),
+              brushPreview,
+              h('div', { className: 'pe-hud pe-hud-bl' },
+                h('span', { className: 'pe-hud-item' },
+                  hover === null ? '—' : t('brush.cell', { x: Math.round(hover.x), y: Math.round(hover.y) })),
+                h('span', { className: 'pe-hud-item' }, t('brush.preview', { tool: labelFor(tool) })),
+                h('span', { className: 'pe-hud-item' }, view.scale + '×')),
+              h('div', { className: 'pe-hud pe-hud-br' },
+                h(Minimap, { store, snapshot, onJump: lookAt })),
+              snapshot.ready === false
+                ? h('div', { className: 'pe-blank' }, t('status.ready'))
+                : null,
+              snapshot.world !== undefined && snapshot.world.empty === true
+                ? h(EmptyWorldOverlay, { t, onRestock: restockWorld })
+                : null,
+              snapshot.onboarding === true
+                ? null
+                : h(OnboardingOverlay, { t, onDismiss: () => store.markOnboardingSeen() }),
+              snapshot.notice === null || snapshot.notice === undefined
+                ? null
+                : h('div', { className: 'pe-notice' },
+                    h('div', { className: 'pe-notice-title' },
+                      snapshot.notice.kind === 'legacy' ? t('notice.legacyTitle') : t('notice.loadTitle')),
+                    h('div', { className: 'pe-notice-body' },
+                      snapshot.notice.kind === 'legacy'
+                        ? t('notice.legacyBody')
+                        : t('notice.loadBody', { reason: snapshot.notice.detail ?? '' })),
+                    h('div', { className: 'pe-notice-actions' },
+                      h('button', { type: 'button', className: 'pe-btn', onClick: () => store.dismissNotice() },
+                        t('notice.dismiss')))),
+              toast === null ? null : h('div', { className: 'pe-toast' }, toast)),
+            h(EventBar, {
+              events: snapshot.events ?? [],
+              t,
+              filter: eventFilter,
+              onFilter: setEventFilter,
+              onLocate: locateEvent,
+              now: snapshot.time ?? 0,
+            })),
           h('aside', { className: 'pe-side' },
-            h('section', { className: 'pe-panel' },
-              h('div', { className: 'pe-panel-title' }, t('tool.group.life')),
-              h('div', { className: 'pe-tools' }, LIFE_TOOLS.map(toolButton))),
-            h('section', { className: 'pe-panel' },
-              h('div', { className: 'pe-panel-title' }, t('tool.group.terrain')),
-              h('div', { className: 'pe-tools' }, TERRAIN_TOOL_IDS.map(toolButton))),
-            h('section', { className: 'pe-panel pe-panel-row' },
-              h('div', { className: 'pe-panel-title' }, t('brush.label')),
-              h('div', { className: 'pe-seg' }, BRUSHES.map((radius, index) => h('button', {
-                type: 'button', key: radius,
-                className: `pe-seg-btn${brushIndex === index ? ' is-active' : ''}`,
-                onClick: () => setBrushIndex(index),
-                'aria-label': t(index === 0 ? 'brush.small' : index === 1 ? 'brush.medium' : 'brush.large'),
-              }, t(index === 0 ? 'brush.small' : index === 1 ? 'brush.medium' : 'brush.large'))))),
-            h(PopulationChart, { history: snapshot.history ?? [], t }),
-            h('section', { className: 'pe-panel pe-panel-grow' },
+            h('div', { className: 'pe-tabs' }, SIDE_TABS.map(tabButton)),
+            h('div', { className: 'pe-tabbody' },
+              h('section', { className: 'pe-panel', style: { display: showTab('tools') } },
+                h('div', { className: 'pe-panel-title' }, t('tool.group.life')),
+                h('div', { className: 'pe-tools' }, LIFE_TOOLS.map(toolButton))),
+              h('section', { className: 'pe-panel', style: { display: showTab('tools') } },
+                h('div', { className: 'pe-panel-title' }, t('tool.group.terrain')),
+                h('div', { className: 'pe-tools' }, TERRAIN_TOOL_IDS.map(toolButton))),
+              h('section', { className: 'pe-panel pe-panel-row', style: { display: showTab('tools') } },
+                h('div', { className: 'pe-panel-title' }, t('brush.label')),
+                h('div', { className: 'pe-seg' }, BRUSHES.map((radius, index) => h('button', {
+                  type: 'button', key: radius,
+                  className: 'pe-seg-btn' + (brushIndex === index ? ' is-active' : ''),
+                  onClick: () => setBrushIndex(index),
+                  'aria-label': t(index === 0 ? 'brush.small' : index === 1 ? 'brush.medium' : 'brush.large'),
+                }, t(index === 0 ? 'brush.small' : index === 1 ? 'brush.medium' : 'brush.large'))))),
+              h('section', { className: 'pe-panel', style: { display: showTab('species') } },
+                h('div', { className: 'pe-panel-title' }, t('species.panelTitle')),
+                h(SpeciesPanel, {
+                  rows: snapshot.species ?? [],
+                  t,
+                  onLocate: locateSpecies,
+                  inferred: snapshot.causeSource === undefined ? 0 : snapshot.causeSource.inferred,
+                })),
+              h('div', { style: { display: showTab('species') } },
+                h(PopulationChart, { history: snapshot.history ?? [], t })),
+              h('section', { className: 'pe-panel', style: { display: showTab('energy') } },
+                h(EnergyFlowPanel, { flows: snapshot.flows, rows: snapshot.species ?? [], t }))),
+            h('div', { className: 'pe-dock' },
               h('div', { className: 'pe-panel-title' }, t('inspect.title')),
               h(Inspector, {
                 selected,
@@ -688,7 +1239,8 @@
                 h('span', { className: 'pe-title' }, t('help.title')),
                 h('button', { type: 'button', className: 'pe-btn pe-btn-ghost', onClick: () => setHelpOpen(false) }, t('action.close'))),
               h('ul', { className: 'pe-modal-body' },
-                [1, 2, 3, 4, 5, 6, 7, 8].map(index => h('li', { key: index }, t(`help.${index}`))))))
+                [1, 2, 3, 4, 5, 6, 7, 8, 9].map(index => h('li', { key: index }, t('help.' + index)))),
+              h('div', { className: 'pe-onboard-actions' },
+                h('button', { type: 'button', className: 'pe-btn', onClick: replayGuide }, t('onboard.again')))))
           : null)
     }
-

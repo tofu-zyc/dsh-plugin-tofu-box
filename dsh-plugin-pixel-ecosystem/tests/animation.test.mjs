@@ -73,14 +73,19 @@ test('a moving animal visits all four gait frames and a resting one does not', (
   assert.ok(changes > 10, 'the gait phase must advance while the animal moves, got ' + changes + ' changes')
   assert.equal(seen.size, 4, 'the gait must visit every frame index, saw ' + [...seen].join(','))
 
-  const resting = engine.spawnEntity(world, 'rabbit', 32, 30)
+  // A quiet world: the decision system lets fear interrupt a rest through the
+  // think timer by design, so a predator two cells away would make this a test
+  // of the interrupt rule instead of a test of the gait.
+  const quiet = Object.fromEntries(engine.SPECIES_IDS.map(id => [id, 0]))
+  const calm = engine.createWorld({ seed: 13, width: 64, height: 48, stocks: quiet, immigration: false })
+  const resting = engine.spawnEntity(calm, 'rabbit', 32, 24)
   resting.intent = 'rest'
   resting.thinkTimer = 999
   resting.targetX = 32
-  resting.targetY = 30
+  resting.targetY = 24
   resting.gait = 0
   const before = resting.gait
-  for (let tick = 0; tick < 20; tick++) engine.stepWorld(world, engine.TICK)
+  for (let tick = 0; tick < 20; tick++) engine.stepWorld(calm, engine.TICK)
   assert.equal(resting.gait, before, 'a resting animal must not advance its gait')
 })
 test('every behaviour state resolves to a frame set, unknown ids fall back to idle', () => {
@@ -154,4 +159,54 @@ test('a paused pose holds one frame, a moving pose cycles', () => {
   const phases = new Set()
   for (let tick = 0; tick < 16; tick++) phases.add(engine.frameFor(rabbit, tick))
   assert.ok(phases.size > 1, 'a stalking animal must keep its legs moving')
+})
+test('a bout phase picks the pose: approach walks, do settles, handling bends the head down', () => {
+  const quiet = Object.fromEntries(engine.SPECIES_IDS.map(id => [id, 0]))
+  const world = engine.createWorld({ seed: 6, width: 48, height: 40, stocks: quiet, immigration: false })
+  const rabbit = engine.spawnEntity(world, 'rabbit', 20, 20)
+  rabbit.heading = 0
+  rabbit.phase = 0
+  rabbit.running = false
+  rabbit.fleeing = false
+  const setIdle = engine.SPRITES.rabbit.idle
+  const walkFrames = new Set(engine.SPRITES.rabbit.walk)
+  rabbit.state = { id: 'forage', phase: 'do' }
+  assert.equal(engine.frameFor(rabbit, 7), setIdle, 'eating at the patch must be a head-down pose')
+  rabbit.state = { id: 'forage', phase: 'approach' }
+  assert.ok(walkFrames.has(engine.frameFor(rabbit, 7)), 'walking to the patch must be a moving pose')
+  rabbit.state = { id: 'hunt', phase: 'do' }
+  rabbit.handling = true
+  assert.equal(engine.frameFor(rabbit, 7), setIdle, 'a kill being worked through must be head down, not a run')
+  rabbit.handling = false
+  rabbit.state = { id: 'socialize', phase: 'do' }
+  rabbit.drives = { libido: 0.8 }
+  assert.ok(walkFrames.has(engine.frameFor(rabbit, 7)), 'a receptive animal courts on the move')
+  rabbit.drives = { libido: 0.1 }
+  assert.ok(walkFrames.has(engine.frameFor(rabbit, 7)), 'a non-receptive animal still socialises')
+})
+
+test('an ambusher stalks in and strikes, a chaser runs', () => {
+  const quiet = Object.fromEntries(engine.SPECIES_IDS.map(id => [id, 0]))
+  const world = engine.createWorld({ seed: 7, width: 48, height: 40, stocks: quiet, immigration: false })
+  for (let y = 0; y < world.height; y++) {
+    for (let x = 0; x < 8; x++) world.terrain[y * world.width + x] = engine.TERRAIN.WATER
+  }
+  const pike = engine.spawnEntity(world, 'pike', 4, 20)
+  assert.ok(pike !== null, 'the pike must spawn in the water strip')
+  pike.heading = 0
+  pike.phase = 0
+  pike.running = false
+  pike.fleeing = false
+  pike.state = { id: 'hunt', phase: 'approach' }
+  const stalk = engine.frameFor(pike, 7)
+  assert.ok(new Set(engine.SPRITES.pike.walk).has(stalk), 'an ambusher approaches on the slow gait, not a run')
+  pike.state = { id: 'hunt', phase: 'do' }
+  assert.equal(engine.frameFor(pike, 7), engine.SPRITES.pike.flee, 'the strike itself is the fast pose')
+  const wolf = engine.spawnEntity(world, 'wolf', 30, 20)
+  wolf.heading = 0
+  wolf.phase = 0
+  wolf.running = false
+  wolf.fleeing = false
+  wolf.state = { id: 'hunt', phase: 'approach' }
+  assert.equal(engine.frameFor(wolf, 7), engine.SPRITES.wolf.flee, 'a chaser runs its prey down')
 })

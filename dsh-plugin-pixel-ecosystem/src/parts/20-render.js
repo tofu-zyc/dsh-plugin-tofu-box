@@ -155,9 +155,9 @@
         // letting the bank end at a colour change.
         if (d < 0.055) color = blendColor(color, water.foam, 0.72)
         else if (d < 0.11) color = blendColor(color, water.foam, 0.3)
-        base[bucket * 3] = nudgeColor(color, -6)
+        base[bucket * 3] = nudgeColor(color, -4)
         base[bucket * 3 + 1] = color
-        base[bucket * 3 + 2] = nudgeColor(color, 6)
+        base[bucket * 3 + 2] = nudgeColor(color, 4)
       }
       const caustic = new Int32Array(steps * 3 * CAUSTIC_STEPS)
       const ripple = new Int32Array(steps * 3)
@@ -290,6 +290,9 @@
             if (d > 0.1 && ((worldX * 3 + worldY * 5 + ripplePhase) & 15) < 2) {
               color = waterRipple[tableIndex]
             }
+            // Icy shallows: in deep winter the rim of the lake freezes before the
+            // middle does, and that white edge is most of what says "frozen".
+            if (snow > 0.4 && d < 0.22) color = blendColor(color, SNOW_COLORS.light, snow * (0.22 - d) * 2.2)
             const cover = weed[index]
             if (cover > 0.05) {
               const lush = cover > 0.55
@@ -308,10 +311,12 @@
             // like nothing happened.
             const damp = weed[index]
             if (damp > 0.3) color = blendColor(color, weedColors[1], Math.min(0.5, damp * 0.55))
-            if (snow > 0.15 && ditherAt(worldX + 5, worldY + 3) < snow * 190) color = snowed(color, 0.55 + snow * 0.4)
+            // Snow settles in patches, not per-pixel: the dither is sampled in
+            // 2x2 blocks, which at 6x reads as banks of snow instead of static.
+            if (snow > 0.15 && ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3) < snow * 190) color = snowed(color, 0.55 + snow * 0.4)
           } else if (surface === TERRAIN.STONE) {
             color = nudgeColor(PALETTE.stone[noise > 198 ? 2 : 1], noiseAt(noise))
-            if (snow > 0.15 && ditherAt(worldX + 5, worldY + 3) < snow * 150) color = snowed(color, 0.6 + snow * 0.35)
+            if (snow > 0.15 && ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3) < snow * 150) color = snowed(color, 0.6 + snow * 0.35)
           } else {
             const cover = grass[index]
             const step = cover <= 0 ? 0 : Math.min(7, (cover * 8) | 0)
@@ -334,8 +339,12 @@
             // which is the difference between "winter" and "white paint".
             if (snow > 0.15) {
               const settle = snow * 205 - cover * 70
-              const flake = ditherAt(worldX + 5, worldY + 3)
-              if (flake < settle) color = (flake & 1) === 0 ? SNOW_COLORS.light : SNOW_COLORS.mid
+              const flake = ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3)
+              // Two snow tones, chosen on a coarser (4x4) sample so the cover
+              // reads as banks with shading rather than a checkerboard.
+              if (flake < settle) {
+                color = ditherAt((worldX >> 2) + 11, (worldY >> 2) + 7) > 120 ? SNOW_COLORS.light : SNOW_COLORS.mid
+              }
             }
           }
           out[outBase + col] = color

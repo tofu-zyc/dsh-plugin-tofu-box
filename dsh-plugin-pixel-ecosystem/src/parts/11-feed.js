@@ -21,7 +21,7 @@
     // docs/10-SCALE-AND-UNITS.md — without any species row carrying it.
 
     /** Reference sward density, kg dry matter/m^2, where intake is 2/3 of max. */
-    const GRAZE_REFERENCE = 0.25
+    const GRAZE_REFERENCE = 0.12
     /** Peak intake as a multiple of the animal's own maintenance requirement. */
     const INTAKE_CEILING = 3
 
@@ -150,8 +150,12 @@
         if (index >= 0 && world.terrain[index] === wanted) {
           const available = field[index]
           if (available > 0) {
+            // `available` is kg per SQUARE METRE and the intake curve is kg per
+            // ANIMAL per day, so the bite is divided by the cell area before it
+            // is taken off the field. Getting this wrong quietly multiplies the
+            // whole herbivore appetite by four.
             const requirement = dryMatterRequirement(species, body.V)
-            const bite = Math.min(available, grazingIntake(requirement, available) * days)
+            const bite = Math.min(available, grazingIntake(requirement, available) * days / CELL_AREA)
             if (bite > 0) {
               field[index] = available - bite
               consumeBite(world, entity, species, bite * CELL_AREA * BIO.GRASS_ENERGY)
@@ -169,7 +173,7 @@
           const plant = nearestFoliage(world, entity, 1.6)
           if (plant !== null && plant.foliage > 0) {
             const requirement = dryMatterRequirement(species, body.V)
-            const bite = Math.min(plant.foliage, grazingIntake(requirement, plant.foliage) * days)
+            const bite = Math.min(plant.foliage, grazingIntake(requirement, plant.foliage) * days / CELL_AREA)
             if (bite > 0) {
               plant.foliage -= bite
               consumeBite(world, entity, species, bite * CELL_AREA * BIO.GRASS_ENERGY)

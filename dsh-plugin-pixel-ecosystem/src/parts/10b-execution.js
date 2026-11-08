@@ -46,7 +46,7 @@
       const originX = Math.round(entity.x)
       const originY = Math.round(entity.y)
       let best = null
-      let bestScore = 0.08
+      let bestScore = 0.02
       for (let offsetY = -2; offsetY <= 2; offsetY++) {
         for (let offsetX = -2; offsetX <= 2; offsetX++) {
           const cellX = originX + offsetX
@@ -75,7 +75,10 @@
     function adoptState(world, entity) {
       const id = INTENT_IDS.includes(entity.intent) ? entity.intent : 'explore'
       const plan = STATE_PLAN[id] ?? STATE_PLAN.explore
-      const until = Math.max(entity.thinkTimer ?? 0, 1)
+      // Never shorter than the floor: a resumed bout is still a bout, and a
+      // bout that ends under its own commitment time is the twitch this whole
+      // part exists to remove.
+      const until = Math.max(entity.thinkTimer ?? 0, plan.min)
       entity.state = {
         id,
         since: world.time,
@@ -241,7 +244,18 @@
         reaim(world, entity, species, state)
         const distance = Math.hypot(state.x - entity.x, state.y - entity.y)
         state.phase = distance > 1.2 ? 'approach' : 'do'
-        done = thirst < 0.12
+        if (state.phase === 'do') {
+          // Standing at the bank: check that drinking is actually working. An
+          // animal that cannot reach the water must abandon the attempt, not
+          // stand there until the bout timer runs out and try again.
+          if (state.thirstAtDo === undefined) {
+            state.thirstAtDo = thirst
+            state.doSince = now
+          } else if (now - state.doSince > 2 && thirst > state.thirstAtDo - 0.02) {
+            done = true
+          }
+        }
+        if (thirst < 0.12) done = true
       } else if (state.id === 'rest') {
         // Resting marks the ground as home: this is where the animal comes back
         // to, and what makes a warren a place instead of a coordinate.
@@ -255,23 +269,46 @@
         reaim(world, entity, species, state)
         const distance = Math.hypot(state.x - entity.x, state.y - entity.y)
         state.phase = distance > 1.5 ? 'approach' : 'do'
-        // Close enough to the herd counts as satisfied company.
+        // Close enough to the herd, or arrived at its own slot: the animal got
+        // what it came for. The channel is marked sated so it goes back to its
+        // own business instead of orbiting the herd for the rest of its life.
         const herd = species.herd
         const crowd = herd === undefined ? 0 : (herd.crowd ?? 4)
-        done = (entity.socialCount ?? 0) >= crowd && distance < 3
+        if (distance <= 1.5 || (entity.socialCount ?? 0) >= crowd) {
+          entity.socialSated = 1
+          done = true
+        }
       } else if (state.id === 'explore') {
         const distance = Math.hypot(state.x - entity.x, state.y - entity.y)
         state.phase = distance > 1.5 ? 'approach' : 'do'
         if (distance <= 1.5) {
-          // Arrived: curiosity is spent for a while (habituation), so the
-          // animal does not immediately pick another random direction.
-          entity.habituation = 1
-          done = true
+          // Arrived, but the bout is not over: pick the next leg from here, in
+          // the direction the animal is already facing. A walk that re-rolls
+          // its angle on every arrival is a random walk however fast it moves;
+          // three legs of the same heading is a trip.
+          const reach = entity.genes.vision * (0.8 + (drives === undefined ? 0.2 : drives.curiosity) * 1.2)
+          const ahead = wanderTarget(world, entity, species, reach)
+          state.x = ahead.x
+          state.y = ahead.y
+          entity.targetX = ahead.x
+          entity.targetY = ahead.y
+          state.legs = (state.legs ?? 0) + 1
+          if (state.legs >= 3) {
+            // Curiosity is spent for a while (habituation), so the animal does
+            // not immediately pick another random direction.
+            entity.habituation = 1
+            done = true
+          }
         }
       }
 
       if (state.phase === 'approach' && stalledAt(world, entity, state)) done = true
       if (now >= state.until) done = true
+      // The commitment floor applies to EVERY ending, not just to rivals: a
+      // bout that starts and stops inside half a second is the twitch this
+      // whole part exists to remove. Only a predator (flee) or the end of the
+      // scheduled bout may finish before the floor.
+      if (done && now - state.since < (state.min ?? 0) && now < state.until) done = false
       if (done) {
         entity.state = undefined
         entity.thinkTimer = 0

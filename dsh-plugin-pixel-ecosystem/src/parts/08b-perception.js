@@ -200,10 +200,20 @@
       const belief = beliefOf(entity)
       let best = null
       let bestScore = 0.04
+      const headingX = Math.cos(entity.heading)
+      const headingY = Math.sin(entity.heading)
       for (const site of belief.sites) {
         const confidence = beliefConfidence(site, now, BELIEF_LIFETIME.site)
         if (confidence <= 0) continue
-        const score = site.value * confidence - threatHeat(entity, site.x, site.y, now) * 0.4
+        const dx = site.x - entity.x
+        const dy = site.y - entity.y
+        const length = Math.hypot(dx, dy) || 1
+        // A patch behind the animal is worth less than the same patch ahead:
+        // animals track food forward, and a memory that keeps pulling them
+        // back is what turns a grazing trip into a random walk.
+        const ahead = (dx * headingX + dy * headingY) / length
+        const behind = ahead < 0 ? 0.12 * (1 - ahead) : 0
+        const score = site.value * confidence - threatHeat(entity, site.x, site.y, now) * 0.4 - behind
         if (score > bestScore) { bestScore = score; best = site }
       }
       return best
@@ -237,6 +247,37 @@
       belief.marks.length = write
     }
 
+    /**
+     * Where to stand to drink: the nearest bank cell next to the water, not the
+     * water cell itself.
+     *
+     * A land animal that aims at the middle of the lake can never arrive, because
+     * canStand refuses the cell; it would reach the shore, fail to get closer,
+     * give up and decide to drink again. That treadmill is what made drinking
+     * take a tenth of a predator's life. Aiming at the bank removes the loop:
+     * the animal stands ON the spot and the feeding code finds water adjacent.
+     * @param {object} world - the world.
+     * @param {object} species - species row.
+     * @param {{x: number, y: number}} water - a water cell (integer coordinates).
+     * @returns {{x: number, y: number}} a standable spot beside the water.
+     */
+    function drinkSpot(world, species, water) {
+      let best = null
+      let bestDistance = Infinity
+      for (let offsetY = -1; offsetY <= 1; offsetY++) {
+        for (let offsetX = -1; offsetX <= 1; offsetX++) {
+          const cellX = water.x + offsetX
+          const cellY = water.y + offsetY
+          if (!canStand(world, species, cellX + 0.5, cellY + 0.5)) continue
+          const distance = offsetX * offsetX + offsetY * offsetY
+          if (distance < bestDistance) {
+            bestDistance = distance
+            best = { x: cellX + 0.5, y: cellY + 0.5 }
+          }
+        }
+      }
+      return best ?? { x: water.x + 0.5, y: water.y + 0.5 }
+    }
     /**
      * Scan for the nearest corpse (food for a hunter, a meal for a scavenger).
      * @param {object} world - the world.
@@ -324,7 +365,10 @@
       // --- water: only worth looking for once the animal is actually dry -----
       if (species.habitat !== 'water' && entity.drives !== undefined && entity.drives.thirst > 0.12) {
         const water = nearestWater(world, entity.x, entity.y, genes.vision)
-        if (water !== null) belief.water = { x: water.x + 0.5, y: water.y + 0.5, t: now }
+        if (water !== null) {
+          const spot = drinkSpot(world, species, water)
+          belief.water = { x: spot.x, y: spot.y, t: now }
+        }
       }
 
       // --- company: a herd is a place as much as a crowd ---------------------

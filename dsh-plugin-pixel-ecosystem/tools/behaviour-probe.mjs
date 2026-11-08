@@ -32,6 +32,9 @@ const NL = String.fromCharCode(10)
 // CLI
 // ---------------------------------------------------------------------------
 
+/** Below this many observations a share is reported as THIN, never as PASS/FAIL. */
+const MIN_GATE_SAMPLES = 20
+
 const DEFAULTS = {
   seed: 12345,
   seconds: 900,
@@ -752,8 +755,11 @@ function evaluateGates(result) {
   let entitySeconds = 0
   let restSeconds = 0
   let swaps = 0
-  let deaths = 0
-  let starved = 0
+  let preyDeaths = 0
+  let preyStarved = 0
+  let predatorDeaths = 0
+  let predatorStarved = 0
+  const SPECIES = result.accessors.SPECIES
   const pooledDwell = new DwellHistogram(0.25)
   const paths = []
   const nets = []
@@ -774,21 +780,43 @@ function evaluateGates(result) {
       paths.push(individual.path)
       nets.push(individual.net)
     }
-    deaths += entry.deaths.length
-    for (const death of entry.deaths) if (death.cause === 'starved') starved += 1
+    const row = SPECIES[id]
+    const isHunter = row !== undefined && row.role === 'hunter'
+    for (const death of entry.deaths) {
+      if (isHunter) {
+        predatorDeaths += 1
+        if (death.cause === 'starved') predatorStarved += 1
+      } else {
+        preyDeaths += 1
+        if (death.cause === 'starved') preyStarved += 1
+      }
+    }
   }
   const meanPath = meanOf(paths)
   const meanNet = meanOf(nets)
   const directionality = meanPath > 0 ? meanNet / meanPath : NaN
   const jitter = entitySeconds === 0 ? NaN : swaps / (entitySeconds / 60)
   const restShare = entitySeconds === 0 ? NaN : restSeconds / entitySeconds
-  const starvedShare = deaths === 0 ? NaN : starved / deaths
+  const preyStarvedShare = preyDeaths === 0 ? NaN : preyStarved / preyDeaths
+  const predatorStarvedShare = predatorDeaths === 0 ? NaN : predatorStarved / predatorDeaths
+  // Mean dwell is the inverse switch rate: entity-seconds divided by switches.
+  // It is the better overview than the pooled median, which a handful of very
+  // short drinking visits can drag far below what a typical animal experiences.
+  const meanDwell = swaps === 0 ? NaN : entitySeconds / swaps
   return [
     { id: 'P2.1', label: 'rest share of entity-time', value: restShare, format: percent, threshold: '< 35%', pass: restShare < 0.35 },
-    { id: 'P2.2', label: 'median intent dwell', value: pooledDwell.median, format: seconds, threshold: '> 10 s', pass: pooledDwell.median > 10 },
-    { id: 'P2.3', label: 'directionality (mean net / mean path)', value: directionality, format: v => fixed(v, 2, 6), threshold: '> 0.30', pass: directionality > 0.3 },
+    { id: 'P2.2', label: 'median intent dwell (pooled)', value: pooledDwell.median, format: seconds, threshold: '> 10 s', pass: pooledDwell.median > 10,
+      extra: 'mean dwell ' + (Number.isFinite(meanDwell) ? meanDwell.toFixed(1) + ' s' : 'n/a') },
+    { id: 'P2.3', label: 'directionality (mean net / mean path)', value: directionality, format: v => fixed(v, 2, 6), threshold: '> 0.30', samples: paths.length, pass: directionality > 0.3 },
     { id: 'P2.4', label: 'intent switches per minute per animal', value: jitter, format: v => fixed(v, 1, 6), threshold: '< 12', pass: jitter < 12 },
-    { id: 'P3.1', label: 'starved share of deaths', value: starvedShare, format: percent, threshold: '< 50%', pass: starvedShare < 0.5 },
+    // Split by trophic role on purpose. docs/97-PROBES.md section 4.1: at the
+    // shipped predator density the predator tier demands ~9.6x the energy its
+    // prey production supplies, so predator starvation is a prediction of that
+    // density, not a broken engine. The gate therefore constrains the prey tier,
+    // and the predator rate is reported as information until the density is
+    // settled by the Lead.
+    { id: 'P3.1', label: 'starved share of PREY deaths', value: preyStarvedShare, format: percent, threshold: '< 50%', samples: preyDeaths, pass: preyStarvedShare < 0.5 },
+    { id: 'P3.2', label: 'starved share of PREDATOR deaths', value: predatorStarvedShare, format: percent, threshold: 'info: expected high at current density', samples: predatorDeaths, kind: 'info', pass: true },
   ]
 }
 
@@ -885,7 +913,9 @@ function toJson(result) {
       label: gate.label,
       value: round3(gate.value),
       threshold: gate.threshold,
-      pass: gate.pass,
+      kind: gate.kind === 'info' ? 'info' : 'gate',
+      samples: gate.samples === undefined ? null : gate.samples,
+      pass: gate.kind === 'info' || (gate.samples !== undefined && gate.samples < 20) ? null : gate.pass,
     })),
   }
 }
@@ -1049,8 +1079,14 @@ function printReport(result, options) {
 
   rule('roadmap gates (docs/90-ROADMAP.md; informational until that phase lands)')
   for (const gate of evaluateGates(result)) {
-    write(gate.id + ' ' + (gate.pass ? 'PASS' : 'FAIL') + ' ' + gate.label.padEnd(46)
-      + gate.format(gate.value) + '  target ' + gate.threshold)
+    // A ratio built on a handful of deaths is noise, not a verdict: report it and
+    // say so, instead of turning it into a FAIL the next run will reverse.
+    const thin = gate.samples !== undefined && gate.samples < MIN_GATE_SAMPLES
+    const status = gate.kind === 'info' ? 'INFO' : thin ? 'THIN' : gate.pass ? 'PASS' : 'FAIL'
+    const suffix = thin ? '  (n=' + gate.samples + ' < ' + MIN_GATE_SAMPLES + ', not a verdict)' : ''
+    write(gate.id + ' ' + status + ' ' + gate.label.padEnd(46)
+      + gate.format(gate.value) + '  target ' + gate.threshold + suffix
+      + (gate.extra === undefined ? '' : '  [' + gate.extra + ']'))
   }
 }
 

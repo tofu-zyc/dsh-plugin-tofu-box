@@ -306,6 +306,8 @@
       // Flight.
       flee: { role: 'run', speed: 1.2 },
       fight: { role: 'run', speed: 1.1, shake: 1, tilt: 3, shadow: 1.1 },
+      // A kill being worked through: crouched over the carcass, head down.
+      feast: { role: 'idle', nod: 0.9, tilt: 4, squash: 0.9, sink: 0.9, shadow: 0.8 },
       // Social and reproductive.
       court: { role: 'walk', speed: 0.8, nod: 0.6 },
       socialize: { role: 'walk', speed: 0.9 },
@@ -358,13 +360,47 @@
     }
 
     /**
+     * Poses that only make sense standing at the target.
+     *
+     * `state.phase` is 'approach' while the animal is still walking to the
+     * patch/carcass/water and 'do' once it is there (contract from
+     * 10b-execution). A head-down grazing loop played while the animal is
+     * crossing the meadow reads as an animal eating while it walks, so the
+     * approach phase falls back to the moving pose.
+     */
+    const DO_POSES = new Set(['graze', 'eat', 'forage', 'browse', 'drink', 'bury',
+      'feast', 'bask', 'huddle', 'mate', 'birth', 'socialize', 'court'])
+
+    /**
      * The pose one animal is showing this frame.
      * @param {object} animal - the animal.
      * @returns {object} normalised pose.
      */
     function poseFor(animal) {
       if (animal.fleeing === true) return POSES.flee
-      return poseForId(stateIdOf(animal))
+      // A predator working through a kill stands still with its head down; the
+      // execution state machine flags that with `handling` (12-step-entity), and
+      // "intent" still says hunt/scavenge, which would otherwise show a run.
+      if (animal.handling === true) return POSES.feast
+      const pose = poseForId(stateIdOf(animal))
+      const state = animal.state
+      if (state === null || state === undefined || typeof state !== 'object') return pose
+      // An ambusher does not pursue: for a stalk-and-strike hunter a crouched
+      // approach and a short strike read as an ambush, a full run reads as a
+      // chase across the meadow.
+      if (pose === POSES.hunt) {
+        const species = SPECIES[animal.species]
+        if (species !== undefined && species.ambush !== undefined) {
+          return state.phase === 'do' ? POSES.strike : POSES.stalk
+        }
+      }
+      // Courtship only when the animal is actually receptive.
+      if (pose === POSES.socialize) {
+        const drives = animal.drives
+        if (drives !== undefined && drives !== null && drives.libido > 0.5) return POSES.court
+      }
+      if (state.phase === 'approach' && DO_POSES.has(pose.id)) return POSES.walk
+      return pose
     }
 
     /**

@@ -27,11 +27,14 @@
       // While a predator is working through a kill it stands still: the carcass
       // is being eaten, not carried. Without this the animal is nailed to its
       // target position and jitters in place for the whole handling time.
-      if (entity.body !== undefined && entity.body.handling !== null) {
+      // intent keeps its last value (hunt/scavenge) so the panel still says what
+      // it is doing; entity.handling is the flag the renderer uses for the
+      // crouched, head-down eating pose.
+      entity.handling = entity.body !== undefined && entity.body.handling !== null
+      if (entity.handling) {
         entity.targetX = entity.x
         entity.targetY = entity.y
-        entity.intent = 'rest'
-        moveToward(world, entity, species, entity.x, entity.y, dt, 0)
+        entity.running = false
         entity.gait = (entity.gait ?? 0)
         updateFatigue(entity, dt, 0.12)
         return true
@@ -51,8 +54,12 @@
       // 3. What the animal can actually see, on its own staggered ~1 Hz slot.
       perceive(world, entity, species, grids, dt)
       // 4. Deliberate only at a boundary or on an interrupt — not every tick.
+      // A freshly spawned animal has no intent yet, so it has to be allowed to
+      // make its first decision instead of adopting an empty bout for its
+      // spawn clock (which used to produce a fake one-second intent).
       entity.thinkTimer -= dt
-      if (entity.thinkTimer <= 0 || interruptPending(world, entity)) {
+      const firstDecision = entity.state === undefined && entity.intent === undefined
+      if (entity.thinkTimer <= 0 || firstDecision || interruptPending(world, entity)) {
         decide(world, entity, species, grids)
       }
       // 5. Run the chosen bout: aim, keep doing the thing, finish it.
@@ -135,15 +142,18 @@
           return false
         }
       }
-      const breedReserve = hasBody ? body.E : entity.energy
-
       const territory = species.territory
       const ownGrid = species.role === 'hunter' ? grids.hunter : grids.prey
       const crowded = territory !== undefined && countNearby(ownGrid, entity.x, entity.y, territory.radius,
         candidate => candidate !== entity && candidate.fate === '' && candidate.species === entity.species) >= territory.max
-      // Juveniles are still growing: only adults reproduce.
+      // Juveniles are still growing: only adults reproduce. The gate is the
+      // reserve relative to the animal's OWN capacity, so a body that is still
+      // growing cannot be asked for an adult's absolute reserve.
+      const breedTarget = balance.maxEnergy > 0
+        ? balance.breedEnergy * clamp((hasBody ? body.Emax : balance.maxEnergy) / balance.maxEnergy, 0, 1.2)
+        : balance.breedEnergy
       const breedReserve = hasBody ? body.E : entity.energy
-      if (!crowded && entity.stage === 'adult' && breedReserve >= balance.breedEnergy && entity.cooldown <= 0) {
+      if (!crowded && entity.stage === 'adult' && breedReserve >= breedTarget && entity.cooldown <= 0) {
         // A litter, not a single pup: rabbits drop 4-7 kits at once, wolves 3-5.
         const range = balance.litter ?? [1, 1]
         const litterSize = range[0] + Math.floor(nextRandom(world) * (range[1] - range[0] + 1))
