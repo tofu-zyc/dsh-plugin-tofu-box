@@ -13,9 +13,10 @@
 有昼夜明暗，世界自动存进浏览器本地，关掉页面再回来还在。它就是给「AI 干活、你等结果的那几分钟」摸鱼用的，
 不联网、不改你的会话、不碰 Host。
 
-> **状态：0.2.3 已发布到 npm**（`npm i dsh-plugin-pixel-ecosystem@0.2.3`）。
-> 0.2.2 = 美术换代（AI 出图 → 拆件成可编辑模型）+ 四个真 bug 修复，见文末「0.2.2 修复了什么」；
-> 0.2.3 只修文档与 description，代码与 0.2.2 完全相同。
+> **状态：0.3.9 在开发分支 `feat/terrarium-energy-core` 上，尚未发布到 npm。**
+> 0.2.3 是 npm 上的最后一个版本（美术换代）；0.3.x 是底层重写——能量账本 + 感知/信念/决策/执行的行为层，
+> 平衡不再靠调数值，而是靠热量收支算出来的。面板与交互在这一版修到可用（画布尺寸、输入、缩放、物种行语义），
+> 修复记录与验收数字见 [docs/FINAL-REPORT.md](docs/FINAL-REPORT.md) 第 8 节。
 > 0.1.0 当时提交成功但仍在 npm 的 staged publishing 队列里等 maintainer 批准；
 > 在 `npm view dsh-plugin-pixel-ecosystem versions` 列出你要装的那个版本之前，只能 `link:` 或 git 直装（见下面「安装」）。
 > 本插件是独立插件，**不并入 `tofu-box` 伞包**（清单里标了 `dsh.umbrella: false`）。
