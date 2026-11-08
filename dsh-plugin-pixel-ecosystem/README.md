@@ -7,8 +7,9 @@
 所以种群会自己波动；有昼夜明暗，世界自动存进浏览器本地，关掉页面再回来还在。
 它就是给「AI 干活、你等结果的那几分钟」摸鱼用的，不联网、不改你的会话、不碰 Host。
 
-> **状态：0.1.0，尚未发布到 npm。** npm 上没有 `dsh-plugin-pixel-ecosystem` 这个包，现在只能从本仓库
-> `link:` 或 git 直装（见下面「安装」）。发版时要**先发子包 `dsh-plugin-pixel-ecosystem`，再发伞包 `tofu-box`**。
+> **状态：0.1.0 已提交到 npm registry，正在等待 maintainer 批准（npm 2026 的 staged publishing）。**
+> 在 `npm view dsh-plugin-pixel-ecosystem versions` 列出 `0.1.0` 之前用不了 npm 安装，只能 `link:` 或 git 直装（见下面「安装」）。
+> 本插件是独立插件，**不并入 `tofu-box` 伞包**（清单里标了 `dsh.umbrella: false`）。
 >
 > 兼容性：`engines.dsh` 声明为 `>=0.2.0-rc.2 <0.3.0-0`；Client 半只声明 `platform: web`。
 > 本文不声称做过浏览器里的视觉确认——那一步请按「测试」一节自己起服务、自己打开链接看。
@@ -29,22 +30,24 @@
 
 ## 安装
 
+> 要接手开发这个插件？先读 [HANDOVER.md](HANDOVER.md)：状态、代码地图、验证方式、已知缺陷、下一步验收标准都在那里。
+
 包名 `dsh-plugin-pixel-ecosystem`，插件行 id 是 `pixel-ecosystem`。Client 半是手写浏览器模块，
 **没有构建步骤**，仓库里是什么 npm 里就是什么。
 
 ```bash
-# 1) npm（等 0.1.0 发布之后才有；现在跑这条会装不到，npm 上还没有这个包）
-dsh plugin --profile <你的profile> add dsh-plugin-pixel-ecosystem
+# 1) npm（0.1.0 已提交到 registry，但 npm 的 staged publishing 需要 maintainer 先批准；
+#    批准后 npm view dsh-plugin-pixel-ecosystem versions 才会列出 0.1.0）
+dsh plugin --profile <你的profile> add dsh-plugin-pixel-ecosystem@0.1.0
 
-# 2) 或装整套伞包（tofu-box 1.3.0 起包含本插件；同样要等发布）
-dsh plugin --profile <你的profile> add tofu-box
+# 2) 本插件是独立插件，**不在 tofu-box 伞包里**（清单里 dsh.umbrella: false），
+#    所以没有"装伞包顺带装它"这条路，只能单独装。
 
-# 3) 开发 / 未发版：从本仓库本地目录安装（link 方式，改代码不用重装）
+# 3) 开发：从本仓库本地目录安装（link 方式，改代码不用重装）
 #    必须写绝对路径：dsh plugin ... 只是转发给 profile 里的 pnpm，相对路径会被锚定到 profile 内部
 dsh plugin --profile <你的profile> add "link:D:\program\dsh-plugins\dsh-plugin-pixel-ecosystem"
 
-# 4) 未发版：从 git 直装（追 HEAD）
-dsh plugin --profile <你的profile> add "github:tofu-zyc/dsh-plugin-tofu-box#path:dsh-plugin-pixel-ecosystem"
+# 4) 追 HEAD：从 git 直装（未发版或想看最新代码时）
 dsh plugin --profile <你的profile> add "git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git#path:dsh-plugin-pixel-ecosystem"
 ```
 
@@ -289,7 +292,7 @@ pwsh -File tools\dev-dsh.ps1 rc-dev --no-open --port 0      # 启动冒烟
 
 ## 已知限制
 
-- **0.1.0 还没发布到 npm**，现在只能 `link:` 或 git 直装；伞包 `tofu-box` 1.3.0 起才把它列进依赖。
+- **0.1.0 已提交 npm，等待 maintainer 批准**（staged publishing）；在此之前用 `link:` 或 git 直装。本插件不进 `tofu-box` 伞包。
 - 只声明了 `platform: web`：浏览器里的视觉确认还没做（见上面「测试」）；桌面端（Electron）、Linux / macOS 都没有验证过。
 - 世界只活在**当前浏览器的 localStorage** 里：换浏览器、清站点数据、换 profile 就是新世界；
   它也不进 Session 日志，所以没有跨设备/跨会话同步，也没有「存档分享」。
