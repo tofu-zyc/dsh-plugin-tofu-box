@@ -1,0 +1,3 @@
+FIXTURE-GZIP-STREAM
+the real build ships pvz-perf.wasm.gz here; the host serves it as application/gzip
+without a content-encoding header because the game inflates it itself

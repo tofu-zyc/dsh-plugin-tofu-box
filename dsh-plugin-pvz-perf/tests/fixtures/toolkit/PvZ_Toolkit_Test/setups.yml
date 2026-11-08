@@ -1,0 +1,13 @@
+#! pvztoolkit
+
+# Test fixture for the Toolkit lineup importer. Mirrors the real setups.yml
+# subset: comments, a version header, `"name": CODE` lines, and junk lines.
+
+# 版本: test (数量: 3)
+"[DE] 双核无炮": LI5HDH3kARQDFMNVWlAyXvhBVN360d/4UBcwRTg+hJhVVLXDWrRU
+"[DE] 长矛无炮": LI5HDH3kARQDFMNVWlAyXvhR3vlBDF9DDV3RJAX4PoSYVVR08kQKVA==
+"我的阵型": LI435DU0xAiflJQkxFVSFPjpVn/VsB78XAQKJnFVYSK8slRUfQ9fLVQ=
+# duplicate code below must be skipped
+"[DE] 双核无炮（重复）": LI5HDH3kARQDFMNVWlAyXvhBVN360d/4UBcwRTg+hJhVVLXDWrRU
+this line is not a lineup
+"[DE] 短码": AAAA

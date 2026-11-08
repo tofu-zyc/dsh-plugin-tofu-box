@@ -1,0 +1,2 @@
+FIXTURE-DATA-BUNDLE
+the real pvz-perf.data is roughly 38 MB; the host must stream it, never buffer it

@@ -1,0 +1,6 @@
+{
+  "version": "3.3.4",
+  "backend": "WebGPU",
+  "source_commit": "incomplete-fixture",
+  "note": "no launcher.js or pvz-perf.js in this directory"
+}

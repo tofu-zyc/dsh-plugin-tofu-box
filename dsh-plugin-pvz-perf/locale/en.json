@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Plants vs. Zombies shelf",
+    "description": "Runs your local pvz_perf web build inside the DSH central panel: click the sidebar icon and a round starts in the content column, with the sidebar, composer and titlebar still usable, and Back to chat returns when you are done. The game files stay on your disk; this plugin ships no game assets."
+  }
+}
