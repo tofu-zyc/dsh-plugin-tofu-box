@@ -285,6 +285,16 @@
       const width = data.width | 0
       const height = data.height | 0
       if (!(width > 0 && height > 0)) throw saveError('corrupt', 'bad world size in save')
+      // A field that should be a list but is not must be an ERROR, not a silent
+      // empty list: a truncated or hand-edited save used to load as a world with
+      // a valid map and zero animals, which reads to the player as "my terrarium
+      // vanished" with no explanation (docs/00-VISION G5, docs/20-CORE-LOOP §5).
+      for (const field of ['entities', 'corpses', 'trees', 'caches']) {
+        const value = data[field]
+        if (value !== undefined && value !== null && !Array.isArray(value)) {
+          throw saveError('corrupt', 'world save has a non-array ' + field)
+        }
+      }
       const size = width * height
       const bits = typeof data.bits === 'object' && data.bits !== null ? data.bits : FIELD_BITS.full
       const scales = typeof data.scales === 'object' && data.scales !== null ? data.scales : {}

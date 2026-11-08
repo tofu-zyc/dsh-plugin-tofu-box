@@ -5855,6 +5855,16 @@ window.__ModuleLoader__.load({
       const width = data.width | 0
       const height = data.height | 0
       if (!(width > 0 && height > 0)) throw saveError('corrupt', 'bad world size in save')
+      // A field that should be a list but is not must be an ERROR, not a silent
+      // empty list: a truncated or hand-edited save used to load as a world with
+      // a valid map and zero animals, which reads to the player as "my terrarium
+      // vanished" with no explanation (docs/00-VISION G5, docs/20-CORE-LOOP §5).
+      for (const field of ['entities', 'corpses', 'trees', 'caches']) {
+        const value = data[field]
+        if (value !== undefined && value !== null && !Array.isArray(value)) {
+          throw saveError('corrupt', 'world save has a non-array ' + field)
+        }
+      }
       const size = width * height
       const bits = typeof data.bits === 'object' && data.bits !== null ? data.bits : FIELD_BITS.full
       const scales = typeof data.scales === 'object' && data.scales !== null ? data.scales : {}
@@ -11700,6 +11710,8 @@ window.__ModuleLoader__.load({
       const [cameraTick, setCameraTick] = React.useState(0)
       const [toast, setToast] = React.useState(null)
       const [hover, setHover] = React.useState(null)
+      /** Mirror of `hover` for the pointer handler, which closes over nothing. */
+      const hoverRef = React.useRef(null)
       const toastTimer = React.useRef(0)
       const stageRef = React.useRef(null)
       const canvasRef = React.useRef(null)
@@ -11738,13 +11750,43 @@ window.__ModuleLoader__.load({
         if (stage === null) return undefined
         const measure = () => {
           const bounds = stage.getBoundingClientRect()
-          setStageSize({ width: Math.max(200, bounds.width), height: Math.max(160, bounds.height) })
+          const width = Math.max(200, Math.round(bounds.width))
+          const height = Math.max(160, Math.round(bounds.height))
+          const previous = stageSizeRef.current
+          if (previous.width === width && previous.height === height) return
+          setStageSize({ width, height })
         }
         measure()
-        if (typeof ResizeObserver !== 'function') return undefined
-        const observer = new ResizeObserver(measure)
-        observer.observe(stage)
-        return () => observer.disconnect()
+        // The observer alone is not enough: a panel that mounts while its
+        // container is hidden or mid-layout keeps the default 900x560 viewport
+        // and the canvas is then drawn at the wrong size until something else
+        // happens to resize it. Re-measure a few times after mount and on any
+        // window/visibility change, so the viewport always catches up.
+        const timers = [120, 400, 900, 1800, 3200].map(ms => setTimeout(measure, ms))
+        const remeasure = () => measure()
+        let observer = null
+        if (typeof ResizeObserver === 'function') {
+          observer = new ResizeObserver(measure)
+          observer.observe(stage)
+        }
+        if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+          window.addEventListener('resize', remeasure)
+          window.addEventListener('orientationchange', remeasure)
+        }
+        if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+          document.addEventListener('visibilitychange', remeasure)
+        }
+        return () => {
+          for (const timer of timers) clearTimeout(timer)
+          if (observer !== null) observer.disconnect()
+          if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+            window.removeEventListener('resize', remeasure)
+            window.removeEventListener('orientationchange', remeasure)
+          }
+          if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+            document.removeEventListener('visibilitychange', remeasure)
+          }
+        }
       }, [])
 
       // Open zoomed in enough to read the animals, centred on the map.
@@ -11855,7 +11897,13 @@ window.__ModuleLoader__.load({
         const handleDown = (event) => {
           // A press that starts on a card/panel is a click on that control, not a
           // stroke on the map: preventDefault() here would eat the click.
-          if (isStageControl(event.target)) return
+          if (isStageControl(event.target)) {
+            // A lost pointerup (alt-tab, browser gesture) can leave a drag armed;
+            // without this a press on a card followed by a move over the map would
+            // paint from the stale lastX/lastY.
+            dragRef.current.mode = 'none'
+            return
+          }
           if (event.button !== 0 && event.button !== 1 && event.button !== 2) return
           const drag = dragRef.current
           drag.mode = shouldPan(event) ? 'pan' : 'paint'
@@ -11877,11 +11925,21 @@ window.__ModuleLoader__.load({
         }
 
         const handleMove = (event) => {
-          // Hovering a card must not move the brush preview or repaint the panel.
-          if (isStageControl(event.target)) return
+          // Hovering a card must not move the brush preview, but it must CLEAR it:
+          // otherwise the preview and the cell read-out freeze at the last cell
+          // the pointer was over and the player thinks they are still drawing.
+          if (isStageControl(event.target)) {
+            if (hoverRef.current !== null) {
+              hoverRef.current = null
+              store.setHover(null)
+              setHover(null)
+            }
+            return
+          }
           const point = cellAt(event.clientX, event.clientY)
           const cell = Math.round(point.x) + ',' + Math.round(point.y)
-          setHover({ x: point.x, y: point.y })
+          hoverRef.current = { x: point.x, y: point.y }
+          setHover(hoverRef.current)
           store.setHover(point)
           const drag = dragRef.current
           if (drag.mode === 'none') return
@@ -11944,6 +12002,7 @@ window.__ModuleLoader__.load({
         }
 
         const handleLeave = () => {
+          hoverRef.current = null
           store.setHover(null)
           setHover(null)
           dragRef.current.mode = 'none'
@@ -11980,7 +12039,13 @@ window.__ModuleLoader__.load({
             store.clearSelection()
             return
           }
-          if (event.target !== null && event.target.tagName === 'INPUT') return
+          // Any focused control keeps its own keys. Checking only INPUT was not
+          // enough: Space on a focused <button> is the standard "activate", and
+          // preventDefault() here made every button in the panel dead to the
+          // keyboard while also pausing the world.
+          const focused = event.target
+          if (focused !== null && focused !== undefined && typeof focused.closest === 'function'
+            && focused.closest('input, textarea, select, button, a, [contenteditable], [role="button"]') !== null) return
           if (event.code === 'Space') { event.preventDefault(); store.togglePause() }
           else if (event.key === '1' || event.key === '2' || event.key === '3' || event.key === '4') {
             store.setSpeed([1, 2, 4, 8][Number(event.key) - 1])
