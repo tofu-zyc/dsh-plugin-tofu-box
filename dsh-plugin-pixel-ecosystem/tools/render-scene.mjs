@@ -76,7 +76,10 @@ for (let row = 0; row < height; row += 1) {
 mkdirSync(dirname(out), { recursive: true })
 writeFileSync(out, encodePng(outW, outH, rgba))
 
-const yearPhase = ((world.time / DAY_SECONDS) / YEAR_DAYS) % 1
+// Read the climate, do not re-derive it: docs/20-CORE-LOOP.md makes the climate
+// the single source of season/day state, and the engine applies a start offset
+// that a naive time/YEAR_SECONDS formula would miss by more than a season.
+const yearPhase = world.climate?.yearPhase ?? ((world.time / DAY_SECONDS) / YEAR_DAYS) % 1
 const counts = {}
 for (const entity of world.entities) counts[entity.species] = (counts[entity.species] ?? 0) + 1
 console.log(JSON.stringify({

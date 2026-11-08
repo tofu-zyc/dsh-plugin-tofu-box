@@ -523,3 +523,57 @@ test('the same year phase paints the same ground in two worlds', () => {
   }
   assert.equal(ground(), ground(), 'two worlds at the same year phase must share one look')
 })
+test('deep water stays blue even when the weed field is saturated', () => {
+  const world = mixedWorld()
+  for (let y = 0; y < world.height; y++) {
+    for (let x = 0; x < 20; x++) {
+      const index = indexOf(world, x, y)
+      world.terrain[index] = TERRAIN.WATER
+      world.weed[index] = 0.9
+      world.depth[index] = x / 20
+    }
+  }
+  world.tick = 0
+  world.time = 0
+  world.climate = { dayPhase: 0.5, yearPhase: 0.38, temperature: 18, sunlight: 0.9 }
+  const frame = paintWorld(world)
+  const shallow = frame[indexOf(world, 2, 15)]
+  const deep = frame[indexOf(world, 18, 15)]
+  const blueOverRed = color => ((color >>> 16) & 0xFF) - (color & 0xFF)
+  const greenOverBlue = color => ((color >>> 8) & 0xFF) - ((color >>> 16) & 0xFF)
+  assert.ok(greenOverBlue(shallow) > 0, 'weed-choked shallows must read green')
+  assert.ok(blueOverRed(deep) > 25,
+    `deep water must stay blue under heavy weed, got blue-red ${blueOverRed(deep)}`)
+  assert.ok(blueOverRed(deep) > blueOverRed(shallow) + 25,
+    'the lake must get bluer with depth, not green all the way down')
+})
+
+test('the shoreline foam is graded instead of a single hard step', () => {
+  const world = mixedWorld()
+  for (let y = 0; y < world.height; y++) {
+    for (let x = 0; x < 20; x++) {
+      const index = indexOf(world, x, y)
+      world.terrain[index] = TERRAIN.WATER
+      world.weed[index] = 0
+      world.depth[index] = x / 80
+    }
+  }
+  world.tick = 0
+  world.time = 0
+  world.climate = { dayPhase: 0.5, yearPhase: 0.38, temperature: 18, sunlight: 0.9 }
+  const frame = paintWorld(world)
+  // Average the brightness down each column of the ramp: foam has to fade out,
+  // not step off, so the means must fall away from the bank.
+  const meanBrightness = (x) => {
+    let total = 0
+    for (let y = 0; y < world.height; y++) total += brightnessOf(frame[indexOf(world, x, y)])
+    return total / world.height
+  }
+  const edge = meanBrightness(1)
+  const next = meanBrightness(5)
+  const middle = meanBrightness(10)
+  const open = meanBrightness(18)
+  assert.ok(edge > next, `the foam must fade from the bank, got ${edge.toFixed(0)} -> ${next.toFixed(0)}`)
+  assert.ok(next > middle, `the foam must keep fading, got ${next.toFixed(0)} -> ${middle.toFixed(0)}`)
+  assert.ok(middle > open, `open water must be darker than the shore band, got ${middle.toFixed(0)} -> ${open.toFixed(0)}`)
+})

@@ -24,6 +24,10 @@
     const CANOPY_REBUILD_TICKS = 60
     /** Share of a carcass that rots away per corpse-lifetime. */
     const CARCASS_ROT_RATE = 3.2
+    /** Depth (0 bank .. 1 mid-lake) where aquatic plants start thinning. */
+    const DEPTH_WEED_START = 0.08
+    /** Depth at which the lake bed carries no plants at all: open water. */
+    const DEPTH_WEED_LIMIT = 0.45
 
     /**
      * Recompute the extra leaf area the woody plants cast over the ground.
@@ -72,7 +76,7 @@
      * @param {number} water - soil water 0..1 for this cell.
      * @param {number} days - slice-adjusted step, in in-world days.
      */
-    function updateProducerCell(world, index, field, params, water, days) {
+    function updateProducerCell(world, index, field, params, water, days, suitability = 1) {
       const current = field[index]
       const nutrientField = field === world.weed ? world.waterFertility : world.fertility
       let soil = nutrientField[index]
@@ -114,18 +118,33 @@
       }
 
       // --- gross primary production --------------------------------------
-      if (light > 0) {
+      if (light > 0 && suitability > 0) {
         const waterFactor = water / (water + params.waterHalf)
         const nutrientFactor = soil / (soil + params.nutrientHalf)
         const gross = TUNING.productivity * params.mu * (next + params.seed)
-          * light * waterFactor * nutrientFactor * days
-        const cap = params.bmax
+          * light * waterFactor * nutrientFactor * suitability * days
+        const cap = params.bmax * suitability
         const grown = next + gross > cap ? cap : next + gross
         world.budget.gpp += (grown - next) * CELL_AREA * BIO.GRASS_ENERGY
         next = grown
         // Uptake is proportional to how much was actually built, so a slow cell
         // does not drain the soil it cannot use.
         soil = Math.max(0, soil - gross * DETRITUS.nutrientPerGrowth)
+      }
+      // Above its habitat limit (deep water for weed, bare rock for grass) the
+      // excess dies back into litter rather than being clipped: it is still mass
+      // and still energy, so it goes to the detritus under the cell.
+      const habitatCap = params.bmax * suitability
+      if (next > habitatCap) {
+        const diesBack = next - habitatCap
+        const cell = world.detritus[index] + diesBack
+        if (cell > DETRITUS.bmax) {
+          world.budget.overflow += (cell - DETRITUS.bmax) * CELL_AREA * BIO.GRASS_ENERGY
+          world.detritus[index] = DETRITUS.bmax
+        } else {
+          world.detritus[index] = cell
+        }
+        next = habitatCap
       }
       nutrientField[index] = soil
       field[index] = next
@@ -156,7 +175,13 @@
           updateProducerCell(world, index, grass, PRODUCERS.grass, moisture[index], days)
         } else if (ground === TERRAIN.WATER) {
           if (grass[index] !== 0) grass[index] = 0
-          updateProducerCell(world, index, weed, PRODUCERS.weed, 1, days)
+          // A lake is not a lawn: weed needs the bottom to be within reach of
+          // light. Depth runs 0 at the bank to 1 in the middle of the lake, and
+          // the bed stops carrying plants at DEPTH_WEED_LIMIT. Without this the
+          // whole lake grew a uniform green carpet and read as a mint pond.
+          const depth = world.depth[index]
+          const suitability = clamp(1 - (depth - DEPTH_WEED_START) / (DEPTH_WEED_LIMIT - DEPTH_WEED_START), 0, 1)
+          updateProducerCell(world, index, weed, PRODUCERS.weed, 1, days, suitability)
         } else {
           if (grass[index] !== 0) grass[index] = 0
           if (weed[index] !== 0) weed[index] = 0

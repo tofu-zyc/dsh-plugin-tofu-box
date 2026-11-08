@@ -299,7 +299,13 @@
           const y = (i / world.width) | 0
           const rank = 0.3 + 0.5 * patch((x + 17) % world.width, (y + 29) % world.height)
           const soil = 0.4 + 0.6 * world.waterFertility[i]
-          world.weed[i] = clamp(PRODUCERS.weed.bmax * rank * soil, 0, PRODUCERS.weed.bmax)
+          // The lake starts the way a lake looks: a weed fringe in the shallows
+          // and open water past the light limit. Seeding it uniformly would give
+          // the player a green carpet on the first frame and then a two-day
+          // die-back, which reads as a bug rather than as a lake.
+          const depth = world.depth[i]
+          const suitable = clamp(1 - (depth - DEPTH_WEED_START) / (DEPTH_WEED_LIMIT - DEPTH_WEED_START), 0, 1)
+          world.weed[i] = clamp(PRODUCERS.weed.bmax * rank * soil * suitable, 0, PRODUCERS.weed.bmax)
           world.detritus[i] = world.weed[i] * 0.25
         }
       }

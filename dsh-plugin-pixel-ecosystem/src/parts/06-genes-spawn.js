@@ -116,8 +116,18 @@
       entity.age = options?.age ?? (newborn ? 0 : species.balance.maturity)
       // The body is the ledger: creating the animal means creating its reserve,
       // its structure and the derived views (energy accessor, hunger channel).
-      const body = installLedger(entity)
-      body.E = clamp(body.Emax * (options?.reserve ?? (newborn ? BIRTH_RESERVE_SHARE : SPAWN_RESERVE_SHARE)), 0, body.Emax)
+      // The reserve is seeded with the ledger MUTED and the whole cost is booked
+      // in one place below: seeding through the accessor would enter the book as
+      // an anonymous deposit and then as an anonymous withdrawal, and any drift
+      // between those two entries is energy nobody can account for.
+      ledgerWriteDepth += 1
+      let body
+      try {
+        body = installLedger(entity)
+        body.E = clamp(body.Emax * (options?.reserve ?? (newborn ? BIRTH_RESERVE_SHARE : SPAWN_RESERVE_SHARE)), 0, body.Emax)
+      } finally {
+        ledgerWriteDepth -= 1
+      }
       // Where a new body's energy came from decides how it is booked.
       //
       //  - A NEWBORN is a transfer FROM ITS PARENT: the parent pays the whole

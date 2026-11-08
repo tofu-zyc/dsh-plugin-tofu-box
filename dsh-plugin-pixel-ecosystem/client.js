@@ -1017,7 +1017,13 @@ window.__ModuleLoader__.load({
           const y = (i / world.width) | 0
           const rank = 0.3 + 0.5 * patch((x + 17) % world.width, (y + 29) % world.height)
           const soil = 0.4 + 0.6 * world.waterFertility[i]
-          world.weed[i] = clamp(PRODUCERS.weed.bmax * rank * soil, 0, PRODUCERS.weed.bmax)
+          // The lake starts the way a lake looks: a weed fringe in the shallows
+          // and open water past the light limit. Seeding it uniformly would give
+          // the player a green carpet on the first frame and then a two-day
+          // die-back, which reads as a bug rather than as a lake.
+          const depth = world.depth[i]
+          const suitable = clamp(1 - (depth - DEPTH_WEED_START) / (DEPTH_WEED_LIMIT - DEPTH_WEED_START), 0, 1)
+          world.weed[i] = clamp(PRODUCERS.weed.bmax * rank * soil * suitable, 0, PRODUCERS.weed.bmax)
           world.detritus[i] = world.weed[i] * 0.25
         }
       }
@@ -1329,8 +1335,18 @@ window.__ModuleLoader__.load({
       entity.age = options?.age ?? (newborn ? 0 : species.balance.maturity)
       // The body is the ledger: creating the animal means creating its reserve,
       // its structure and the derived views (energy accessor, hunger channel).
-      const body = installLedger(entity)
-      body.E = clamp(body.Emax * (options?.reserve ?? (newborn ? BIRTH_RESERVE_SHARE : SPAWN_RESERVE_SHARE)), 0, body.Emax)
+      // The reserve is seeded with the ledger MUTED and the whole cost is booked
+      // in one place below: seeding through the accessor would enter the book as
+      // an anonymous deposit and then as an anonymous withdrawal, and any drift
+      // between those two entries is energy nobody can account for.
+      ledgerWriteDepth += 1
+      let body
+      try {
+        body = installLedger(entity)
+        body.E = clamp(body.Emax * (options?.reserve ?? (newborn ? BIRTH_RESERVE_SHARE : SPAWN_RESERVE_SHARE)), 0, body.Emax)
+      } finally {
+        ledgerWriteDepth -= 1
+      }
       // Where a new body's energy came from decides how it is booked.
       //
       //  - A NEWBORN is a transfer FROM ITS PARENT: the parent pays the whole
@@ -4592,6 +4608,10 @@ window.__ModuleLoader__.load({
     const CANOPY_REBUILD_TICKS = 60
     /** Share of a carcass that rots away per corpse-lifetime. */
     const CARCASS_ROT_RATE = 3.2
+    /** Depth (0 bank .. 1 mid-lake) where aquatic plants start thinning. */
+    const DEPTH_WEED_START = 0.08
+    /** Depth at which the lake bed carries no plants at all: open water. */
+    const DEPTH_WEED_LIMIT = 0.45
 
     /**
      * Recompute the extra leaf area the woody plants cast over the ground.
@@ -4640,7 +4660,7 @@ window.__ModuleLoader__.load({
      * @param {number} water - soil water 0..1 for this cell.
      * @param {number} days - slice-adjusted step, in in-world days.
      */
-    function updateProducerCell(world, index, field, params, water, days) {
+    function updateProducerCell(world, index, field, params, water, days, suitability = 1) {
       const current = field[index]
       const nutrientField = field === world.weed ? world.waterFertility : world.fertility
       let soil = nutrientField[index]
@@ -4682,18 +4702,33 @@ window.__ModuleLoader__.load({
       }
 
       // --- gross primary production --------------------------------------
-      if (light > 0) {
+      if (light > 0 && suitability > 0) {
         const waterFactor = water / (water + params.waterHalf)
         const nutrientFactor = soil / (soil + params.nutrientHalf)
         const gross = TUNING.productivity * params.mu * (next + params.seed)
-          * light * waterFactor * nutrientFactor * days
-        const cap = params.bmax
+          * light * waterFactor * nutrientFactor * suitability * days
+        const cap = params.bmax * suitability
         const grown = next + gross > cap ? cap : next + gross
         world.budget.gpp += (grown - next) * CELL_AREA * BIO.GRASS_ENERGY
         next = grown
         // Uptake is proportional to how much was actually built, so a slow cell
         // does not drain the soil it cannot use.
         soil = Math.max(0, soil - gross * DETRITUS.nutrientPerGrowth)
+      }
+      // Above its habitat limit (deep water for weed, bare rock for grass) the
+      // excess dies back into litter rather than being clipped: it is still mass
+      // and still energy, so it goes to the detritus under the cell.
+      const habitatCap = params.bmax * suitability
+      if (next > habitatCap) {
+        const diesBack = next - habitatCap
+        const cell = world.detritus[index] + diesBack
+        if (cell > DETRITUS.bmax) {
+          world.budget.overflow += (cell - DETRITUS.bmax) * CELL_AREA * BIO.GRASS_ENERGY
+          world.detritus[index] = DETRITUS.bmax
+        } else {
+          world.detritus[index] = cell
+        }
+        next = habitatCap
       }
       nutrientField[index] = soil
       field[index] = next
@@ -4724,7 +4759,13 @@ window.__ModuleLoader__.load({
           updateProducerCell(world, index, grass, PRODUCERS.grass, moisture[index], days)
         } else if (ground === TERRAIN.WATER) {
           if (grass[index] !== 0) grass[index] = 0
-          updateProducerCell(world, index, weed, PRODUCERS.weed, 1, days)
+          // A lake is not a lawn: weed needs the bottom to be within reach of
+          // light. Depth runs 0 at the bank to 1 in the middle of the lake, and
+          // the bed stops carrying plants at DEPTH_WEED_LIMIT. Without this the
+          // whole lake grew a uniform green carpet and read as a mint pond.
+          const depth = world.depth[index]
+          const suitability = clamp(1 - (depth - DEPTH_WEED_START) / (DEPTH_WEED_LIMIT - DEPTH_WEED_START), 0, 1)
+          updateProducerCell(world, index, weed, PRODUCERS.weed, 1, days, suitability)
         } else {
           if (grass[index] !== 0) grass[index] = 0
           if (weed[index] !== 0) weed[index] = 0
@@ -8014,18 +8055,23 @@ window.__ModuleLoader__.load({
       const water = look.water
       const steps = WATER_BUCKETS + 1
       const base = new Int32Array(steps * 3)
+      /** Foam strength per dither shade: the ring breaks up instead of being drawn. */
+      const FOAM_BY_SHADE = [0.66, 0.92, 0.5]
       for (let bucket = 0; bucket < steps; bucket++) {
         const d = bucket / WATER_BUCKETS
         let color = blendColor(water.surface, water.shallow, Math.min(1, d * 5))
-        color = blendColor(color, water.mid, clamp(d * 2.1, 0, 1))
-        color = blendColor(color, water.deep, Math.min(0.88, clamp((d - 0.28) * 1.9, 0, 1)))
-        // Foam on the two shallowest bands draws the shoreline instead of
-        // letting the bank end at a colour change.
-        if (d < 0.055) color = blendColor(color, water.foam, 0.72)
-        else if (d < 0.11) color = blendColor(color, water.foam, 0.3)
-        base[bucket * 3] = nudgeColor(color, -4)
-        base[bucket * 3 + 1] = color
-        base[bucket * 3 + 2] = nudgeColor(color, 4)
+        color = blendColor(color, water.mid, clamp((d - 0.04) * 2.5, 0, 1))
+        color = blendColor(color, water.deep, Math.min(0.92, clamp((d - 0.22) * 2.3, 0, 1)))
+        // Shoreline foam. One hard step at 0.055 read as a sticker outline at 6x,
+        // so it is four graded bands now, and each of the three dither shades gets
+        // a different foam strength: the foam ring is interrupted cell by cell
+        // instead of being a clean contour, and weed drawn afterwards covers it.
+        const foamBase = d < 0.04 ? 0.8 : d < 0.085 ? 0.56 : d < 0.15 ? 0.32 : d < 0.24 ? 0.15 : 0
+        for (let shade = 0; shade < 3; shade++) {
+          let shaded = color
+          if (foamBase > 0) shaded = blendColor(color, water.foam, foamBase * FOAM_BY_SHADE[shade])
+          base[bucket * 3 + shade] = shade === 1 ? shaded : nudgeColor(shaded, shade === 0 ? -4 : 4)
+        }
       }
       const caustic = new Int32Array(steps * 3 * CAUSTIC_STEPS)
       const ripple = new Int32Array(steps * 3)
@@ -8173,10 +8219,15 @@ window.__ModuleLoader__.load({
             // Submerged weed dies back under the ice, so the frozen water shows
             // through in winter instead of staying a green soup.
             const weedStrength = snow > 0.4 ? 1 - snow * 0.55 : 1
-            if (cover > 0.05 && weedStrength > 0.05) {
+            // Weed is shallow-water growth: it thins out over the deep water, so
+            // even a lake covered edge to edge still reads blue in the middle
+            // (it used to be a mint-green pond whenever the weed field was
+            // saturated).
+            const weedDepth = d < 0.16 ? 1 : clamp(1 - (d - 0.16) * 1.8, 0, 1)
+            if (cover > 0.05 && weedStrength > 0.05 && weedDepth > 0.02) {
               const lush = cover > 0.55
               const sway = SWAY[(worldX + (world.tick >> 3)) & 15]
-              color = blendColor(color, weedColors[lush ? 1 : 0], Math.min(0.82, cover * 1.05) * weedStrength)
+              color = blendColor(color, weedColors[lush ? 1 : 0], Math.min(0.82, cover * 1.05) * weedStrength * weedDepth)
               // A bright stalk every few cells turns a flat green wash into
               // something that reads as plants growing off the bottom.
               if (cover > 0.34 && noise > 168) color = blendColor(color, PALETTE.weedStalk, 0.5)
