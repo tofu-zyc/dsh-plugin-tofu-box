@@ -1,6 +1,7 @@
 {
   "name": "dsh-plugin-pvz-perf",
-  "version": "0.1.3",
+  "version": "0.1.4",
+  "private": true,
   "engines": {
     "dsh": ">=0.2.0-rc.2 <0.3.0-0"
   },
