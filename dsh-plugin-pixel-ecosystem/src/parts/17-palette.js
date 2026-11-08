@@ -61,6 +61,285 @@
       nibble: rgb(188, 240, 176),
     }
 
+    // ---------------------------------------------------------------------
+    // Seasons, weather and sun direction
+    // ---------------------------------------------------------------------
+    //
+    // The look of the world is a *material* change, not a full-screen filter:
+    // grass, foliage and water are rebuilt from a seasonal palette, and the sun
+    // direction moves the cast shadows. A tint pass over the finished frame
+    // would double up with the day/night wash the panel already draws and would
+    // turn every sprite grey in winter.
+
+    /** Seasons in year order; `seasonLook` blends between neighbours. */
+    const SEASON_IDS = ['spring', 'summer', 'autumn', 'winter']
+
+    /**
+     * Days per year, used only until `climate.yearPhase` exists.
+     * Matches docs/10 YEAR_DAYS (8); the stepped climate wins once it lands.
+     */
+    const SEASON_DAYS = 8
+
+    /**
+     * Per-season artwork.
+     *
+     * `grassDry`/`grassLush` are RGB triples (the ramp builder needs the raw
+     * channels), everything else is a packed colour. `snow` is the ground snow
+     * cover 0..1 and `bare` the share of canopy lost (autumn thins, winter is
+     * bare): those two are what make winter read as winter rather than as "the
+     * same meadow, slightly blue".
+     */
+    const SEASON_LOOK = {
+      spring: {
+        grassDry: [98, 132, 66],
+        grassLush: [50, 118, 54],
+        leaf: { dark: rgb(30, 76, 44), mid: rgb(54, 118, 58), light: rgb(98, 160, 76), outline: rgb(16, 40, 26) },
+        weed: [rgb(70, 146, 110), rgb(104, 186, 130)],
+        water: {
+          surface: rgb(120, 200, 214), shallow: rgb(76, 158, 186), mid: rgb(34, 102, 148),
+          deep: rgb(30, 80, 122), caustic: rgb(156, 226, 236), foam: rgb(214, 244, 250),
+        },
+        snow: 0.04,
+        bare: 0,
+      },
+      summer: {
+        grassDry: [136, 128, 66],
+        grassLush: [36, 94, 46],
+        leaf: { dark: rgb(22, 58, 32), mid: rgb(40, 94, 44), light: rgb(74, 132, 60), outline: rgb(12, 32, 20) },
+        weed: [rgb(58, 132, 96), rgb(92, 174, 118)],
+        water: {
+          surface: rgb(104, 188, 204), shallow: rgb(66, 146, 178), mid: rgb(28, 94, 142),
+          deep: rgb(24, 72, 112), caustic: rgb(146, 220, 232), foam: rgb(208, 240, 248),
+        },
+        snow: 0,
+        bare: 0,
+      },
+      autumn: {
+        grassDry: [166, 140, 62],
+        grassLush: [126, 116, 50],
+        leaf: { dark: rgb(92, 50, 24), mid: rgb(164, 98, 38), light: rgb(206, 148, 58), outline: rgb(56, 30, 16) },
+        weed: [rgb(104, 118, 66), rgb(140, 148, 84)],
+        water: {
+          surface: rgb(128, 186, 190), shallow: rgb(84, 138, 148), mid: rgb(44, 96, 120),
+          deep: rgb(34, 76, 100), caustic: rgb(170, 210, 210), foam: rgb(216, 236, 238),
+        },
+        snow: 0.12,
+        bare: 0.35,
+      },
+      winter: {
+        grassDry: [166, 158, 128],
+        grassLush: [122, 126, 96],
+        leaf: { dark: rgb(80, 72, 64), mid: rgb(108, 100, 86), light: rgb(146, 138, 122), outline: rgb(48, 42, 38) },
+        weed: [rgb(120, 128, 104), rgb(154, 160, 136)],
+        water: {
+          surface: rgb(176, 214, 234), shallow: rgb(140, 186, 214), mid: rgb(94, 148, 190),
+          deep: rgb(68, 116, 162), caustic: rgb(200, 234, 246), foam: rgb(238, 250, 254),
+        },
+        snow: 1,
+        bare: 1,
+      },
+    }
+
+    /** Snow and frost colours shared by every season (the cover ramps to them). */
+    const SNOW_COLORS = {
+      light: rgb(240, 246, 252),
+      mid: rgb(212, 226, 238),
+      shade: rgb(176, 194, 214),
+      blade: rgb(196, 206, 186),
+    }
+
+    /** Dust and track colours, for footfalls on dry ground. */
+    const DUST_COLORS = [rgb(206, 190, 158), rgb(172, 156, 128)]
+
+    /**
+     * Blend two seasonal records of packed colours.
+     * @param {object} from - record at t = 0.
+     * @param {object} to - record at t = 1.
+     * @param {number} t - 0..1.
+     * @returns {object} blended record.
+     */
+    function blendPaletteRecord(from, to, t) {
+      const out = {}
+      for (const key of Object.keys(from)) out[key] = blendColor(from[key], to[key], t)
+      return out
+    }
+
+    /**
+     * Blend two RGB triples.
+     * @param {number[]} from - triple at t = 0.
+     * @param {number[]} to - triple at t = 1.
+     * @param {number} t - 0..1.
+     * @returns {number[]} blended triple.
+     */
+    function blendTriple(from, to, t) {
+      return [mix(from[0], to[0], t), mix(from[1], to[1], t), mix(from[2], to[2], t)]
+    }
+
+    /**
+     * Eight-step ground ramp between three anchors: bare, mixed, lush.
+     *
+     * Two scales is the whole trick behind a meadow that does not read as one
+     * flat green sheet: the low half is dry/dormant ground, the high half is
+     * living cover. Season only swaps the anchors.
+     * @param {number[]} dry - bare-ground triple.
+     * @param {number[]} lush - full-cover triple.
+     * @returns {number[]} eight packed colours, bare → lush.
+     */
+    function grassRampFrom(dry, lush) {
+      const mid = [(dry[0] + lush[0]) / 2, (dry[1] + lush[1]) / 2, (dry[2] + lush[2]) / 2]
+      const ramp = new Array(8)
+      for (let step = 0; step < 8; step++) {
+        const t = step / 7
+        const from = t < 0.5 ? dry : mid
+        const to = t < 0.5 ? mid : lush
+        const local = t < 0.5 ? t * 2 : (t - 0.5) * 2
+        ramp[step] = rgb(
+          Math.round(mix(from[0], to[0], local)),
+          Math.round(mix(from[1], to[1], local)),
+          Math.round(mix(from[2], to[2], local)),
+        )
+      }
+      return ramp
+    }
+
+    /**
+     * Fraction of the year (0..1), from the climate when it has been stepped.
+     * @param {object} world - the world.
+     * @returns {number} year phase.
+     */
+    function yearPhaseOf(world) {
+      const climate = world.climate
+      if (climate !== null && climate !== undefined && typeof climate.yearPhase === 'number') {
+        const phase = climate.yearPhase % 1
+        return phase < 0 ? phase + 1 : phase
+      }
+      const seconds = typeof world.time === 'number' && Number.isFinite(world.time) ? world.time : 0
+      const yearSeconds = DAY_SECONDS * SEASON_DAYS
+      const phase = (seconds % yearSeconds) / yearSeconds
+      return phase < 0 ? phase + 1 : phase
+    }
+
+    /**
+     * Fraction of the day (0..1), from the climate when it has been stepped.
+     * @param {object} world - the world.
+     * @returns {number} day phase.
+     */
+    function dayPhaseOf(world) {
+      const climate = world.climate
+      if (climate !== null && climate !== undefined && typeof climate.dayPhase === 'number') {
+        const phase = climate.dayPhase % 1
+        return phase < 0 ? phase + 1 : phase
+      }
+      const seconds = typeof world.time === 'number' && Number.isFinite(world.time) ? world.time : 0
+      const phase = (seconds % DAY_SECONDS) / DAY_SECONDS
+      return phase < 0 ? phase + 1 : phase
+    }
+
+    /**
+     * Where the sun stands: azimuth drives the shadow *direction*, elevation the
+     * shadow *length* and the shadow *strength*.
+     *
+     * One shared vector: the ground pass paints plant shadows and the display
+     * pass paints creature shadows, and they have to agree or the meadow looks
+     * lit by two suns.
+     * @param {object} world - the world.
+     * @returns {{azimuth: number, elevation: number, length: number, strength: number}} sun state.
+     */
+    function sunState(world) {
+      const phase = dayPhaseOf(world)
+      // Sunrise at 0.22, sunset at 0.78 of the day (matches daylight()).
+      const t = (phase - 0.22) / 0.56
+      const elevation = t <= 0 || t >= 1 ? 0 : Math.sin(Math.PI * t)
+      const azimuth = (t - 0.5) * 2
+      const length = 1 - elevation
+      return {
+        azimuth,
+        elevation,
+        length,
+        strength: 0.3 + 0.7 * Math.max(0, elevation),
+      }
+    }
+
+    /**
+     * Shadow offset as a fraction of the caster's width.
+     *
+     * A low sun throws shadows away from it and makes them long; at noon the
+     * shadow sits under the object. The cast is *horizontal on screen* because
+     * the world is seen from the side, not from above.
+     * @param {object} world - the world.
+     * @returns {{x: number, y: number, strength: number}} offset fractions.
+     */
+    function shadowOffset(world) {
+      const sun = sunState(world)
+      return {
+        x: -sun.azimuth * (0.1 + 0.5 * sun.length),
+        y: 0.05 + 0.14 * sun.length,
+        strength: sun.strength,
+      }
+    }
+
+    /** Memo for the blended seasonal look: one slot is enough, one world is shown. */
+    const seasonMemo = { key: -1, look: null }
+
+    /**
+     * The blended seasonal look for this frame.
+     *
+     * Rebuilt only when the quantised year phase moves, so the per-cell hot loop
+     * never does colour maths for the season.
+     * @param {object} world - the world.
+     * @returns {object} look record.
+     */
+    function seasonLook(world) {
+      const phase = yearPhaseOf(world)
+      const seasons = SEASON_IDS.length
+      const scaled = phase * seasons
+      const index = Math.min(seasons - 1, Math.floor(scaled))
+      const local = scaled - index
+      const step = Math.round(local * 16)
+      const key = index * 17 + step
+      if (seasonMemo.key === key) return seasonMemo.look
+      const from = SEASON_LOOK[SEASON_IDS[index]]
+      const to = SEASON_LOOK[SEASON_IDS[(index + 1) % seasons]]
+      const t = step / 16
+      // Each season holds its own palette for the first three quarters and only
+      // bleeds into the next one at the end. Blending across the whole quarter
+      // made mid-winter already half spring: the snow cover was gone by the
+      // middle of the season and the ground never actually turned white.
+      const eased = smooth(clamp((t - 0.75) / 0.25, 0, 1))
+      const look = {
+        key,
+        // Foliage sprites are rebuilt from scratch, so they use a coarser key.
+        plantKey: index * 9 + Math.round(local * 8),
+        index,
+        t,
+        snow: mix(from.snow, to.snow, eased),
+        bare: mix(from.bare, to.bare, eased),
+        leaf: blendPaletteRecord(from.leaf, to.leaf, eased),
+        water: blendPaletteRecord(from.water, to.water, eased),
+        weed: [
+          blendColor(from.weed[0], to.weed[0], eased),
+          blendColor(from.weed[1], to.weed[1], eased),
+        ],
+        ramp: grassRampFrom(
+          blendTriple(from.grassDry, to.grassDry, eased),
+          blendTriple(from.grassLush, to.grassLush, eased),
+        ),
+      }
+      seasonMemo.key = key
+      seasonMemo.look = look
+      return look
+    }
+
+    /**
+     * Blend a packed colour toward the snow palette.
+     * @param {number} color - packed colour.
+     * @param {number} amount - 0..1.
+     * @returns {number} packed colour.
+     */
+    function snowed(color, amount) {
+      return blendColor(color, SNOW_COLORS.light, amount)
+    }
+
     /**
      * Compile a character-grid sprite into a pixel buffer.
      * `0` is transparent; every other character must name a palette colour.

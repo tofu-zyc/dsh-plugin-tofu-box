@@ -5,6 +5,59 @@
     /** Playback speeds, in simulation-time multipliers. */
     const SPEEDS = [1, 2, 4, 8]
 
+    /** Event kinds the ticker understands, in display order. */
+    const EVENT_KINDS = ['predation', 'birth', 'death', 'migration', 'hoard', 'placed']
+
+    /**
+     * Death causes the observer can attribute.
+     *
+     * The engine does not write a cause yet (docs/20-CORE-LOOP.md 2.1,
+     * body.cause), so the store infers one from the last state it saw and the
+     * panel labels it "inferred". A real cause wins the moment it exists.
+     */
+    const CAUSE_KEYS = ['predation', 'starved', 'frozen', 'old', 'disease', 'unknown']
+
+    // The inspector draws DRIVE_KEYS, which behaviour owns in 09-needs.js: one
+    // list, so a channel that exists in the model cannot be missing from the
+    // panel. The order there is the contract order of docs/20-CORE-LOOP.md 2.2.
+
+    /** How many events the store keeps, and how long an event stays news. */
+    const MAX_EVENTS = 64
+    const EVENT_TTL = 150
+
+    /** Cells between plant-stock samples: the panel needs a trend, not a census. */
+    const PLANT_STRIDE = 8
+
+    /** Seconds of history the header pulse summarises. */
+    const PULSE_SECONDS = 60
+
+    /** Where the first-run guide remembers that it has been dismissed. */
+    const ONBOARD_KEY = 'dsh-pixel-ecosystem:onboarded'
+
+    /**
+     * Energy a grazer draws from one cell-unit of each flora field.
+     *
+     * Derived from the species table instead of a second hand-tuned constant, so
+     * the producer side of the energy panel moves when the diet data moves.
+     */
+    const FLORA_ENERGY = (() => {
+      const sum = { grass: 0, weed: 0 }
+      const count = { grass: 0, weed: 0 }
+      for (const id of SPECIES_IDS) {
+        const row = SPECIES[id]
+        const field = row.flora
+        if (field !== 'grass' && field !== 'weed') continue
+        const energy = row.balance === undefined ? undefined : row.balance.floraEnergy
+        if (!Number.isFinite(energy)) continue
+        sum[field] += energy
+        count[field] += 1
+      }
+      return {
+        grass: count.grass === 0 ? 1 : sum.grass / count.grass,
+        weed: count.weed === 0 ? 1 : sum.weed / count.weed,
+      }
+    })()
+
     /**
      * The browser's localStorage, or null where it is unavailable.
      * @returns {Storage|null} storage.
@@ -16,6 +69,280 @@
       } catch {
         return null
       }
+    }
+
+    /**
+     * The body numbers the inspector shows, preferring the real ledger.
+     *
+     * sim-core owns body.{E,Emax,V,M,health,fatigue} (docs/20-CORE-LOOP.md 2.1).
+     * Until a world carries them, the same fields are derived from state the
+     * older model already has, and every derived value is flagged so the panel
+     * never claims more than it knows.
+     * @param {object} entity - the animal.
+     * @param {object} species - species row.
+     * @returns {object} body view.
+     */
+    function bodyRecord(entity, species) {
+      const balance = species.balance
+      const body = entity.body
+      if (body !== undefined && body !== null && Number.isFinite(body.E)) {
+        return {
+          reserve: body.E,
+          reserveMax: Number.isFinite(body.Emax) ? body.Emax : balance.maxEnergy,
+          structure: Number.isFinite(body.V) ? body.V : null,
+          structureUnit: 'kg',
+          maturity: Number.isFinite(body.M) ? body.M : null,
+          health: Number.isFinite(body.health) ? body.health : null,
+          fatigue: Number.isFinite(body.fatigue) ? body.fatigue : null,
+          cause: typeof body.cause === 'string' ? body.cause : null,
+          derived: false,
+        }
+      }
+      const needs = needsOf(entity)
+      return {
+        reserve: entity.energy,
+        reserveMax: balance.maxEnergy,
+        structure: entity.genes.size,
+        structureUnit: 'gene',
+        maturity: balance.maturity > 0 ? clamp(entity.age / balance.maturity, 0, 1) : 1,
+        health: null,
+        fatigue: clamp(needs.energy ?? 0, 0, 1),
+        cause: null,
+        derived: true,
+      }
+    }
+
+    /**
+     * Round to three decimals for display records; keeps snapshots comparable
+     * and stops a score from rendering as 1.2400000000000002.
+     * @param {number} value - number.
+     * @returns {number} rounded, or 0 when not finite.
+     */
+    function round3(value) {
+      return Number.isFinite(value) ? Math.round(value * 1000) / 1000 : 0
+    }
+
+    /**
+     * Air temperature, preferring the climate step (13b-climate) and falling
+     * back to the same sun-angle estimate the cold drive uses, so the header
+     * thermometer and the cold bar can never disagree.
+     * @param {object} world - the world.
+     * @returns {number} degrees C.
+     */
+    function temperatureOf(world) {
+      const climate = world.climate
+      if (climate !== undefined && climate !== null && Number.isFinite(climate.temperature)) return climate.temperature
+      if (typeof climateTemperature === 'function') return climateTemperature(world)
+      return 4 + 18 * daylight(world)
+    }
+
+    /**
+     * Cold stress, 0 comfortable to 1 freezing. Uses the same band as the drive
+     * so an inferred death and a drawn bar agree.
+     * @param {object} world - the world.
+     * @returns {number} 0..1.
+     */
+    function coldOf(world) {
+      return clamp((4 - temperatureOf(world)) / 18, 0, 1)
+    }
+
+    /**
+     * The eight drive channels the inspector draws.
+     *
+     * Behaviour owns the real records (docs/20-CORE-LOOP.md 2.2). Until they
+     * exist the panel derives every channel from the body and the needs it
+     * already has, using the contract formula hunger = 1 - E/Emax. A drive bar
+     * nobody can justify would be worse than an empty one, so the derivation is
+     * returned flagged and the panel says so.
+     * @param {object} world - the world.
+     * @param {object} entity - the animal.
+     * @param {object} species - species row.
+     * @returns {{values: object, derived: boolean}} drives.
+     */
+    function drivesOf(world, entity, species) {
+      if (entity.drives !== undefined && entity.drives !== null) {
+        const values = {}
+        for (const key of DRIVE_KEYS) values[key] = clamp(Number(entity.drives[key]) || 0, 0, 1)
+        return { values, derived: false }
+      }
+      const needs = needsOf(entity)
+      const body = bodyRecord(entity, species)
+      const ratio = body.reserveMax > 0 ? clamp(body.reserve / body.reserveMax, 0, 1) : 0
+      const traits = traitsOf(species)
+      const values = {
+        hunger: clamp(1 - ratio, 0, 1),
+        thirst: clamp(needs.thirst ?? 0, 0, 1),
+        cold: coldOf(world),
+        fatigue: clamp(needs.energy ?? 0, 0, 1),
+        fear: clamp(needs.safety ?? 0, 0, 1),
+        social: clamp(needs.social ?? 0, 0, 1),
+        libido: entity.stage === 'adult' && (entity.cooldown ?? 0) <= 0 ? clamp(ratio * 0.9, 0, 1) : 0.05,
+        curiosity: 0,
+      }
+      // Curiosity is what is left when nothing is urgent: a bold, well-fed adult
+      // is the one that wanders instead of standing still.
+      const urgent = Math.max(values.hunger, values.thirst, values.cold, values.fear)
+      values.curiosity = clamp((traits.curious ?? 0.5) * (1 - urgent) * (0.4 + ratio * 0.6), 0, 1)
+      return { values, derived: true }
+    }
+
+    /**
+     * Why this animal is doing what it is doing.
+     *
+     * Behaviour may publish its own sentence (entity.decideReason, or
+     * entity.state.reason). Otherwise the loudest drive explains the intent. The
+     * store returns a drive and its value, not a sentence, so the panel stays
+     * bilingual.
+     * @param {object} entity - the animal.
+     * @param {object} drives - drive values.
+     * @returns {object} reason record.
+     */
+    function reasonOf(entity, drives) {
+      const decision = entity.decision
+      if (decision !== undefined && decision !== null && typeof decision.picked === 'string') {
+        const rivals = []
+        if (Array.isArray(decision.alternatives)) {
+          for (const rival of decision.alternatives.slice(0, 3)) {
+            if (rival === null || typeof rival !== 'object') continue
+            rivals.push({ kind: String(rival.kind), score: round3(rival.score) })
+          }
+        }
+        return {
+          text: typeof decision.text === 'string' ? decision.text : null,
+          derived: false,
+          picked: decision.picked,
+          why: typeof decision.why === 'string' ? decision.why : 'idle',
+          score: Number.isFinite(decision.score) ? round3(decision.score) : null,
+          at: Number.isFinite(decision.at) ? decision.at : null,
+          rivals,
+          drive: null,
+          driveValue: 0,
+        }
+      }
+      // No decision record yet (a freshly spawned animal, or an older save):
+      // the loudest drive still explains the intent, it just explains it less.
+      let drive = 'curiosity'
+      let top = -1
+      for (const key of DRIVE_KEYS) {
+        if (key === 'curiosity') continue
+        const value = drives[key]
+        if (value > top) { top = value; drive = key }
+      }
+      return {
+        text: null, derived: true, picked: null, why: drive, score: null, at: null,
+        rivals: [], drive, driveValue: clamp(top, 0, 1),
+      }
+    }
+
+    /**
+     * How many animals that hunt this one are within sight, using the last
+     * observation instead of a fresh spatial query.
+     * @param {object} observation - the last observation.
+     * @param {string} speciesId - the species being looked at.
+     * @param {number} x - position.
+     * @param {number} y - position.
+     * @param {number} radius - cells.
+     * @returns {number} count.
+     */
+    function predatorsNear(observation, speciesId, x, y, radius) {
+      if (observation === null) return 0
+      const hunters = PREDATORS_OF[speciesId]
+      if (hunters === undefined || hunters.size === 0) return 0
+      const reach = radius * radius
+      let found = 0
+      for (const hunter of observation.hunters) {
+        if (!hunters.has(hunter.species)) continue
+        const dx = hunter.x - x
+        const dy = hunter.y - y
+        if (dx * dx + dy * dy <= reach) found += 1
+      }
+      return found
+    }
+
+    /**
+     * The most likely way this animal dies if nothing changes.
+     *
+     * G5 wants failure to be explainable, and that has to work *before* the
+     * animal is gone, which is exactly when the inspector can still be opened.
+     * @param {object} entity - the animal.
+     * @param {object} body - body view.
+     * @param {object} drives - drive values.
+     * @param {object} observation - the last observation.
+     * @returns {string|null} cause key, or null when nothing is looming.
+     */
+    function predictCause(entity, body, drives, observation) {
+      if (drives.hunger >= 0.75) return 'starved'
+      if (drives.cold >= 0.65) return 'frozen'
+      if (drives.fear >= 0.6 && predatorsNear(observation, entity.species, entity.x, entity.y, 8) > 0) return 'predation'
+      if (Number.isFinite(entity.genes.lifespan) && entity.age >= entity.genes.lifespan * 0.85) return 'old'
+      if (body.health !== null && body.health <= 0.25) return 'disease'
+      return null
+    }
+
+    /**
+     * Sample the standing producer stock without walking a quarter million cells.
+     *
+     * A strided sample is what an "is the meadow shrinking" panel needs; a full
+     * census of the field costs more than drawing it.
+     * @param {object} world - the world.
+     * @returns {{grass: number, weed: number, energy: number}} mean cover and total energy.
+     */
+    function samplePlantStock(world) {
+      const grass = world.grass
+      const weed = world.weed
+      const width = world.width
+      const height = world.height
+      let grassSum = 0
+      let weedSum = 0
+      let samples = 0
+      for (let y = 0; y < height; y += PLANT_STRIDE) {
+        const row = y * width
+        for (let x = 0; x < width; x += PLANT_STRIDE) {
+          grassSum += grass[row + x]
+          weedSum += weed[row + x]
+          samples += 1
+        }
+      }
+      if (samples === 0) return { grass: 0, weed: 0, energy: 0 }
+      const scale = (width * height) / samples
+      return {
+        grass: grassSum / samples,
+        weed: weedSum / samples,
+        // Biomass is kg per square metre, so one sample stands for a cell area of
+        // ground, not one cell of pixels (docs/10 section 1: CELL_M = 2 m).
+        energy: (grassSum * FLORA_ENERGY.grass + weedSum * FLORA_ENERGY.weed) * scale * CELL_AREA,
+      }
+    }
+
+    /**
+     * Attribute a death from the last state the animal was seen in.
+     *
+     * Order matters: the simulation kills on an empty reserve or on age, and a
+     * predator removes an animal that still had reserves, so reserve is checked
+     * first and a nearby hunter only decides an otherwise unexplained death.
+     * @param {object} rec - last record of the animal.
+     * @param {object[]} hunters - hunter positions from that sighting.
+     * @returns {string} one of CAUSE_KEYS.
+     */
+    function classifyDeath(rec, hunters) {
+      if (rec.cause !== null && rec.cause !== undefined) return rec.cause
+      const predators = PREDATORS_OF[rec.species]
+      let best = Infinity
+      if (predators !== undefined && predators.size > 0 && rec.ratio > 0.02) {
+        for (const hunter of hunters) {
+          if (!predators.has(hunter.species)) continue
+          const dx = hunter.x - rec.x
+          const dy = hunter.y - rec.y
+          const distance = dx * dx + dy * dy
+          if (distance < best) best = distance
+        }
+      }
+      if (best <= 20.25) return 'predation'
+      if (rec.ratio <= 0.02) return 'starved'
+      if (Number.isFinite(rec.lifespan) && rec.age >= rec.lifespan * 0.92) return 'old'
+      if (rec.cold >= 0.6) return 'frozen'
+      if (rec.health !== null && rec.health <= 0.2) return 'disease'
+      return 'unknown'
     }
 
     /**
@@ -69,6 +396,8 @@
       let view = { x: 0, y: 0, width: 0, height: 0 }
       const brush = { tool: 'grass', radius: 1 }
       const listeners = new Set()
+      /** First-run flag; null means "not read from storage yet". */
+      let onboardingFlag = null
 
       /** Load the saved world, or create a fresh one. */
       function ensureWorld() {
@@ -101,6 +430,51 @@
         }
       }
 
+      /**
+       * Whether the first-run guide has been dismissed.
+       * Storage may be missing (private mode, tests); the flag then lives for
+       * this session only, which is better than showing the guide forever.
+       * @returns {boolean} seen.
+       */
+      function onboardingSeen() {
+        if (onboardingFlag !== null) return onboardingFlag
+        onboardingFlag = false
+        if (storage !== null) {
+          try {
+            onboardingFlag = storage.getItem(ONBOARD_KEY) === '1'
+          } catch {
+            onboardingFlag = false
+          }
+        }
+        return onboardingFlag
+      }
+
+      /** Remember that the guide was dismissed, and repaint. */
+      function markOnboardingSeen() {
+        onboardingFlag = true
+        if (storage !== null) {
+          try {
+            storage.setItem(ONBOARD_KEY, '1')
+          } catch {
+            // Storage full or disabled: the guide stays dismissed this session.
+          }
+        }
+        publish()
+      }
+
+      /** Show the guide again ("How to play" -> start over). */
+      function resetOnboarding() {
+        onboardingFlag = false
+        if (storage !== null) {
+          try {
+            storage.removeItem(ONBOARD_KEY)
+          } catch {
+            // Nothing to clean up.
+          }
+        }
+        publish()
+      }
+
       /** Ask for a React snapshot on the next tick, at most a few times a second. */
       function markDirty() {
         pendingSnapshot = true
@@ -112,21 +486,491 @@
         for (const listener of listeners) listener()
       }
 
+      // -------------------------------------------------------------------
+      // Observation
+      //
+      // The engine records what happened; this layer answers the questions a
+      // player actually asks: who is left, where was it, why did it die, and
+      // where is the energy going. Everything below is derived by watching the
+      // world and never writes to it, so it keeps working as the simulation
+      // underneath is rewritten.
+      // -------------------------------------------------------------------
+      let observedWorld = null
+      let observation = null
+      let events = []
+      let eventSeq = 0
+      const causeTally = {}
+      const deathCount = {}
+      const placedIds = new Set()
+      const corpseSeen = new Set()
+      const rateIntake = {}
+      const rates = { gpp: 0, herbs: 0, carns: 0, respire: 0 }
+
+      /**
+       * Drop the observation state and start watching a new world.
+       * Ids restart with a new world, so keeping the old records would read as
+       * one huge die-off the moment the player presses "new world".
+       */
+      function resetObservation() {
+        observation = null
+        events = []
+        eventSeq = 0
+        placedIds.clear()
+        corpseSeen.clear()
+        for (const key of Object.keys(causeTally)) delete causeTally[key]
+        for (const key of Object.keys(deathCount)) delete deathCount[key]
+        for (const key of Object.keys(rateIntake)) delete rateIntake[key]
+        rates.gpp = 0
+        rates.herbs = 0
+        rates.carns = 0
+        rates.respire = 0
+      }
+
+      /**
+       * Record one species' death causes, creating the bucket on first use.
+       * @param {string} speciesId - species id.
+       * @returns {object} mutable cause buckets.
+       */
+      function causeBucket(speciesId) {
+        if (causeTally[speciesId] === undefined) causeTally[speciesId] = {}
+        return causeTally[speciesId]
+      }
+
+      /**
+       * Push one event into the ticker and keep the ticker short.
+       * @param {string} kind - EVENT_KINDS member.
+       * @param {string} speciesId - species id.
+       * @param {number} x - position.
+       * @param {number} y - position.
+       * @param {number} count - how many animals the event covers.
+       * @param {number} [id] - entity id, when the event is about one animal.
+       * @param {string} [cause] - death cause, when the kind carries one.
+       */
+      function pushEvent(kind, speciesId, x, y, count, id, cause) {
+        eventSeq += 1
+        events.push({
+          seq: eventSeq,
+          t: Math.round(observedWorld === null ? 0 : observedWorld.time),
+          kind,
+          species: speciesId,
+          x: Math.round(x * 10) / 10,
+          y: Math.round(y * 10) / 10,
+          count: Math.max(1, count | 0),
+          id: typeof id === 'number' ? id : 0,
+          cause: typeof cause === 'string' ? cause : null,
+        })
+      }
+
+      /**
+       * Count same-species animals in the coarse cells around a point.
+       * The bucket holds the species of every animal in a 4x4 cell block, so a
+       * newborn is recognised by its litter and an arrival from off-map is not.
+       * @param {Map<number, string[]>} cells - coarse occupancy index.
+       * @param {number} x - position.
+       * @param {number} y - position.
+       * @param {string} speciesId - species to count.
+       * @returns {number} neighbours, including the caller itself.
+       */
+      function kinsAround(cells, x, y, speciesId) {
+        const cx = (x | 0) >> 2
+        const cy = (y | 0) >> 2
+        let found = 0
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const bucket = cells.get((cx + dx) * 4096 + (cy + dy))
+            if (bucket === undefined) continue
+            for (const id of bucket) if (id === speciesId) found += 1
+          }
+        }
+        return found
+      }
+
+      /**
+       * Read the world once and turn it into a census, an event feed and a
+       * measured energy budget.
+       * @param {object} world - the world.
+       * @returns {object|null} the observation, or null when there is no world.
+       */
+      function observe(world) {
+        if (observedWorld !== world) {
+          observedWorld = world
+          resetObservation()
+        }
+        const now = world.time
+        const previous = observation
+        // A paused world still needs a fresh census (the player places animals
+        // while paused), but a zero-length interval cannot carry a rate, so the
+        // flows below are the only part gated on time actually passing.
+        const dt = previous === null ? 0 : Math.max(0, now - previous.time)
+        const hunters = []
+        const seen = new Map()
+        const cells = new Map()
+        const species = {}
+        for (const id of SPECIES_IDS) {
+          species[id] = { count: 0, sumE: 0, sumMax: 0, sumAge: 0, respire: 0, hungry: 0 }
+        }
+
+        for (const entity of world.entities) {
+          const row = SPECIES[entity.species]
+          if (row === undefined) continue
+          const balance = row.balance
+          const body = entity.body
+          const reserve = body === undefined || body === null || !Number.isFinite(body.E) ? entity.energy : body.E
+          const reserveMax = body === undefined || body === null || !Number.isFinite(body.Emax) ? balance.maxEnergy : body.Emax
+          const ratio = reserveMax > 0 ? clamp(reserve / reserveMax, 0, 1) : 0
+          const bucket = species[entity.species]
+          if (bucket !== undefined) {
+            bucket.count += 1
+            bucket.sumE += reserve
+            bucket.sumMax += reserveMax
+            bucket.sumAge += entity.age
+            // Maintenance power, kJ per in-world day: the buffer's own number
+            // from the DEB ledger. The old per-second drain stays as the
+            // fallback so a save from before the ledger still shows a budget.
+            bucket.respire += body !== undefined && body !== null && Number.isFinite(body.pMetabolism)
+              ? Math.max(0, body.pMetabolism)
+              : (balance.drain * entity.genes.metabolism + (entity.fleeing === true ? (balance.fleeDrain ?? 0) : 0)) * DAY_SECONDS
+            if (ratio < 0.35) bucket.hungry += 1
+          }
+          if (row.role === 'hunter') hunters.push({ id: entity.id, species: entity.species, x: entity.x, y: entity.y })
+          const key = ((entity.x | 0) >> 2) * 4096 + ((entity.y | 0) >> 2)
+          const occupants = cells.get(key)
+          if (occupants === undefined) cells.set(key, [entity.species])
+          else occupants.push(entity.species)
+          seen.set(entity.id, {
+            species: entity.species,
+            x: entity.x,
+            y: entity.y,
+            ratio,
+            age: entity.age,
+            lifespan: entity.genes.lifespan,
+            cold: entity.drives === undefined || !Number.isFinite(entity.drives.cold) ? coldOf(world) : clamp(entity.drives.cold, 0, 1),
+            health: body === undefined || body === null || !Number.isFinite(body.health) ? null : body.health,
+            // A living body carries cause: '' — that is "not dead", not a cause.
+            cause: body === undefined || body === null || typeof body.cause !== 'string' || body.cause === ''
+              ? null
+              : body.cause,
+          })
+        }
+
+        const plants = samplePlantStock(world)
+        const birthBatch = new Map()
+        const deathBatch = new Map()
+        const arrivalBatch = new Map()
+        const placements = []
+        // A carcass carries the cause the engine wrote (dieOf in 09b-body), which
+        // makes the death panel exact instead of inferred. Scavengers eat corpses,
+        // so some are gone before this sweep sees them; those fall back to the
+        // inference in classifyDeath and are still counted.
+        const explained = new Map()
+        for (const corpse of world.corpses) {
+          if (corpse === null || typeof corpse !== 'object') continue
+          if (corpseSeen.has(corpse.id)) continue
+          corpseSeen.add(corpse.id)
+          if (typeof corpse.cause !== 'string' || corpse.cause === '') continue
+          if (!CAUSE_KEYS.includes(corpse.cause)) continue
+          const pool = explained.get(corpse.species)
+          const hit = { cause: corpse.cause, x: corpse.x, y: corpse.y }
+          if (pool === undefined) explained.set(corpse.species, [hit])
+          else pool.push(hit)
+        }
+        if (corpseSeen.size > 2048) {
+          // Corpses are transient; rebuilding from the live list keeps this set
+          // from growing for the whole session.
+          corpseSeen.clear()
+          for (const corpse of world.corpses) {
+            if (corpse !== null && typeof corpse === 'object') corpseSeen.add(corpse.id)
+          }
+        }
+
+        if (previous !== null) {
+          for (const [id, rec] of seen) {
+            if (previous.seen.has(id)) continue
+            if (placedIds.has(id)) {
+              placedIds.delete(id)
+              placements.push({ species: rec.species, x: rec.x, y: rec.y })
+              continue
+            }
+            const immigration = world.lastImmigration
+            const immigrated = immigration !== undefined && immigration !== null &&
+              immigration.species === rec.species && (now - immigration.at) <= 2
+            if (!immigrated && kinsAround(cells, rec.x, rec.y, rec.species) > 1) {
+              birthBatch.set(rec.species, (birthBatch.get(rec.species) ?? 0) + 1)
+            } else {
+              arrivalBatch.set(rec.species, (arrivalBatch.get(rec.species) ?? 0) + 1)
+            }
+          }
+
+          let kills = 0
+          for (const [id, rec] of previous.seen) {
+            if (seen.has(id)) continue
+            const pool = explained.get(rec.species)
+            const hit = pool === undefined || pool.length === 0 ? null : pool.pop()
+            const cause = hit === null ? classifyDeath(rec, previous.hunters) : hit.cause
+            const atX = hit === null ? rec.x : hit.x
+            const atY = hit === null ? rec.y : hit.y
+            const causes = causeBucket(rec.species)
+            causes[cause] = (causes[cause] ?? 0) + 1
+            deathCount[rec.species] = (deathCount[rec.species] ?? 0) + 1
+            if (cause === 'predation' && kills < 3) {
+              kills += 1
+              pushEvent('predation', rec.species, atX, atY, 1, 0, cause)
+            } else {
+              const key = rec.species + '|' + cause
+              const row = deathBatch.get(key)
+              if (row === undefined) deathBatch.set(key, { species: rec.species, cause, count: 1, x: atX, y: atY })
+              else row.count += 1
+            }
+          }
+          // A corpse whose animal vanished in an earlier sweep still explains a
+          // death: tally its cause, but never add to the death count twice.
+          for (const [speciesId, pool] of explained) {
+            for (const hit of pool) {
+              const causes = causeBucket(speciesId)
+              causes[hit.cause] = (causes[hit.cause] ?? 0) + 1
+            }
+          }
+        }
+
+        // One ticker line per species per kind: a litter of seven is one piece of
+        // news, not seven, or the ticker becomes unreadable during a boom.
+        const originOf = (speciesId) => {
+          for (const entity of world.entities) {
+            if (entity.species === speciesId) return { x: entity.x, y: entity.y }
+          }
+          return { x: world.width / 2, y: world.height / 2 }
+        }
+        for (const [speciesId, count] of birthBatch) {
+          const at = originOf(speciesId)
+          pushEvent('birth', speciesId, at.x, at.y, count, 0)
+        }
+        for (const row of deathBatch.values()) {
+          const at = Number.isFinite(row.x) ? row : originOf(row.species)
+          pushEvent('death', row.species, at.x, at.y, row.count, 0, row.cause)
+        }
+        for (const [speciesId, count] of arrivalBatch) {
+          const at = originOf(speciesId)
+          pushEvent('migration', speciesId, at.x, at.y, count, 0)
+        }
+        for (const placed of placements) pushEvent('placed', placed.species, placed.x, placed.y, 1, 0)
+        if (world.caches !== undefined && world.caches !== null) {
+          for (const cache of world.caches) {
+            if (cache === null || typeof cache !== 'object') continue
+            const filled = Number(cache.energy) || 0
+            const before = previous === null ? 0 : (previous.caches.get(cache.id) ?? 0)
+            if (filled > before + 0.5) pushEvent('hoard', cache.owner ?? cache.species ?? 'rabbit', cache.x ?? 0, cache.y ?? 0, 1, 0)
+          }
+        }
+
+        // Measured flows, all in kJ per in-world day so every row of the budget
+        // is comparable (docs/10 section 2). Two sources, in order of authority:
+        //  - world.budget: gross primary production and plant respiration, which
+        //    the producer step counts itself;
+        //  - the bodies: an animal's intake is whatever its reserve gained plus
+        //    whatever it burned, since nothing else moves energy in or out.
+        if (previous !== null && dt > 0) {
+          const perDay = DAY_SECONDS / dt
+          for (const id of SPECIES_IDS) {
+            const nowBucket = species[id]
+            const oldBucket = previous.species[id]
+            if (nowBucket === undefined || oldBucket === undefined) continue
+            const intake = (nowBucket.sumE - oldBucket.sumE) * perDay + nowBucket.respire
+            rateIntake[id] = rateIntake[id] === undefined ? intake : rateIntake[id] + (intake - rateIntake[id]) * 0.35
+          }
+          let herbs = 0
+          let carns = 0
+          let respire = 0
+          for (const id of SPECIES_IDS) {
+            const role = SPECIES[id].role
+            const value = Math.max(0, rateIntake[id] ?? 0)
+            if (role === 'grazer') herbs += value
+            else carns += value
+            respire += species[id].respire
+          }
+          const budget = world.budget
+          const before = previous.budget
+          let gpp = 0
+          let plantRespired = 0
+          if (budget !== undefined && budget !== null && before !== null && before !== undefined) {
+            gpp = Math.max(0, (budget.gpp - before.gpp) * perDay)
+            plantRespired = Math.max(0, (budget.plantRespired - before.plantRespired) * perDay)
+          } else {
+            // No budget in this world: fall back to the net stock rise, which
+            // understates growth by whatever the grazers took.
+            gpp = Math.max(0, (plants.energy - previous.plants.energy) * perDay)
+          }
+          rates.gpp += (gpp - rates.gpp) * 0.35
+          rates.herbs += (herbs - rates.herbs) * 0.35
+          rates.carns += (carns - rates.carns) * 0.35
+          rates.respire += (respire + plantRespired - rates.respire) * 0.35
+        }
+
+        const caches = new Map()
+        if (world.caches !== undefined && world.caches !== null) {
+          for (const cache of world.caches) {
+            if (cache === null || typeof cache !== 'object') continue
+            caches.set(cache.id, Number(cache.energy) || 0)
+          }
+        }
+        if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS)
+        while (events.length > 0 && now - events[0].t > EVENT_TTL) events.shift()
+
+        const budget = world.budget
+        observation = {
+          time: now,
+          dt,
+          species,
+          hunters,
+          seen,
+          plants,
+          caches,
+          budget: budget === undefined || budget === null
+            ? null
+            : { gpp: budget.gpp, plantRespired: budget.plantRespired, mineralised: budget.mineralised },
+        }
+        return observation
+      }
+
+      /**
+       * Events worth showing, newest first.
+       * @returns {object[]} events.
+       */
+      function recentEvents() {
+        const list = []
+        for (let i = events.length - 1; i >= 0 && list.length < 24; i--) list.push(events[i])
+        return list
+      }
+
+      /**
+       * Births and deaths in the last minute, for the header pulse.
+       * @param {object} world - the world.
+       * @returns {{births: number, deaths: number, predations: number}} pulse.
+       */
+      function pulseOf(world) {
+        const window = PULSE_SECONDS
+        const since = world.time - window
+        let births = 0
+        let deaths = 0
+        let predations = 0
+        for (const event of events) {
+          if (event.t < since) continue
+          if (event.kind === 'birth') births += event.count
+          else if (event.kind === 'death') deaths += event.count
+          else if (event.kind === 'predation') { deaths += event.count; predations += event.count }
+        }
+        return { births, deaths, predations }
+      }
+
+      /**
+       * One row per species for the species table and the energy budget.
+       * @returns {object[]} rows in SPECIES_IDS order.
+       */
+      function speciesRows() {
+        const rows = []
+        for (const id of SPECIES_IDS) {
+          const bucket = observation === null || observation.species[id] === undefined
+            ? { count: 0, sumE: 0, sumMax: 0, sumAge: 0, respire: 0, hungry: 0 }
+            : observation.species[id]
+          const causes = causeTally[id] ?? {}
+          const dead = deathCount[id] ?? 0
+          rows.push({
+            id,
+            count: bucket.count,
+            meanRatio: bucket.count === 0 || bucket.sumMax <= 0 ? 0 : clamp(bucket.sumE / bucket.sumMax, 0, 1),
+            meanEnergy: bucket.count === 0 ? 0 : bucket.sumE / bucket.count,
+            meanAge: bucket.count === 0 ? 0 : bucket.sumAge / bucket.count,
+            hungry: bucket.hungry,
+            respire: bucket.respire,
+            intake: rateIntake[id] ?? 0,
+            deaths: causes,
+            dead,
+            extinct: bucket.count === 0 && dead > 0,
+          })
+        }
+        return rows
+      }
+
+      /**
+       * The cascade the energy panel draws, in energy units per game second.
+       * @returns {object} flows.
+       */
+      function flowView() {
+        let animalStock = 0
+        if (observation !== null) {
+          for (const id of SPECIES_IDS) {
+            const bucket = observation.species[id]
+            if (bucket !== undefined) animalStock += bucket.sumE
+          }
+        }
+        return {
+          gpp: Math.max(0, rates.gpp),
+          herbs: Math.max(0, rates.herbs),
+          carns: Math.max(0, rates.carns),
+          respire: Math.max(0, rates.respire),
+          plantStock: observation === null ? 0 : observation.plants.energy,
+          animalStock,
+        }
+      }
+
+      /**
+       * Climate as the header and the cold drive read it.
+       * @param {object} world - the world.
+       * @returns {object} climate view.
+       */
+      function climateView(world) {
+        const climate = world.climate ?? null
+        const phase = (world.time % DAY_SECONDS) / DAY_SECONDS
+        return {
+          temperature: temperatureOf(world),
+          sunlight: climate !== null && Number.isFinite(climate.sunlight) ? climate.sunlight : daylight(world),
+          dayPhase: climate !== null && Number.isFinite(climate.dayPhase) ? climate.dayPhase : phase,
+          yearPhase: climate !== null && Number.isFinite(climate.yearPhase) ? climate.yearPhase : null,
+          season: climate !== null && typeof climate.season === 'string' ? climate.season : null,
+        }
+      }
+
       /** The inspected animal, if it is still alive. */
       function selectedEntity() {
         if (world === null || selectedId === 0) return undefined
         return findEntityById(world, selectedId)
       }
 
-      /** Flatten one entity for the inspector. */
+      /**
+       * Flatten one entity for the inspector.
+       *
+       * The inspector is the answer to "what is it doing and why" (G2), so this
+       * is everything needed to say that in one card: the body, the eight
+       * drives, the timed state, the goal it walks toward, the sentence behind
+       * the decision and the death it is heading for.
+       * @param {object} entity - the animal.
+       * @returns {object} inspector record.
+       */
       function summariseEntity(entity) {
         const species = SPECIES[entity.species]
+        const safe = species === undefined
+          ? { balance: { maxEnergy: 100, maturity: 1 }, genes: {}, color: '#999', role: 'grazer' }
+          : species
+        const body = bodyRecord(entity, safe)
+        const drives = drivesOf(world, entity, safe)
+        const state = entity.state
+        const stateId = state !== undefined && state !== null && typeof state.id === 'string'
+          ? state.id
+          : (entity.intent ?? 'explore')
+        const remaining = state !== undefined && state !== null && Number.isFinite(state.until)
+          ? Math.max(0, state.until - world.time)
+          : null
+        const hasGoal = Number.isFinite(entity.targetX) && Number.isFinite(entity.targetY)
+        const plan = entity.plan
+        const decision = entity.decision
+        const decisionAge = decision !== undefined && decision !== null && Number.isFinite(decision.at)
+          ? Math.max(0, world.time - decision.at)
+          : null
         return {
           id: entity.id,
           species: entity.species,
           age: entity.age,
-          energy: entity.energy,
-          maxEnergy: species === undefined ? 100 : species.balance.maxEnergy,
+          energy: body.reserve,
+          maxEnergy: body.reserveMax,
           generation: entity.generation,
           children: entity.children ?? 0,
           genes: { ...entity.genes },
@@ -137,6 +981,41 @@
           intent: entity.intent ?? 'explore',
           needs: { ...needsOf(entity) },
           speed: entity.genes.speed * (STAGE_SPEED[entity.stage ?? 'adult'] ?? 1),
+          body,
+          drives: drives.values,
+          drivesDerived: drives.derived,
+          state: {
+            id: stateId,
+            phase: state !== undefined && state !== null && typeof state.phase === 'string' ? state.phase : null,
+            since: state !== undefined && state !== null && Number.isFinite(state.since) ? state.since : null,
+            remaining,
+            nextDecision: Number.isFinite(entity.thinkTimer) ? Math.max(0, entity.thinkTimer) : null,
+            score: state !== undefined && state !== null && Number.isFinite(state.score) ? round3(state.score) : null,
+          },
+          plan: plan === undefined || plan === null
+            ? null
+            : {
+                goal: typeof plan.goal === 'string' ? plan.goal : null,
+                index: Number.isFinite(plan.index) ? plan.index : 0,
+                steps: Array.isArray(plan.steps)
+                  ? plan.steps.slice(0, 4).map(step => ({
+                      x: round3(step?.x ?? 0),
+                      y: round3(step?.y ?? 0),
+                      act: typeof step?.act === 'string' ? step.act : null,
+                      duration: Number.isFinite(step?.duration) ? round3(step.duration) : null,
+                    }))
+                  : [],
+              },
+          decisionAge,
+          goal: hasGoal
+            ? { x: entity.targetX, y: entity.targetY, distance: Math.hypot(entity.targetX - entity.x, entity.targetY - entity.y) }
+            : null,
+          reason: reasonOf(entity, drives.values),
+          cause: {
+            predicted: predictCause(entity, body, drives.values, observation),
+            actual: body.cause,
+          },
+          threats: predatorsNear(observation, entity.species, entity.x, entity.y, 8),
         }
       }
 
@@ -159,28 +1038,49 @@
             ready: false,
             paused,
             speed,
+            time: 0,
             stats: emptyStats(),
-            world: { width: GRID_W, height: GRID_H },
+            world: { width: GRID_W, height: GRID_H, empty: true },
             history: [],
             brush: { tool: brush.tool, radius: brush.radius },
             selected: null,
             following: false,
             view: { x: 0, y: 0, width: 0, height: 0 },
+            events: [],
+            pulse: { births: 0, deaths: 0, predations: 0 },
+            species: [],
+            flows: { gpp: 0, herbs: 0, carns: 0, respire: 0, plantStock: 0, animalStock: 0 },
+            plants: { grass: 0, weed: 0, energy: 0 },
+            climate: { temperature: null, sunlight: 1, dayPhase: 0.26, yearPhase: null, season: null },
+            onboarding: onboardingSeen(),
           }
         }
         const stats = sampleStats(world)
+        // Observe before summarising: the inspector reads the predators and the
+        // census from the same reading, so one card never mixes two moments.
+        observe(world)
         const selected = selectedEntity()
+        let population = 0
+        for (const id of SPECIES_IDS) population += stats.counts[id] ?? 0
         return {
           ready: true,
           paused,
           speed,
+          time: world.time,
           stats,
-          world: { width: world.width, height: world.height },
+          world: { width: world.width, height: world.height, empty: population === 0 },
           history: world.history.slice(-120),
           brush: { tool: brush.tool, radius: brush.radius },
           selected: selected === undefined ? null : summariseEntity(selected),
           following: follow && selected !== undefined,
           view: { x: view.x, y: view.y, width: view.width, height: view.height },
+          events: recentEvents(),
+          pulse: pulseOf(world),
+          species: speciesRows(),
+          flows: flowView(),
+          plants: observation === null ? { grass: 0, weed: 0, energy: 0 } : observation.plants,
+          climate: climateView(world),
+          onboarding: onboardingSeen(),
         }
       }
 
@@ -363,6 +1263,41 @@
         frameBuffer = null
       }
 
+      /**
+       * Put a starter population back into an emptied world.
+       *
+       * This is the "the world went quiet" button: it places a few animals per
+       * species through the same code path as the brush, so the arrival is
+       * reported in the event ticker like any other placement and no rule is
+       * bypassed (caps still refuse a species that is already full).
+       * @returns {number} how many animals were released.
+       */
+      function restock() {
+        if (world === null) ensureWorld()
+        let released = 0
+        const spots = 6
+        for (const id of SPECIES_IDS) {
+          const want = id === 'rabbit' || id === 'fish' || id === 'frog' ? 3 : 2
+          let placed = 0
+          for (let attempt = 0; attempt < spots * 4 && placed < want; attempt++) {
+            const x = randomBetween(world, 2, world.width - 3)
+            const y = randomBetween(world, 2, world.height - 3)
+            const before = Number.isFinite(world.nextId) ? world.nextId : 0
+            const count = place(world, id, x, y, 1)
+            const added = typeof count === 'number' ? count : 0
+            if (added <= 0) continue
+            if (before > 0 && Number.isFinite(world.nextId)) {
+              for (let newId = before; newId < world.nextId; newId++) placedIds.add(newId)
+            }
+            placed += added
+            released += added
+          }
+        }
+        markDirty()
+        publish()
+        return released
+      }
+
       /** Replace the world with a fresh one. */
       function newWorld(seed) {
         world = createWorld(seed === undefined ? {} : { seed })
@@ -442,11 +1377,18 @@
         },
         paintAt(x, y, erase = false) {
           if (world === null) ensureWorld()
+          // Anything the brush spawns is the player's doing, not a birth: the
+          // id watermark tells the observer exactly which animals appeared.
+          const before = Number.isFinite(world.nextId) ? world.nextId : 0
           const result = place(world, erase ? 'erase' : brush.tool, x, y, brush.radius)
+          const released = typeof result === 'number' ? result : 0
+          if (released > 0 && before > 0 && Number.isFinite(world.nextId) && placedIds.size < 512) {
+            for (let id = before; id < world.nextId; id++) placedIds.add(id)
+          }
           // The canvas repaints on the next animation frame anyway; a full
           // snapshot here would rescan 200k cells per cell of a brush drag.
           markDirty()
-          return typeof result === 'number' ? result : 0
+          return released
         },
         selectAt(x, y) {
           if (world === null) return undefined
@@ -478,6 +1420,9 @@
           return follow
         },
         newWorld,
+        restock,
+        markOnboardingSeen,
+        resetOnboarding,
         save,
         peekSave() {
           return load()

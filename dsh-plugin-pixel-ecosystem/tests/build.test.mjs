@@ -42,3 +42,21 @@ test('client.js is exactly the concatenation of the parts', () => {
   const built = manifest.parts.map(readPart).join('\n')
   assert.equal(shipped, built, 'client.js is stale: run node tools/build-client.mjs')
 })
+test('no identifier is declared by two parts', () => {
+  // All parts share one closure, so a duplicate top-level declaration is a
+  // SyntaxError in the built bundle and takes the whole panel down. This is how
+  // two owners ended up both declaring DRIVE_KEYS.
+  const DECLARATION = /^    (?:(?:async\s+)?function|const|let|var|class)\s+([A-Za-z_$][\w$]*)/gm
+  const seen = new Map()
+  const clashes = []
+  for (const part of manifest.parts) {
+    const text = readPart(part)
+    for (const match of text.matchAll(DECLARATION)) {
+      const name = match[1]
+      const owner = seen.get(name)
+      if (owner === undefined) seen.set(name, part.file)
+      else if (owner !== part.file) clashes.push(name + ': ' + owner + ' + ' + part.file)
+    }
+  }
+  assert.deepEqual(clashes, [], 'duplicate top-level declarations across parts')
+})

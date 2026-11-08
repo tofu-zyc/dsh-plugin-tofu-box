@@ -130,6 +130,103 @@
     }
 
     /**
+     * Quality of a standing crop as the share of a full bite rate.
+     *
+     * Patch value has to be in the same unit as the intake the animal will
+     * actually get, otherwise a decision compares apples to grass. The feeding
+     * layer already owns that curve (Holling type II in 11-feed), so this reads
+     * it instead of inventing a second one; the fallback is a plain saturation
+     * curve for the case where the feeding part is not loaded.
+     * @param {number} available - standing crop, kg dry matter/m^2.
+     * @returns {number} 0..1 opportunity quality.
+     */
+    function swardQuality(available) {
+      if (!(available > 0)) return 0
+      if (typeof grazingIntake === 'function') {
+        const ceiling = grazingIntake(1, 1e9)
+        if (ceiling > 0) return clamp(grazingIntake(1, available) / ceiling, 0, 1)
+      }
+      return clamp(available / (0.5 + available), 0, 1)
+    }
+    /**
+     * Scan the neighbourhood for the best edible cell of an animal's flora.
+     *
+     * The scan is a deterministic lattice walk, not a random sample: every cell
+     * inside the search circle at the current stride is looked at, so an animal
+     * cannot "miss" a full meadow standing in front of it. The stride coarsens
+     * with the radius, which is how a real eye loses detail at the edge of its
+     * vision — and it keeps a wide scan cheap enough for a thousand animals.
+     * @param {object} world - the world.
+     * @param {object} entity - the grazer.
+     * @param {object} species - species row.
+     * @param {number} hunger - current hunger drive (0..1).
+     * @param {number} now - world time.
+     * @returns {{x: number, y: number, value: number}|null} best patch centre.
+     */
+    function scanFlora(world, entity, species, hunger, now) {
+      const field = floraField(world, species)
+      if (field === null) return null
+      const wanted = species.flora === 'grass' ? TERRAIN.GRASS : TERRAIN.WATER
+      const reach = clamp(Math.round(entity.genes.vision * (0.4 + hunger * 0.9)), 3, 15)
+      const stride = reach > 8 ? 2 : 1
+      const originX = entity.x | 0
+      const originY = entity.y | 0
+      let best = null
+      let bestScore = 0.02
+      for (let offsetY = -reach; offsetY <= reach; offsetY += stride) {
+        const cellY = originY + offsetY
+        for (let offsetX = -reach; offsetX <= reach; offsetX += stride) {
+          const offset = offsetX * offsetX + offsetY * offsetY
+          if (offset > reach * reach) continue
+          const cellX = originX + offsetX
+          const index = cellIndex(world, cellX, cellY)
+          if (index < 0 || world.terrain[index] !== wanted) continue
+          const available = field[index]
+          // Any standing crop is visible; what differs is what a bite is worth,
+          // which is what the functional-response quality below expresses.
+          if (available <= 0.004) continue
+          // A wader must not aim at water it cannot stand in; a fish never leaves
+          // the water, so canStand is the one legality test for both.
+          if (!canStand(world, species, cellX + 0.5, cellY + 0.5)) continue
+          const distance = Math.sqrt(offset)
+          const heat = threatHeat(entity, cellX + 0.5, cellY + 0.5, now)
+          const quality = swardQuality(available)
+          const score = quality * (1 - heat * 0.6) - distance * 0.014
+          if (score > bestScore) {
+            bestScore = score
+            best = { x: cellX + 0.5, y: cellY + 0.5, value: quality }
+          }
+        }
+      }
+      return best
+    }
+
+    /**
+     * Nearest leafy plant inside a radius. Browsing is the fallback when the
+     * ground is bare, so this only runs when the flora scan found little.
+     * @param {object} world - the world.
+     * @param {object} entity - the deer.
+     * @param {number} radius - reach in cells.
+     * @param {number} now - world time.
+     * @returns {{x: number, y: number, value: number}|null} the plant.
+     */
+    function scanFoliage(world, entity, radius, now) {
+      let best = null
+      let bestScore = 0.12
+      for (const plant of world.trees) {
+        if (plant.variant === 'lily' || plant.variant === 'reed') continue
+        const foliage = plant.foliage ?? 0
+        if (foliage <= 0.12) continue
+        const distance = Math.hypot(plant.x - entity.x, plant.y - entity.y)
+        if (distance > radius) continue
+        const heat = threatHeat(entity, plant.x, plant.y, now)
+        const score = foliage * (1 - heat * 0.6) - distance * 0.014
+        if (score > bestScore) { bestScore = score; best = plant }
+      }
+      return best
+    }
+
+    /**
      * Movement multiplier for the current time of day, from the species'
      * activity window (rabbits and deer peak at dawn/dusk; crows roost at night).
      * @param {object} world - the world.
@@ -178,61 +275,6 @@
           spreadEffectBudget -= 1
         }
       }
-    }
-
-    /**
-     * Where a herd animal drifts when it has nothing better to do: toward the
-     * centroid of its neighbours, pushed away from the ones standing on top of
-     * it. Returns null when it is alone, so solitary animals keep wandering.
-     * @param {object} world - the world.
-     * @param {object} entity - the animal.
-     * @param {object} species - its species row.
-     * @param {object} grid - grid of all animals.
-     * @returns {{x: number, y: number}|null} a target, or null.
-     */
-    /**
-     * Centroid of nearby conspecifics, or null when alone.
-     * Used to bias grazing toward the rest of the herd, so a group keeps eating
-     * the same patch instead of each animal drifting its own way.
-     * @param {object} entity - the animal.
-     * @param {object} species - its species row.
-     * @param {object} grid - grid of all animals.
-     * @returns {{x: number, y: number}|null} centroid or null.
-     */
-    function herdCentroid(entity, species, grid) {
-      const herd = species.herd
-      const neighbours = queryNearby(grid, entity.x, entity.y, herd.radius,
-        candidate => candidate !== entity && candidate.fate === '' && candidate.species === entity.species, 8)
-      if (neighbours.length === 0) return null
-      let sumX = 0
-      let sumY = 0
-      for (const neighbour of neighbours) { sumX += neighbour.x; sumY += neighbour.y }
-      return { x: sumX / neighbours.length, y: sumY / neighbours.length }
-    }
-
-    function herdTarget(world, entity, species, grid) {
-      const herd = species.herd
-      const neighbours = queryNearby(grid, entity.x, entity.y, herd.radius,
-        candidate => candidate !== entity && candidate.fate === '' && candidate.species === entity.species)
-      if (neighbours.length === 0) return null
-      let sumX = 0
-      let sumY = 0
-      let pushX = 0
-      let pushY = 0
-      for (const neighbour of neighbours) {
-        sumX += neighbour.x
-        sumY += neighbour.y
-        const dx = entity.x - neighbour.x
-        const dy = entity.y - neighbour.y
-        const distance = Math.hypot(dx, dy)
-        if (distance > 0.01 && distance < herd.separation) {
-          pushX += dx / distance
-          pushY += dy / distance
-        }
-      }
-      const x = sumX / neighbours.length + pushX * herd.separation * 1.6
-      const y = sumY / neighbours.length + pushY * herd.separation * 1.6
-      return { x: clamp(x, 1, world.width - 2), y: clamp(y, 1, world.height - 2) }
     }
 
     /**

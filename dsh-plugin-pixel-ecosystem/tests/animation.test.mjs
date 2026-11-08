@@ -83,3 +83,75 @@ test('a moving animal visits all four gait frames and a resting one does not', (
   for (let tick = 0; tick < 20; tick++) engine.stepWorld(world, engine.TICK)
   assert.equal(resting.gait, before, 'a resting animal must not advance its gait')
 })
+test('every behaviour state resolves to a frame set, unknown ids fall back to idle', () => {
+  const world = engine.createWorld({ seed: 3, width: 48, height: 40, immigration: false })
+  const rabbit = engine.spawnEntity(world, 'rabbit', 20, 20)
+  rabbit.heading = 0
+  rabbit.phase = 0
+  rabbit.running = false
+  rabbit.fleeing = false
+  const setIdle = engine.SPRITES.rabbit.idle
+  const setFlee = engine.SPRITES.rabbit.flee
+  const walkFrames = new Set(engine.SPRITES.rabbit.walk)
+  const standing = ['idle', 'alert', 'graze', 'eat', 'forage', 'browse', 'drink', 'rest', 'sleep',
+    'bask', 'bury', 'ambush', 'cold', 'shiver', 'freeze', 'huddle', 'mate', 'birth']
+  const walking = ['stalk', 'sneak', 'hoard', 'cache', 'wander', 'explore', 'patrol', 'walk',
+    'travel', 'migrate', 'scavenge', 'court', 'socialize', 'follow']
+  const running = ['hunt', 'chase', 'strike', 'flee', 'fight', 'play']
+  for (const id of standing) {
+    rabbit.state = { id }
+    assert.equal(engine.frameFor(rabbit, 7), setIdle, `state "${id}" must show an idle frame`)
+  }
+  for (const id of walking) {
+    rabbit.state = { id }
+    assert.ok(walkFrames.has(engine.frameFor(rabbit, 7)), `state "${id}" must show a walk frame`)
+  }
+  for (const id of running) {
+    rabbit.state = { id }
+    assert.equal(engine.frameFor(rabbit, 7), setFlee, `state "${id}" must show the run frame`)
+  }
+  rabbit.state = { id: 'glorp' }
+  assert.equal(engine.frameFor(rabbit, 7), setIdle, 'an unknown state must fall back to idle')
+  rabbit.state = { id: 'sleeping-bag' }
+  assert.equal(engine.frameFor(rabbit, 7), setIdle, 'an unknown multi-word state must fall back to idle')
+})
+
+test('state ids may be decorated, and the legacy intent field still drives the pose', () => {
+  const world = engine.createWorld({ seed: 4, width: 48, height: 40, immigration: false })
+  const rabbit = engine.spawnEntity(world, 'rabbit', 20, 20)
+  rabbit.heading = 0
+  rabbit.phase = 0
+  rabbit.running = false
+  rabbit.fleeing = false
+  const setIdle = engine.SPRITES.rabbit.idle
+  const walkFrames = new Set(engine.SPRITES.rabbit.walk)
+  rabbit.state = { id: 'eat:grass' }
+  assert.equal(engine.frameFor(rabbit, 7), setIdle, 'a decorated eating id must still show the eating pose')
+  rabbit.state = { id: 'hoard_cache' }
+  assert.ok(walkFrames.has(engine.frameFor(rabbit, 7)), 'a decorated hoarding id must still walk')
+  delete rabbit.state
+  rabbit.intent = 'hunt'
+  assert.equal(engine.frameFor(rabbit, 7), engine.SPRITES.rabbit.flee, 'the legacy intent must still pick the run pose')
+  rabbit.intent = 'rest'
+  assert.equal(engine.frameFor(rabbit, 7), setIdle, 'the legacy rest intent must stand still')
+  rabbit.state = { id: 'graze' }
+  rabbit.fleeing = true
+  assert.equal(engine.frameFor(rabbit, 7), engine.SPRITES.rabbit.flee, 'flight overrides any standing pose')
+})
+
+test('a paused pose holds one frame, a moving pose cycles', () => {
+  const world = engine.createWorld({ seed: 5, width: 48, height: 40, immigration: false })
+  const rabbit = engine.spawnEntity(world, 'rabbit', 20, 20)
+  rabbit.heading = 0
+  rabbit.phase = 0
+  rabbit.running = false
+  rabbit.fleeing = false
+  rabbit.state = { id: 'sleep' }
+  const asleepFirst = engine.frameFor(rabbit, 0)
+  const asleepLater = engine.frameFor(rabbit, 91)
+  assert.equal(asleepFirst, asleepLater, 'a sleeping animal must not flicker between frames')
+  rabbit.state = { id: 'stalk' }
+  const phases = new Set()
+  for (let tick = 0; tick < 16; tick++) phases.add(engine.frameFor(rabbit, tick))
+  assert.ok(phases.size > 1, 'a stalking animal must keep its legs moving')
+})

@@ -4,13 +4,18 @@
 
     /**
      * Kill an animal and leave a carcass behind.
-     * Single death path: starvation, old age and predation all end here.
+     * Single death path: starvation, old age and predation all end here, and the
+     * cause is written down — a world where animals vanish without a reason is
+     * unreadable (docs/20-CORE-LOOP.md invariant 3).
      * @param {object} world - the world.
      * @param {object} entity - the dying animal.
+     * @param {string} [cause] - 'starved' | 'frozen' | 'predation' | 'old' | 'disease'.
      */
-    function killEntity(world, entity) {
+    function killEntity(world, entity, cause) {
       if (entity.fate === 'dead') return
       entity.fate = 'dead'
+      if (cause !== undefined && entity.cause === undefined) entity.cause = cause
+      if (entity.body !== undefined && entity.body.cause === undefined && cause !== undefined) entity.body.cause = cause
       for (let puff = 0; puff < 3; puff++) spawnEffect(world, entity.x, entity.y, PALETTE.effect.death, 0.5, 0.5)
       if (world.population !== undefined && world.population[entity.species] !== undefined) {
         world.population[entity.species] = Math.max(0, world.population[entity.species] - 1)
@@ -134,44 +139,6 @@
     }
 
     /**
-     * Pick the most nutritious producer cell within vision, preferring closer
-     * ones. Sampling beats a full scan and produces natural grazing paths.
-     * @param {object} world - the world.
-     * @param {object} entity - the hungry grazer.
-     * @param {object} species - species row.
-     * @returns {object|null} `{ x, y }` cell centre, or null when nothing is in reach.
-     */
-    function findFlora(world, entity, species, anchor) {
-      const field = floraField(world, species)
-      if (field === null) return null
-      const wanted = species.flora === 'grass' ? TERRAIN.GRASS : TERRAIN.WATER
-      // A starving animal searches further, not harder: nine samples inside its
-      // eyesight almost never hit a patch when the meadow is patchy, which is
-      // exactly why grazers used to stand in a meadow and starve.
-      const hunger = needsOf(entity).hunger
-      const radius = entity.genes.vision * (hunger > 0.4 ? 2.4 : 1)
-      let best = null
-      let bestScore = 0.05
-      for (let attempt = 0; attempt < 12; attempt++) {
-        const angle = nextRandom(world) * Math.PI * 2
-        const distance = 1 + nextRandom(world) * radius
-        const x = (entity.x + Math.cos(angle) * distance) | 0
-        const y = (entity.y + Math.sin(angle) * distance) | 0
-        const index = cellIndex(world, x, y)
-        if (index < 0 || world.terrain[index] !== wanted) continue
-        // A wader must not aim at a patch it cannot stand in: the frog used to
-        // target deep water, drift to the bank and starve in sight of food.
-        if (species.wade === true && wanted === TERRAIN.WATER && world.depth[index] > 0.34) continue
-        const herdBias = anchor === undefined || anchor === null
-          ? 0
-          : Math.hypot(x - anchor.x, y - anchor.y) * 0.007
-        const score = field[index] - distance * 0.012 - herdBias
-        if (score > bestScore) { bestScore = score; best = { x: x + 0.5, y: y + 0.5 } }
-      }
-      return best
-    }
-
-    /**
      * Nearest prey of a hunter, honouring the species' preference order.
      *
      * `prey` is ordered: a wolf lists deer first, so it looks for a deer and
@@ -185,7 +152,10 @@
      * @returns {object|null} the chosen prey.
      */
     function nearestPrey(entity, species, grid, radius) {
-      for (const preyId of species.prey) {
+      // Grazers and scavengers have no prey list at all, and every caller
+      // (perception included) asks unconditionally: an absent field must mean
+      // "hunts nothing", not a TypeError that takes the whole world down.
+      for (const preyId of species.prey ?? []) {
         const found = queryNearest(grid, entity.x, entity.y, radius,
           candidate => candidate.fate === '' && candidate.species === preyId)
         if (found !== null) return found
@@ -214,33 +184,61 @@
       return best
     }
 
+    // ---------------------------------------------------------------------
+    // Behaviour states (executed by the machine in 10b-execution.js)
+    // ---------------------------------------------------------------------
+
     /**
-     * Best leafy plant within vision: the browser's equivalent of `findFlora`.
-     * @param {object} world - the world.
-     * @param {object} entity - the deer.
-     * @param {number} radius - vision radius in cells.
-     * @returns {object|null} the plant, or null when nothing leafy is in reach.
+     * States are ordered by urgency, and that order is what makes an interrupt
+     * safe: something urgent may cut a lower state short, nothing may cut
+     * something more urgent. A predator beats a drink, a drink beats a meal, a
+     * meal beats a nap or a look around.
      */
-    function findFoliage(world, entity, radius) {
-      let best = null
-      let bestScore = 0.2
-      for (const plant of world.trees) {
-        if (plant.variant === 'lily' || plant.variant === 'reed') continue
-        const dx = plant.x - entity.x
-        const dy = plant.y - entity.y
-        const distance = Math.hypot(dx, dy)
-        if (distance > radius) continue
-        const available = plant.foliage ?? 0
-        const score = available - distance * 0.02
-        if (score > bestScore) { bestScore = score; best = plant }
-      }
-      return best
+    const STATE_CLASS = {
+      flee: 3,
+      drink: 2,
+      forage: 1,
+      hunt: 1,
+      scavenge: 1,
+      rest: 0,
+      socialize: 0,
+      explore: 0,
     }
 
     /**
-     * Steer one animal for this think tick.
-     * @param {object} world - the world.
-     * @param {object} entity - the animal.
-     * @param {object} species - species row.
-     * @param {object} grid - grid of all animals.
+     * Per state: the shortest time the animal stays committed, and the planned
+     * length of a normal bout.
+     *
+     * `min` is the anti-twitch floor. The 0.2.x build re-rolled its whole intent
+     * every 0.22-0.55 s, which is why nothing on screen ever looked like it was
+     * doing something. `duration` is how long a bout runs before the animal
+     * considers its options again.
      */
+    const STATE_PLAN = {
+      flee: { min: 1.5, duration: [2.5, 5] },
+      drink: { min: 1.5, duration: [2.5, 6] },
+      forage: { min: 5, duration: [11, 22] },
+      hunt: { min: 5, duration: [12, 24] },
+      scavenge: { min: 4, duration: [10, 20] },
+      rest: { min: 8, duration: [18, 38] },
+      socialize: { min: 4, duration: [8, 16] },
+      explore: { min: 4, duration: [10, 20] },
+    }
+
+    /** How much better a rival must score before it may cut a state short. */
+    const STATE_HYSTERESIS = 1.18
+
+    /** Absolute score margin on top of the ratio, so a near-tie never flips. */
+    const STATE_MARGIN = 0.1
+
+    /**
+     * How much of its hunger one kJ of travel is worth, i.e. the exchange rate
+     * between a joule spent walking and a hunger drive unit: exactly the size of
+     * the reserve, because hunger is 1 - E/Emax. This is what lets the decision
+     * system subtract a real energy cost from a unitless score.
+     * @param {object} species - species row.
+     * @returns {number} hunger units per kJ.
+     */
+    function energyToDriveUnits(species) {
+      return 1 / Math.max(1, species.balance.maxEnergy)
+    }

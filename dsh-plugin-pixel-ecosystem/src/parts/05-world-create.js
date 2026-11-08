@@ -119,9 +119,11 @@
      * @returns {object} the new world.
      */
     function createWorld(options = {}) {
-      const width = Math.max(32, Math.min(512, options.width ?? GRID_W))
-      const height = Math.max(24, Math.min(512, options.height ?? GRID_H))
-      const seed = (options.seed ?? ((Math.random() * 4294967295) | 0)) >>> 0
+      const width = Math.max(32, Math.min(GRID_W, options.width ?? GRID_W))
+      const height = Math.max(24, Math.min(GRID_H, options.height ?? GRID_H))
+      // A world without an explicit seed gets a clock-derived one. `Math.random`
+      // is banned in the engine so that any run can be replayed from its seed.
+      const seed = (options.seed ?? (Date.now() & 0xffffffff)) >>> 0
       const size = width * height
       const world = {
         version: SAVE_VERSION,
@@ -134,15 +136,26 @@
         height,
         tick: 0,
         // Start at dawn: a fresh world should be lit, not a dark screen.
-      time: DAY_SECONDS * 0.26,
+        time: DAY_SECONDS * 0.26,
         rngState: seed === 0 ? 1 : seed,
         terrain: new Uint8Array(size),
         moisture: new Float32Array(size),
         depth: new Float32Array(size),
         waterFertility: new Float32Array(size),
         fertility: new Float32Array(size),
+        // Producer biomass, kg of dry matter per m^2 (docs/10 section 2).
         grass: new Float32Array(size),
         weed: new Float32Array(size),
+        // Detritus: corpses, dung and litter waiting to be mineralised.
+        detritus: new Float32Array(size),
+        // Light reaching each cell after canopy attenuation, 0..1.
+        light: new Float32Array(size),
+        // Extra leaf area the woody plants cast (rebuilt when the forest moves).
+        canopy: new Float32Array(size),
+        canopyDirty: true,
+        climate: createClimate(DAY_SECONDS * 0.26),
+        budget: createBudget(),
+        deaths: {},
         trees: [],
         entities: [],
         corpses: [],
@@ -151,12 +164,18 @@
         stats: { day: 1, clock: '06:00', grass: 0, weed: 0, counts: {}, corpses: 0 },
         history: [],
       }
+      // `nutrient` is the name the data contract uses (docs/CORE-LOOP 3); it is
+      // the same array as `fertility` so the renderer and the player tools keep
+      // reading the field they always read.
+      world.nutrient = world.fertility
       generateTerrain(world)
       computeHydrology(world)
       seedProducers(world)
-      seedTrees(world, options.trees ?? 430)
+      seedTrees(world, options.trees ?? Math.round(430 * (size / 256000)))
       seedAnimals(world, { ...DEFAULT_STOCKS, ...(options.stocks ?? {}) })
       world.population = countPopulations(world)
+      // Fill the shade field once so the first tick already has light.
+      rebuildCanopy(world)
       sampleStats(world)
       return world
     }

@@ -1,161 +1,394 @@
+    // ---------------------------------------------------------------------
+    // Deliberation: utility scoring at state boundaries
+    // ---------------------------------------------------------------------
+    //
+    // decide() is no longer called every few hundred milliseconds. It runs when
+    // a bout ends, or when something urgent interrupts one, and it answers one
+    // question: of the things this animal could do next, which is worth the
+    // most? Every option is scored as
+    //
+    //   utility = sum over drives( weight x drive x opportunity ) - energy cost
+    //
+    // where the opportunity term is how well that action addresses the drive
+    // (a full patch is better than a grazed one, a prey animal is better than
+    // carrion), and the cost is the energy the trip itself will burn, converted
+    // into the same units as hunger. Nothing here knows about species balance
+    // knob-turning: the weights are role traits and the cost is drain/speed.
+
     /**
-     * Score the candidate actions and commit to the best one.
+     * Energy in kJ an animal burns to walk a distance and then act for a while.
+     * @param {object} entity - the animal.
+     * @param {object} species - species row.
+     * @param {number} distance - travel in cells.
+     * @param {number} duration - seconds spent on the action itself.
+     * @returns {number} kJ.
+     */
+    function tripCostKj(entity, species, distance, duration) {
+      // kJ per second of upkeep. The body's field metabolic rate is the physical
+      // number (Nagy 1999); the old flat drain is zero now that 09b owns the
+      // ledger, so deriving it here is the only way the cost stays real.
+      const body = entity.body
+      const volume = body !== undefined && Number.isFinite(body.V) ? body.V : adultMassOf(species)
+      const fmr = typeof fieldMetabolicRate === 'function'
+        ? fieldMetabolicRate(species, volume)
+        : Math.max(1, species.balance.maxEnergy) / 5
+      const perSecond = (fmr / DAY_SECONDS) * (entity.genes.metabolism ?? 1)
+      const speed = Math.max(0.4, entity.genes.speed)
+      return perSecond * (distance / speed + duration)
+    }
+
+    /**
+     * Turn a travel distance into the share of a bout it eats up.
      *
-     * This is the whole decision system: each option gets a score from the
-     * needs it would satisfy, the temperament of the species, and the distance
-     * it would cost. The winner becomes `entity.intent`, which the renderer,
-     * the inspector and any future social layer can read directly.
+     * A trip is paid for in TIME, which is the budget a foraging animal actually
+     * spends: a patch fifteen cells away is only worth it if it is close to
+     * full value. Multiplying by this factor is what stops a walk across the
+     * map for a marginally better bite, without banning long trips when the
+     * animal is starving.
+     * @param {number} distance - travel in cells.
+     * @param {number} speed - cells per second.
+     * @param {number} bout - planned seconds of the action itself.
+     * @returns {number} 0..1 efficiency factor.
+     */
+    function tripEfficiency(distance, speed, bout) {
+      const travel = distance / Math.max(0.4, speed)
+      return bout / (bout + travel)
+    }
+
+    /**
+     * A wander target that keeps going the way the animal was already going.
+     *
+     * Picking a random angle every time is what makes a walk look like a random
+     * walk: the net displacement collapses toward zero no matter how fast the
+     * animal moves. Keeping the current heading (with a small turn) gives a trip
+     * a direction, which is what "it is going somewhere" looks like on screen.
+     * @param {object} world - the world.
+     * @param {object} entity - the animal.
+     * @param {number} reach - how far ahead to aim.
+     * @returns {{x: number, y: number}} target.
+     */
+    function wanderTarget(world, entity, reach) {
+      let best = null
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const angle = entity.heading + randomBetween(world, -1.1, 1.1)
+        const x = clamp(entity.x + Math.cos(angle) * reach, 1, world.width - 2)
+        const y = clamp(entity.y + Math.sin(angle) * reach, 1, world.height - 2)
+        const index = cellIndex(world, x, y)
+        if (index >= 0 && world.terrain[index] !== TERRAIN.STONE) return { x, y }
+        if (best === null) best = { x, y }
+      }
+      return best ?? { x: entity.x + Math.cos(entity.heading) * reach, y: entity.y + Math.sin(entity.heading) * reach }
+    }
+
+    /**
+     * Score every action this animal could take right now.
      * @param {object} world - the world.
      * @param {object} entity - the animal.
      * @param {object} species - species row.
      * @param {object} grids - spatial grids for prey/hunters.
+     * @returns {{options: object[], best: object|null}} scored options, best first.
      */
-    function decide(world, entity, species, grids) {
+    function scoreOptions(world, entity, species, grids) {
+      const drives = entity.drives ?? updateDrives(world, entity, species, TICK)
+      const weights = driveWeightsOf(species)
       const genes = entity.genes
-      const balance = species.balance
-      const needs = needsOf(entity)
-      const traits = traitsOf(species)
-      const weights = NEED_WEIGHT[species.role] ?? NEED_WEIGHT.grazer
+      const belief = beliefOf(entity)
+      const now = world.time
+      const hungerWeight = weights.hunger ?? 1
       const options = []
-      const offer = (kind, score, x, y) => {
-        if (score > 0) options.push({ kind, score, x, y })
+
+      /**
+       * Record one candidate. The travel charge is subtracted here so every
+       * option pays the same rate for the same distance.
+       * @param {string} kind - intent id.
+       * @param {number} gain - weighted drive satisfaction.
+       * @param {number} x - target column.
+       * @param {number} y - target row.
+       * @param {string} why - which drive chose this (for the inspector).
+       * @returns {void}
+       */
+      const offer = (kind, gain, x, y, why) => {
+        const distance = Math.hypot(x - entity.x, y - entity.y)
+        const plan = STATE_PLAN[kind] ?? STATE_PLAN.rest
+        const bout = plan.duration[0]
+        // Energy actually spent getting there, in hunger units, plus the share
+        // of the bout the walk eats up.
+        const cost = tripCostKj(entity, species, distance, bout * 0.5)
+          * energyToDriveUnits(species) * hungerWeight
+        const score = gain * tripEfficiency(distance, entity.genes.speed, bout) - cost
+        if (score <= 0.005) return
+        options.push({ kind, score, x, y, why, distance })
       }
 
-      // --- safety: a spotted predator always wins -------------------------
-      if (species.role === 'grazer') {
-        const predators = PREDATORS_OF[entity.species]
-        const threat = queryNearest(grids.hunter, entity.x, entity.y, genes.vision,
-          candidate => candidate.fate === '' && predators.has(candidate.species))
-        if (threat !== null) {
-          entity.alarm = ALARM_SECONDS
-          entity.threatX = threat.x
-          entity.threatY = threat.y
-          spreadAlarm(entity, species, grids.prey, threat, world)
+      // --- fear: nothing is worth standing next to a predator ----------------
+      if (drives.fear > 0.22) {
+        const threat = belief.threat
+        const threatX = threat === null ? entity.threatX : threat.x
+        const threatY = threat === null ? entity.threatY : threat.y
+        let x = entity.x
+        let y = entity.y
+        if (threatX !== undefined && threatY !== undefined) {
+          const dx = entity.x - threatX
+          const dy = entity.y - threatY
+          const length = Math.hypot(dx, dy) || 1
+          const reach = genes.vision * 1.6
+          x = clamp(entity.x + (dx / length) * reach, 1, world.width - 2)
+          y = clamp(entity.y + (dy / length) * reach, 1, world.height - 2)
         }
-        const threatX = threat !== null ? threat.x : entity.threatX
-        const threatY = threat !== null ? threat.y : entity.threatY
-        const distance = threatX === undefined || threatY === undefined
-          ? Infinity
-          : Math.hypot(entity.x - threatX, entity.y - threatY)
-        // Bold animals let a threat come closer before they bolt.
-        const nerve = genes.vision * (1.05 + traits.bold * 0.75)
-        if (threat !== null || distance < nerve) {
-          needs.safety = Math.max(needs.safety, threat !== null ? 1 : 0.75)
-        }
-      }
-      if (needs.safety > 0.45) {
-        const threatX = entity.threatX ?? entity.x - 1
-        const threatY = entity.threatY ?? entity.y
-        const dx = entity.x - threatX
-        const dy = entity.y - threatY
-        const length = Math.hypot(dx, dy) || 1
-        offer('flee', weights.safety * needs.safety + 6,
-          clamp(entity.x + (dx / length) * genes.vision * 1.5, 1, world.width - 2),
-          clamp(entity.y + (dy / length) * genes.vision * 1.5, 1, world.height - 2))
+        // No travel charge: running away is not an investment, and a predator
+        // sitting on the best food in the county must still win every comparison.
+        options.push({ kind: 'flee', score: weights.fear * drives.fear * 1.2 + 0.3, x, y, why: 'fear', distance: 0 })
       }
 
-      // --- food ------------------------------------------------------------
+      // --- thirst -----------------------------------------------------------
+      if (species.habitat !== 'water' && drives.thirst > 0.12 && belief.water !== null) {
+        offer('drink', weights.thirst * drives.thirst * 1.1, belief.water.x, belief.water.y, 'thirst')
+      }
+
+      // --- food -------------------------------------------------------------
       if (species.role === 'grazer') {
-        const anchor = species.herd === undefined ? null : (entity.herdAnchor ?? null)
-        const patch = findFlora(world, entity, species, anchor)
-        if (patch !== null) {
-          const pull = anchor === null ? 0 : 0.12
-          const x = patch.x + (anchor === null ? 0 : (anchor.x - patch.x) * pull)
-          const y = patch.y + (anchor === null ? 0 : (anchor.y - patch.y) * pull)
-          offer('forage', weights.hunger * (needs.hunger + 0.3), x, y)
-        } else if (species.browse === true) {
-          const plant = findFoliage(world, entity, genes.vision)
-          if (plant !== null) offer('forage', weights.hunger * (needs.hunger + 0.06), plant.x, plant.y)
+        const food = belief.food
+        if (food !== null && food !== undefined) {
+          const confidence = beliefConfidence(food, now, BELIEF_LIFETIME.food)
+          // Opportunity quality: how much food is there, how sure are we, and how
+          // long would a bite last. A grazed-out cell is a bad place to walk to.
+          const quality = clamp((food.value ?? 0) * (0.55 + 0.45 * confidence) * 1.15, 0.12, 1.25)
+          offer('forage', weights.hunger * drives.hunger * quality, food.x, food.y, 'hunger')
+        } else if (drives.hunger > 0.25) {
+          // Nothing edible is in sight and the reserve is draining: go look.
+          const spot = wanderTarget(world, entity, genes.vision * (1.1 + drives.hunger))
+          offer('explore', weights.hunger * drives.hunger * 0.6, spot.x, spot.y, 'search')
         }
       } else if (species.role === 'hunter') {
-        // Predators work on scent as well as sight. With eyesight alone a fox
-        // has a ~20% chance of a rabbit being in range on this map, so the whole
-        // predator tier used to wander (explore 60%+) and starve at hunger 0.8.
-        const reach = genes.vision * (species.huntReach ?? 2.6)
-        const prey = nearestPrey(entity, species, grids.prey, reach)
-        if (prey !== null) offer('hunt', weights.hunger * (needs.hunger + 0.25) * 1.7, prey.x, prey.y)
-        const corpse = nearestCorpse(world, entity.x, entity.y, genes.vision * 1.7)
-        if (corpse !== null) offer('scavenge', weights.hunger * (needs.hunger - 0.1), corpse.x, corpse.y)
-      } else {
-        // Carrion is worth smelling from far off; a crow also patrols between
-        // corpses instead of picking a random wander direction.
-        const corpse = nearestCorpse(world, entity.x, entity.y, genes.vision * 1.9)
-        if (corpse !== null) offer('scavenge', weights.hunger * (needs.hunger + 0.2), corpse.x, corpse.y)
-      }
-
-      // --- water -----------------------------------------------------------
-      if (needs.thirst > 0.2 && species.habitat !== 'water') {
-        const water = nearestWater(world, entity.x, entity.y, genes.vision)
-        if (water !== null) offer('drink', weights.thirst * (needs.thirst + 0.1), water.x, water.y)
-      }
-
-      // --- rest ------------------------------------------------------------
-      // Diurnal animals rest harder at night; night animals rest by day.
-      const activity = activityFactor(world, species)
-      const restBias = activity < 0.6 ? 1.35 : 0.9
-      if (needs.hunger < 0.62) {
-        offer('rest', weights.energy * (needs.energy + 0.05) * restBias, entity.x, entity.y)
-      }
-
-      // --- company ---------------------------------------------------------
-      if (species.herd !== undefined && needs.hunger < 0.65) {
-        let anchorPoint = entity.herdAnchor ?? null
-        if (entity.herdTimer <= 0 || anchorPoint === null) {
-          anchorPoint = herdCentroid(entity, species, species.role === 'hunter' ? grids.hunter : grids.prey)
-          entity.herdAnchor = anchorPoint
-          entity.herdTimer = 0.8
+        const prey = belief.food
+        if (prey !== null && prey !== undefined) {
+          const quality = clamp(0.7 + (prey.value ?? 0.5) * 0.5, 0.4, 1.2)
+          offer('hunt', weights.hunger * clamp(drives.hunger + 0.18, 0, 1) * quality, prey.x, prey.y, 'hunger')
         }
-        if (anchorPoint !== null) {
-          // Stand on a ring around the herd, not on the herd. Without this every
-          // member of a herd walks to the exact same centroid and the meadow
-          // fills with a pile of overlapping sprites. The golden angle gives each
-          // animal its own stable slot in the ring.
-          const separation = species.herd.separation ?? 3
-          // Big animals need a bigger ring: a deer is six cells long, so a
-          // six-cell ring still stacks them.
-          const ring = separation + (species.genes.size?.[1] ?? 1) * 2.6
-          const angle = (entity.id * 2.399963229728653) % (Math.PI * 2)
-          const ringX = anchorPoint.x + Math.cos(angle) * ring
-          const ringY = anchorPoint.y + Math.sin(angle) * ring * 0.75
-          const crowd = entity.herdAnchor !== null
-          offer('socialize', weights.social * (needs.social + (crowd ? 0.1 : 0.25)),
-            clamp(ringX, 1, world.width - 2), clamp(ringY, 1, world.height - 2))
+        const carrion = belief.carrion
+        if (carrion !== null && carrion !== undefined) {
+          offer('scavenge', weights.hunger * drives.hunger * 0.85, carrion.x, carrion.y, 'hunger')
+        } else if (drives.hunger > 0.45 && (prey === null || prey === undefined)) {
+          const spot = wanderTarget(world, entity, genes.vision * 1.3)
+          offer('explore', weights.hunger * drives.hunger * 0.55, spot.x, spot.y, 'search')
+        }
+      } else {
+        const carrion = belief.carrion
+        if (carrion !== null && carrion !== undefined) {
+          offer('scavenge', weights.hunger * clamp(drives.hunger + 0.1, 0, 1) * (0.6 + carrion.value * 0.5),
+            carrion.x, carrion.y, 'hunger')
+        } else if (drives.hunger > 0.3) {
+          const spot = wanderTarget(world, entity, genes.vision * 1.4)
+          offer('explore', weights.hunger * drives.hunger * 0.5, spot.x, spot.y, 'search')
         }
       }
 
-      // --- wander ----------------------------------------------------------
-      if (traits.curious > 0 && needs.hunger < 0.55 && needs.safety < 0.2) {
-        const angle = nextRandom(world) * Math.PI * 2
-        const reach = genes.vision * (0.5 + traits.curious * 0.6)
-        offer('explore', traits.curious * 0.55,
-          clamp(entity.x + Math.cos(angle) * reach, 1, world.width - 2),
-          clamp(entity.y + Math.sin(angle) * reach, 1, world.height - 2))
+      // --- rest: only worth it when tired, fed enough and not scared ---------
+      const restGain = weights.fatigue * drives.fatigue
+        * clamp(0.3 + 0.7 * (1 - drives.fear), 0, 1)
+        * clamp(1 - (drives.hunger - 0.5) / 0.45, 0, 1)
+        * (1 - drives.cold * 0.5)
+      if (restGain > 0.01) options.push({ kind: 'rest', score: restGain, x: entity.x, y: entity.y, why: 'fatigue', distance: 0 })
+
+      // --- company ----------------------------------------------------------
+      const herd = species.herd
+      if (herd !== undefined && entity.herdAnchor !== null && entity.herdAnchor !== undefined) {
+        const separation = herd.separation ?? 3
+        const ring = separation + (species.genes.size?.[1] ?? 1) * 2.6
+        // Each animal owns a slot on the ring instead of all of them aiming at
+        // the centroid, which is what used to pile a herd onto one cell.
+        const angle = (entity.id * 2.399963229728653) % (Math.PI * 2)
+        const x = clamp(entity.herdAnchor.x + Math.cos(angle) * ring, 1, world.width - 2)
+        const y = clamp(entity.herdAnchor.y + Math.sin(angle) * ring * 0.75, 1, world.height - 2)
+        const pull = weights.social * (drives.social * 0.9 + drives.libido * 0.7)
+        if (pull > 0.01) offer('socialize', pull, x, y, drives.libido > drives.social ? 'libido' : 'social')
       }
 
-      // Distance is a cost, not a blocker: a far meal still beats starving.
-      let best = null
-      for (const option of options) {
-        const distance = Math.hypot(option.x - entity.x, option.y - entity.y)
-        const scored = option.score - Math.min(0.45, distance / Math.max(4, genes.vision * 3))
-        if (best === null || scored > best.score) best = { ...option, score: scored }
+      // --- curiosity --------------------------------------------------------
+      if (drives.curiosity > 0.06) {
+        const reach = genes.vision * (0.7 + drives.curiosity * 1.2)
+        const spot = wanderTarget(world, entity, reach)
+        offer('explore', weights.curiosity * drives.curiosity, spot.x, spot.y, 'curiosity')
       }
-      if (best === null) {
-        best = { kind: 'explore', score: 0, x: entity.x, y: entity.y }
+
+      options.sort((a, b) => b.score - a.score)
+      return { options, best: options[0] ?? null }
+    }
+
+    /**
+     * Whether a drive has crossed the line where it may cut a bout short.
+     *
+     * This is the cheap per-tick guard: it reads numbers that are already on the
+     * entity and never scores options. Full re-scoring only happens when one of
+     * these fires (or when a bout ends on its own).
+     * @param {object} world - the world.
+     * @param {object} entity - the animal.
+     * @returns {boolean} true when decide() should be woken early.
+     */
+    function interruptPending(world, entity) {
+      const state = entity.state
+      // No bout yet: the animal is between bouts and the think clock decides
+      // when it starts one. Returning true here would overrun an intent that
+      // was set from outside (a restored save, or a test that pins an intent).
+      if (state === undefined) return false
+      const drives = entity.drives
+      if (drives === undefined) return false
+      const klass = STATE_CLASS[state.id] ?? 0
+      // A predator in sight ignores the commitment floor entirely.
+      if (drives.fear > 0.5 && state.id !== 'flee') return true
+      const elapsed = world.time - state.since
+      if (elapsed < (state.min ?? 0)) return false
+      if (drives.thirst > 0.85 && klass < STATE_CLASS.drink) return true
+      if (drives.hunger > 0.92 && klass < 1) return true
+      return false
+    }
+
+    /**
+     * Start a new bout of the chosen action, with its own clock.
+     * @param {object} world - the world.
+     * @param {object} entity - the animal.
+     * @param {object} species - species row.
+     * @param {object} option - the winning option.
+     * @param {object[]} [rivals] - the options it beat (for the inspector).
+     * @returns {void}
+     */
+    function startState(world, entity, species, option, rivals) {
+      const plan = STATE_PLAN[option.kind] ?? STATE_PLAN.rest
+      const duration = randomBetween(world, plan.duration[0], plan.duration[1])
+      entity.state = {
+        id: option.kind,
+        since: world.time,
+        until: world.time + duration,
+        min: plan.min,
+        phase: 'approach',
+        why: option.why ?? 'idle',
+        score: option.score,
+        x: option.x,
+        y: option.y,
       }
-      entity.intent = best.kind
-      entity.intentScore = best.score
-      entity.targetX = best.x
-      entity.targetY = best.y
-      entity.fleeing = best.kind === 'flee'
-      if (entity.fleeing) {
-        entity.flightTime = entity.flightTime ?? 0
-      } else {
-        entity.flightTime = 0
+      entity.thinkTimer = duration
+      entity.intent = option.kind
+      entity.intentScore = option.score
+      entity.targetX = option.x ?? entity.x
+      entity.targetY = option.y ?? entity.y
+      entity.fleeing = option.kind === 'flee'
+      if (entity.fleeing) entity.flightTime = entity.flightTime ?? 0
+      else entity.flightTime = 0
+      // The inspector's "why": what was chosen, what it beat, and what the
+      // animal wanted at that moment. Kept after the bout ends so the panel can
+      // explain the last decision instead of only the current one.
+      entity.decision = {
+        at: world.time,
+        picked: option.kind,
+        score: Math.round(option.score * 1000) / 1000,
+        why: option.why ?? 'idle',
+        target: { x: option.x ?? entity.x, y: option.y ?? entity.y },
+        alternatives: (rivals ?? []).slice(0, 3).map(rival => ({
+          kind: rival.kind,
+          score: Math.round(rival.score * 1000) / 1000,
+        })),
+        drives: entity.drives === undefined ? null : {
+          hunger: Math.round(entity.drives.hunger * 100) / 100,
+          thirst: Math.round(entity.drives.thirst * 100) / 100,
+          cold: Math.round(entity.drives.cold * 100) / 100,
+          fatigue: Math.round(entity.drives.fatigue * 100) / 100,
+          fear: Math.round(entity.drives.fear * 100) / 100,
+          social: Math.round(entity.drives.social * 100) / 100,
+          curiosity: Math.round(entity.drives.curiosity * 100) / 100,
+          libido: Math.round(entity.drives.libido * 100) / 100,
+        },
       }
-      // Standing still is a behaviour, not a failure: the animal is resting.
-      if (best.kind === 'rest') {
-        entity.targetX = entity.x
-        entity.targetY = entity.y
+      // A plan is the sentence the inspector shows: walk there, then do the
+      // thing. One step per phase is enough for now; the array shape is the
+      // contract (docs/20-CORE-LOOP.md 2.3) so later systems can add steps.
+      entity.plan = {
+        goal: option.kind,
+        index: 0,
+        steps: [
+          { x: option.x ?? entity.x, y: option.y ?? entity.y, act: option.kind, duration },
+        ],
       }
     }
 
+    /**
+     * Keep the current bout but re-aim it at a better version of the same thing.
+     * @param {object} world - the world.
+     * @param {object} entity - the animal.
+     * @param {object} species - species row.
+     * @param {object} option - the refreshed winner.
+     * @returns {void}
+     */
+    function continueState(world, entity, species, option) {
+      const plan = STATE_PLAN[option.kind] ?? STATE_PLAN.rest
+      const duration = randomBetween(world, plan.duration[0], plan.duration[1])
+      entity.state.since = world.time
+      entity.state.until = world.time + duration
+      entity.state.phase = 'approach'
+      entity.state.score = option.score
+      entity.state.why = option.why ?? 'idle'
+      entity.state.x = option.x
+      entity.state.y = option.y
+      entity.thinkTimer = duration
+      entity.targetX = option.x ?? entity.x
+      entity.targetY = option.y ?? entity.y
+      entity.intentScore = option.score
+    }
+
+    /**
+     * Choose the next action, or keep the current one on its clock.
+     *
+     * Called at a state boundary or on an interrupt (see interruptPending).
+     * @param {object} world - the world.
+     * @param {object} entity - the animal.
+     * @param {object} species - species row.
+     * @param {object} grids - spatial grids for prey/hunters.
+     * @returns {void}
+     */
+    function decide(world, entity, species, grids) {
+      const scored = scoreOptions(world, entity, species, grids)
+      const current = entity.state
+      const best = scored.best
+      if (best === null) {
+        // Nothing scores: an animal with no want sits down. This is the only
+        // zero-score state and it is honest — it means every drive is satisfied.
+        startState(world, entity, species, { kind: 'rest', score: 0.02, x: entity.x, y: entity.y, why: 'idle' })
+        return
+      }
+      if (current === undefined) {
+        startState(world, entity, species, best, scored.options.slice(1))
+        return
+      }
+      const sameKind = current.id === best.kind
+      const rivals = scored.options.filter(option => option.kind !== current.id)
+      if (sameKind) {
+        // Same answer: keep going, with a fresh clock and a better target.
+        continueState(world, entity, species, best)
+        return
+      }
+      const currentScore = bestByKind(scored.options, current.id)
+      const klassGap = (STATE_CLASS[best.kind] ?? 0) - (STATE_CLASS[current.id] ?? 0)
+      const expired = world.time >= current.until
+      const committed = world.time - current.since < (current.min ?? 0)
+      // Hysteresis: a rival has to be clearly better, not merely ahead. This is
+      // what makes the intent dwell worth watching instead of a twitch.
+      const clearlyBetter = best.score > currentScore * STATE_HYSTERESIS + STATE_MARGIN
+      const mayCut = klassGap > 0 || expired
+      if (mayCut && (!committed || klassGap > 0) && (clearlyBetter || expired)) {
+        startState(world, entity, species, best, rivals)
+        return
+      }
+      // Otherwise the animal stays with what it was doing and finishes the bout.
+      current.score = Math.max(current.score, best.score)
+      entity.thinkTimer = Math.max(0.5, current.until - world.time)
+    }
+
+    /**
+     * Score recorded for one kind among the scored options (0 when absent).
+     * @param {object[]} options - scored options.
+     * @param {string} kind - intent id.
+     * @returns {number} that kind's best score.
+     */
+    function bestByKind(options, kind) {
+      for (const option of options) if (option.kind === kind) return option.score
+      return 0
+    }

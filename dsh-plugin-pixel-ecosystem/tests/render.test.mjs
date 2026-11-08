@@ -16,7 +16,7 @@ import { boot } from './_harness.mjs'
 const { engine } = boot()
 const {
   TERRAIN, PALETTE, SPRITES,
-  createWorld, spawnEntity, paintWorld,
+  createWorld, spawnEntity, paintWorld, paintView,
 } = engine
 
 const EMPTY_STOCKS = Object.fromEntries(engine.SPECIES_IDS.map(id => [id, 0]))
@@ -162,8 +162,15 @@ test('an animal paints its sprite above the ground colour', () => {
   }
 })
 
+/** Brightness of a packed colour, for "darker than the ground" comparisons. */
+const brightnessOf = color => (color & 0xFF) + ((color >>> 8) & 0xFF) + ((color >>> 16) & 0xFF)
+
 test('an animal at the frame edge is clipped instead of writing outside the buffer', () => {
   const sprite = SPRITES.rabbit.idle
+  // The creature's cast shadow widens the footprint: it is a deliberate layer
+  // (docs/70-VISUAL.md), so the clip box is the sprite box plus its shadow
+  // margin. The next test pins the sprite box exactly with shadows off.
+  const SHADOW_MARGIN = 3
   for (const [x, y] of [[0.5, 0.5], [39.5, 29.5], [0.5, 29.5]]) {
     const world = mixedWorld({ grass: 0.5 })
     world.tick = 0
@@ -176,10 +183,10 @@ test('an animal at the frame edge is clipped instead of writing outside the buff
     assert.equal(drawn.length, world.width * world.height, 'clipping must not change the buffer size')
     const left = Math.round(x - sprite.width / 2)
     const top = Math.round(y - sprite.height + 1)
-    const minX = Math.max(0, left)
-    const maxX = Math.min(world.width - 1, left + sprite.width - 1)
-    const minY = Math.max(0, top)
-    const maxY = Math.min(world.height - 1, top + sprite.height - 1)
+    const minX = Math.max(0, left - SHADOW_MARGIN)
+    const maxX = Math.min(world.width - 1, left + sprite.width - 1 + SHADOW_MARGIN)
+    const minY = Math.max(0, top - SHADOW_MARGIN)
+    const maxY = Math.min(world.height - 1, top + sprite.height - 1 + SHADOW_MARGIN)
     const changed = changedCells(empty, drawn)
     assert.ok(changed.length > 0, `the animal at ${x},${y} painted nothing`)
     for (const index of changed) {
@@ -188,6 +195,29 @@ test('an animal at the frame edge is clipped instead of writing outside the buff
       assert.ok(cellX >= minX && cellX <= maxX && cellY >= minY && cellY <= maxY,
         `cell ${cellX},${cellY} is outside the clipped sprite box (${minX}..${maxX} x ${minY}..${maxY})`)
     }
+  }
+})
+
+test('with shadows off an animal touches only its own sprite box', () => {
+  const sprite = SPRITES.rabbit.idle
+  const world = mixedWorld({ grass: 0.5 })
+  world.tick = 0
+  const view = { x: 0, y: 0, width: world.width, height: world.height }
+  const buffer = new Uint32Array(world.width * world.height)
+  const empty = paintView(world, view, buffer, 1, null, { shadows: false }).slice()
+  const animal = spawnEntity(world, 'rabbit', 25.5, 15.5)
+  animal.heading = 0
+  animal.phase = 0
+  const drawn = paintView(world, view, buffer, 1, null, { shadows: false })
+  const left = Math.round(25.5 - sprite.width / 2)
+  const top = Math.round(15.5 - sprite.height + 1)
+  const changed = changedCells(empty, drawn)
+  assert.ok(changed.length > 0, 'the animal painted nothing')
+  for (const index of changed) {
+    const cellX = index % world.width
+    const cellY = (index / world.width) | 0
+    assert.ok(cellX >= left && cellX < left + sprite.width, `cell ${cellX},${cellY} is outside the sprite box horizontally`)
+    assert.ok(cellY >= top && cellY < top + sprite.height, `cell ${cellX},${cellY} is outside the sprite box vertically`)
   }
 })
 
@@ -216,4 +246,153 @@ test('paintWorld never mutates the world', () => {
     grass: [...world.grass].join(','),
   }
   assert.deepEqual(after, before, 'painting must be read-only, otherwise the panel would perturb the simulation')
+})
+test('winter ground reads paler than summer and grows snow', () => {
+  const sample = (yearPhase) => {
+    const world = mixedWorld({ grass: 0.6 })
+    world.tick = 0
+    world.time = 0
+    world.climate = { dayPhase: 0.5, yearPhase, temperature: 5, sunlight: 0.7 }
+    const frame = paintWorld(world)
+    let pale = 0
+    let total = 0
+    let land = 0
+    for (let y = 0; y < world.height; y++) {
+      for (let x = 20; x < world.width; x++) {
+        const color = frame[y * world.width + x]
+        const red = color & 0xFF
+        const green = (color >>> 8) & 0xFF
+        const blue = (color >>> 16) & 0xFF
+        total += red + green + blue
+        land += 3
+        if (red > 195 && green > 195 && blue > 195) pale += 1
+      }
+    }
+    return { mean: total / land, pale }
+  }
+  const summer = sample(0.3)
+  const winter = sample(0.95)
+  assert.ok(winter.mean > summer.mean + 25,
+    `winter ground must read paler: summer ${summer.mean.toFixed(1)} vs winter ${winter.mean.toFixed(1)}`)
+  assert.ok(winter.pale > 40, `winter must cover open ground with snow, only ${winter.pale} pale land cells`)
+  assert.equal(summer.pale, 0, `summer must not paint snow, got ${summer.pale} pale land cells`)
+})
+
+test('a plant shadow swings across the ground as the sun moves', () => {
+  const tree = { id: 900, x: 25.5, y: 16.5, variant: 'tree', size: 3, age: 40, foliage: 1, seedTimer: 50 }
+  const centroid = (dayPhase) => {
+    const world = mixedWorld({ grass: 0.5 })
+    world.tick = 0
+    world.time = 0
+    world.climate = { dayPhase, yearPhase: 0.3, temperature: 12, sunlight: 0.8 }
+    const before = paintWorld(world).slice()
+    world.trees.push(tree)
+    const after = paintWorld(world)
+    // Only the rows under the base of the tree: the canopy itself is up in the
+    // sprite rows, so anything darker down here is cast shadow.
+    let sum = 0
+    let count = 0
+    for (let y = 17; y <= 22; y++) {
+      for (let x = 12; x < world.width; x++) {
+        const index = indexOf(world, x, y)
+        if (brightnessOf(after[index]) >= brightnessOf(before[index])) continue
+        sum += x
+        count += 1
+      }
+    }
+    return { x: count === 0 ? 0 : sum / count, count }
+  }
+  const morning = centroid(0.26)
+  const afternoon = centroid(0.74)
+  assert.ok(morning.count > 4 && afternoon.count > 4,
+    `the tree must cast a shadow at both times, got ${morning.count} and ${afternoon.count} cells`)
+  assert.ok(morning.x > afternoon.x,
+    `the shadow must swing the other way by afternoon: morning ${morning.x.toFixed(2)} vs afternoon ${afternoon.x.toFixed(2)}`)
+})
+
+test('a smaller body casts a smaller shadow', () => {
+  const shadowCells = (stage) => {
+    const world = mixedWorld({ grass: 0.4 })
+    world.tick = 0
+    world.time = 0
+    world.climate = { dayPhase: 0.5, yearPhase: 0.3, temperature: 12, sunlight: 0.8 }
+    const view = { x: 0, y: 0, width: world.width, height: world.height }
+    const buffer = new Uint32Array(world.width * world.height)
+    const deer = spawnEntity(world, 'deer', 25.5, 15.5)
+    deer.heading = 0
+    deer.phase = 0
+    deer.stage = stage
+    const withShadow = paintView(world, view, buffer, 1, null).slice()
+    const withoutShadow = paintView(world, view, buffer, 1, null, { shadows: false }).slice()
+    return changedCells(withShadow, withoutShadow).length
+  }
+  const adult = shadowCells('adult')
+  const juvenile = shadowCells('juvenile')
+  assert.ok(adult > 0, 'an adult deer must cast a shadow')
+  assert.ok(juvenile > 0, 'a juvenile deer must cast a shadow too')
+  assert.ok(adult > juvenile, `the adult shadow must be bigger: adult ${adult} vs juvenile ${juvenile} cells`)
+})
+
+test('an animal outside the viewport does not paint inside it', () => {
+  const world = mixedWorld({ grass: 0.5 })
+  world.tick = 10
+  const view = { x: 0, y: 0, width: 20, height: 15 }
+  const first = paintView(world, view, new Uint32Array(20 * 15), 1, null).slice()
+  spawnEntity(world, 'rabbit', 35, 25)
+  const second = paintView(world, view, new Uint32Array(20 * 15), 1, null)
+  assert.equal(changedCells(first, second).length, 0, 'a creature outside the view must not paint inside it')
+})
+
+test('snow falls only in winter and the weather layer can be switched off', () => {
+  const landChanges = (yearPhase, options) => {
+    const world = mixedWorld({ grass: 0.45 })
+    world.time = 0
+    world.climate = { dayPhase: 0.5, yearPhase, temperature: -4, sunlight: 0.6 }
+    const view = { x: 0, y: 0, width: world.width, height: world.height }
+    const buffer = new Uint32Array(world.width * world.height)
+    world.tick = 40
+    const first = paintView(world, view, buffer, 1, null, options).slice()
+    world.tick = 42
+    const second = paintView(world, view, buffer, 1, null, options)
+    let changed = 0
+    for (const index of changedCells(first, second)) if (world.terrain[index] !== TERRAIN.WATER) changed += 1
+    return changed
+  }
+  assert.ok(landChanges(0.95, null) > 0, 'winter snow must move between ticks')
+  assert.equal(landChanges(0.95, { weather: false }), 0, 'with the weather layer off the land must not animate')
+  assert.equal(landChanges(0.3, null), 0, 'no snow outside winter')
+})
+
+test('a sleeping animal reads lower than a standing one', () => {
+  const silhouette = (stateId) => {
+    const world = mixedWorld({ grass: 0.3 })
+    world.tick = 0
+    world.time = 0
+    const view = { x: 0, y: 0, width: world.width, height: world.height }
+    const buffer = new Uint32Array(world.width * world.height)
+    const empty = paintView(world, view, buffer, 1, null, { shadows: false }).slice()
+    const rabbit = spawnEntity(world, 'rabbit', 25.5, 15.5)
+    rabbit.heading = 0
+    rabbit.phase = 0
+    rabbit.state = { id: stateId }
+    const frame = paintView(world, view, buffer, 1, null, { shadows: false })
+    let top = world.height
+    let bottom = -1
+    let cells = 0
+    for (const index of changedCells(empty, frame)) {
+      const row = (index / world.width) | 0
+      top = Math.min(top, row)
+      bottom = Math.max(bottom, row)
+      cells += 1
+    }
+    return { top, bottom, cells }
+  }
+  const standing = silhouette('idle')
+  const sleeping = silhouette('sleep')
+  assert.ok(standing.cells > 0 && sleeping.cells > 0, 'both poses must paint something')
+  assert.ok(sleeping.top > standing.top,
+    `the sleeping silhouette must start lower: standing top ${standing.top}, sleeping top ${sleeping.top}`)
+  assert.ok(sleeping.bottom === standing.bottom, 'both poses must keep their feet planted on the same row')
+  assert.ok(sleeping.cells < standing.cells,
+    `sleeping must cover fewer pixels: standing ${standing.cells}, sleeping ${sleeping.cells}`)
 })

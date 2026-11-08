@@ -52,3 +52,16 @@ node tools/behaviour-probe.mjs --seed 12345 --seconds 900
 
 Lead 负责：看 diff、跑测试、跑探针、按 `90-ROADMAP.md` 的门禁验收。
 门禁不过的改动不进分支。
+## 并行作业踩过的坑（用结构防住，不靠记性）
+
+1. **同一闭包内重复声明**。所有 part 共享一个闭包，两个 owner 各写一次 `const DRIVE_KEYS` 就会让整个 bundle SyntaxError、面板全挂。
+   防线：`tests/build.test.mjs` 的 "no identifier is declared by two parts" 会扫出跨 part 的重复顶层声明。
+   规矩：**共享词表（DRIVE_KEYS / CAUSE_KEYS / INTENT_IDS …）只许有一个出处**，别人只能引用。
+2. **数据字段缺失导致运行时崩溃**。`nearestPrey` 直接 `for (const id of species.prey)`，而 grazer/scavenger 没有这个字段，于是任何 `stepWorld` 都崩。
+   防线：读物种数据一律给默认值（`species.prey ?? []`），并在物种表里**显式**写空数组。
+   规矩：新增必填字段时，同一次提交里补齐**所有**物种行；否则就是定时炸弹。
+3. **中间态不可验证**。P1 把 `energy` 换成 kJ 但 `entity.body` 还没挂上时，别人没法做探针对照。
+   规矩：涉及契约的改动，**先把字段挂上去并保持可运行**，宁可数值粗糙，也不要让世界跑不起来。
+4. **构建竞态**。`node tools/build-client.mjs` 会拼所有人的 part；谁把 part 写坏，所有人的构建都红。
+   规矩：每次编辑后立刻 `node --check src/parts/<你的文件>`；`client.js` 只由 Lead 提交。
+5. **尺子要单独校准**。死因普查在旧引擎上是推断出来的，必须用一次性的"打补丁交叉验证"（把 killEntity 的真实 fate 记下来和推断逐 id 对齐）证明推断准确率，结果写进 `docs/97-PROBES.md`。

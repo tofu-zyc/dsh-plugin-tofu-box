@@ -90,10 +90,11 @@
         x,
         y,
         heading: nextRandom(world) * Math.PI * 2,
-        energy: species.balance.startEnergy,
         age: 0,
         generation: generation ?? 1,
-        cooldown: 0,
+        // Adults do not all breed on the same tick: a staggered cooldown is what
+        // keeps the first minute from being one population explosion.
+        cooldown: options?.cooldown ?? (generation === undefined || generation <= 1 ? randomBetween(world, 0, 20) : 0),
         thinkTimer: randomBetween(world, 0, 0.3),
         herdTimer: randomBetween(world, 0, 0.8),
         herdAnchor: null,
@@ -105,6 +106,22 @@
         children: 0,
         phase: nextRandom(world),
         genes: genes ?? randomGenes(world, speciesId),
+      }
+      // A birth is juvenile; anything else entering the world (starting stock,
+      // immigration, a player release) is a full-grown animal. Births are the
+      // only call that passes inherited genes.
+      const newborn = options?.juvenile === true || (generation !== undefined && generation > 1)
+      entity.age = options?.age ?? (newborn ? 0 : species.balance.maturity)
+      // The body is the ledger: creating the animal means creating its reserve,
+      // its structure and the derived views (energy accessor, hunger channel).
+      const body = installLedger(entity)
+      body.E = clamp(body.Emax * (options?.reserve ?? (newborn ? BIRTH_RESERVE_SHARE : SPAWN_RESERVE_SHARE)), 0, body.Emax)
+      // A newborn (or a released animal) is energy ENTERING the system. The book
+      // records it under its own name instead of pretending gestation is free.
+      if (world.budget !== undefined) {
+        // Structure AND the reserve it starts with: both are energy entering the
+        // world with a new body, and both have to be on the books by name.
+        world.budget.reproduction += body.V * BIO.MEAT_ENERGY + body.E
       }
       world.entities.push(entity)
       world.population[speciesId] = (world.population[speciesId] ?? 0) + 1

@@ -262,22 +262,35 @@
     }
 
     /**
-     * Seed the two producer fields from fertility/hydrology.
+     * Seed the two producer fields, in kg of dry matter per square metre.
+     *
+     * The starting sward is NOT uniform. A 26-cell value-noise field decides how
+     * rank the meadow is from place to place, and soil moisture and nutrient build
+     * on top of it. That matters for gameplay, not for looks: an animal's eyesight
+     * is 5-26 cells, so a patch has to be about that wide before it can be seen
+     * and walked to. A uniform field is a field with nowhere to go.
      * @param {object} world - the world.
      */
     function seedProducers(world) {
       const size = world.width * world.height
+      const patch = createNoise(world, 26)
+      const grain = createNoise(world, 7)
       for (let i = 0; i < size; i++) {
         const terrain = world.terrain[i]
         world.fertility[i] = baseFertility(world, i)
         if (terrain === TERRAIN.GRASS) {
           const x = i % world.width
           const y = (i / world.width) | 0
-          world.grass[i] = clamp(0.3 + world.fertility[i] * 0.55 + hash2(x + 31, y + 53, world.seed) * 0.18, 0, 0.98)
+          const rank = 0.35 + 0.55 * patch(x, y) + 0.12 * grain(x, y)
+          const wet = 0.5 + 0.5 * world.moisture[i]
+          const soil = 0.45 + 0.55 * world.fertility[i]
+          world.grass[i] = clamp(PRODUCERS.grass.bmax * rank * wet * soil, 0, PRODUCERS.grass.bmax)
         } else if (terrain === TERRAIN.WATER) {
           const x = i % world.width
           const y = (i / world.width) | 0
-          world.weed[i] = clamp(0.12 + world.waterFertility[i] * 0.5 + hash2(x + 61, y + 11, world.seed) * 0.2, 0, 0.95)
+          const rank = 0.3 + 0.5 * patch(x + 17, y + 29)
+          const soil = 0.4 + 0.6 * world.waterFertility[i]
+          world.weed[i] = clamp(PRODUCERS.weed.bmax * rank * soil, 0, PRODUCERS.weed.bmax)
         }
       }
     }

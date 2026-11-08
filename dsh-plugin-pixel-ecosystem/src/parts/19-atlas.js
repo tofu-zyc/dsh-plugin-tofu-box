@@ -71,20 +71,24 @@
     }
 
     /**
-     * Which atlas frame one animal shows.
+     * Which atlas frame *set* one animal shows.
+     *
+     * The frame set comes from the pose table (18-sprites): the engine already
+     * decided walk vs run from the pace multiplier (1 = walk, 1.25+ = chase or
+     * flight), and re-deriving it from distance here made every animal run all
+     * day because distance is scaled by the time-of-day factor.
      * @param {object} animal - the animal.
-     * @returns {'idle'|'run'} frame role.
+     * @param {object} [pose] - its pose, when the caller already resolved it.
+     * @returns {'idle'|'walk'|'run'} frame role.
      */
-    function atlasFrameRole(animal) {
-      const moved = animal.prevX === undefined ? 0 : Math.hypot(animal.x - animal.prevX, animal.y - animal.prevY)
-      if (moved < 0.06) return 'idle'
-      const slots = ATLAS_SLOTS[animal.species]
-      if (slots === undefined || slots.walk === undefined) return 'run'
+    function atlasFrameRole(animal, pose) {
+      const resolved = pose ?? poseFor(animal)
       if (animal.fleeing === true) return 'run'
-      // The engine already decided the gait from the pace multiplier (1 = walk,
-      // 1.25+ = chase or flight). Re-deriving it from distance here made every
-      // animal run all day, because distance is scaled by the time-of-day factor.
-      return animal.running === true ? 'run' : 'walk'
+      const moved = animal.prevX === undefined ? 0 : Math.hypot(animal.x - animal.prevX, animal.y - animal.prevY)
+      // A pose that says "standing" while the animal slides across the meadow
+      // would read as a bug, so motion wins over the pose's frame set.
+      if (resolved.role === 'idle' && moved >= 0.06) return 'walk'
+      return poseRole(animal, resolved)
     }
 
     /**
@@ -98,21 +102,75 @@
      * @param {object} view - { x, y, width, height, scale }.
      * @param {number} alpha - interpolation between the last two ticks.
      */
-    function drawAtlasAnimals(context, world, view, alpha) {
+    function drawAtlasAnimals(context, world, view, alpha, look) {
       if (atlas.ready !== true) return
-      const visible = []
+      const seasonal = look ?? seasonLook(world)
+      const shadow = shadowOffset(world)
+      const scratch = beginDepthScratch()
+      collectAnimals(world, view, alpha, scratch)
+      context.save()
+      context.imageSmoothingEnabled = false
+      for (const index of sortDepth(scratch)) {
+        drawAtlasAnimal(context, world, view, scratch.items[index], scratch.xs[index], scratch.ys[index], seasonal, shadow)
+      }
+      context.restore()
+    }
+
+    /**
+     * Reused depth-sort scratch.
+     *
+     * This pass runs at display refresh rate and the first version allocated one
+     * `{ animal, x, y }` object per visible creature per frame, which is exactly
+     * the kind of garbage that shows up as a stutter every few seconds once the
+     * map is 1024x640 and the herds are dense.
+     */
+    const depthScratch = { items: [], xs: [], ys: [], kinds: [], order: [], count: 0 }
+
+    /**
+     * Reset the depth scratch for one pass.
+     * @returns {object} the scratch record.
+     */
+    function beginDepthScratch() {
+      depthScratch.count = 0
+      return depthScratch
+    }
+
+    /**
+     * Collect the visible animals into the depth scratch.
+     * @param {object} world - the world.
+     * @param {object} view - viewport.
+     * @param {number} alpha - interpolation between the last two ticks.
+     * @param {object} scratch - depth scratch.
+     * @returns {void}
+     */
+    function collectAnimals(world, view, alpha, scratch) {
       for (const animal of world.entities) {
         const x = animal.prevX === undefined ? animal.x : animal.prevX + (animal.x - animal.prevX) * alpha
         const y = animal.prevY === undefined ? animal.y : animal.prevY + (animal.y - animal.prevY) * alpha
         if (x < view.x - 12 || x > view.x + view.width + 12) continue
         if (y < view.y - 14 || y > view.y + view.height + 8) continue
-        visible.push({ animal, x, y })
+        const slot = scratch.count
+        scratch.items[slot] = animal
+        scratch.xs[slot] = x
+        scratch.ys[slot] = y
+        scratch.kinds[slot] = 0
+        scratch.count = slot + 1
       }
-      visible.sort((a, b) => a.y - b.y)
-      context.save()
-      context.imageSmoothingEnabled = false
-      for (const { animal, x, y } of visible) drawAtlasAnimal(context, world, view, animal, x, y)
-      context.restore()
+    }
+
+    /**
+     * Sort the depth scratch by base row, far to near.
+     * @param {object} scratch - depth scratch.
+     * @returns {number[]} iteration order (a reused array).
+     */
+    function sortDepth(scratch) {
+      const order = scratch.order
+      const ys = scratch.ys
+      const count = scratch.count
+      for (let index = 0; index < count; index++) order[index] = index
+      order.length = count
+      order.sort((a, b) => ys[a] - ys[b])
+      return order
     }
 
     /**
@@ -125,68 +183,82 @@
      * @param {number} y - interpolated world row.
      * @returns {void}
      */
-    function drawAtlasAnimal(context, world, view, animal, x, y) {
+    function drawAtlasAnimal(context, world, view, animal, x, y, look, shadow) {
       const scale = view.scale
-        const baseScale = scale / 6
-        const time = world.time ?? 0
-        const slots = ATLAS_SLOTS[animal.species]
-        if (slots === undefined) return
-        const role = atlasFrameRole(animal)
-        const frames = slots[role] ?? slots.run ?? slots.idle
-        // The gait phase is accumulated from distance travelled, so the feet are
-        // planted on the ground instead of skating: a slow animal takes slow
-        // steps and a fleeing one takes fast ones, without a speed if-chain.
-        const gait = animal.gait ?? 0
-        const frame = role === 'run'
-          ? frames[Math.min(frames.length - 1, Math.floor(gait * frames.length))]
-          : frames[Math.floor(time * 1.15 + (animal.phase ?? 0) * 3) % frames.length]
-        const slot = frame
-        const column = slot % ATLAS.columns
-        const row = Math.floor(slot / ATLAS.columns)
-        const stageScale = STAGE_SCALE[animal.stage ?? 'adult'] ?? 1
-        const size = ATLAS_SIZE[animal.species] * baseScale * stageScale
-        // Gallop rhythm: a running animal rises and falls and stretches in step.
-        const running = role === 'run'
-        const gaitPhase = running ? gait * Math.PI * 2 : 0
-        const bob = running ? Math.sin(gaitPhase) * 0.07 * ATLAS.cellHeight * size : 0
-        const stretch = running ? 1 + Math.sin(gaitPhase + Math.PI / 2) * 0.04 : 1
-        const drawWidth = ATLAS.cellWidth * size * stretch
-        const drawHeight = ATLAS.cellHeight * size / stretch
-        const screenX = (x - view.x) * scale
-        const screenY = (y - view.y) * scale + bob
-        const left = screenX - drawWidth / 2
-        const top = screenY - ATLAS.baseline * size - (drawHeight - ATLAS.cellHeight * size)
-        const speciesRow = SPECIES[animal.species]
-        context.save()
-        if (speciesRow !== undefined && speciesRow.habitat === 'water') {
-          // A ground shadow under a fish makes it read as hovering in mid air.
-          // Water animals get a ripple ring instead, and sit a little higher.
-          context.strokeStyle = 'rgba(214, 246, 255, 0.38)'
-          context.lineWidth = Math.max(1, size * 0.9)
-          context.beginPath()
-          context.ellipse(screenX, screenY - size * 2, ATLAS.cellWidth * size * 0.24,
-            ATLAS.cellHeight * size * 0.085, 0, 0, Math.PI * 2)
-          context.stroke()
-        } else {
-          // A soft shadow on the ground anchors the creature; without it a sprite
-          // reads as a sticker pasted on the meadow.
-          context.fillStyle = 'rgba(10, 22, 14, 0.22)'
-          context.beginPath()
-          context.ellipse(screenX, screenY + 1, ATLAS.cellWidth * size * 0.3, ATLAS.cellHeight * size * 0.09, 0, 0, Math.PI * 2)
-          context.fill()
-        }
-        context.restore()
-        const facingLeft = Math.cos(animal.heading) < 0
-        context.save()
-        context.translate(left + drawWidth / 2, top)
-        if (facingLeft) context.scale(-1, 1)
-        const species = SPECIES[animal.species]
-        const ratio = species === undefined ? 1 : animal.energy / species.balance.maxEnergy
-        if (ratio < 0.22) context.globalAlpha = 0.62
-        context.drawImage(atlas.image,
-          column * ATLAS.cellWidth, row * ATLAS.cellHeight, ATLAS.cellWidth, ATLAS.cellHeight,
-          -drawWidth / 2, 0, drawWidth, drawHeight)
-        context.restore()
+      const baseScale = scale / 6
+      const time = world.time ?? 0
+      const slots = ATLAS_SLOTS[animal.species]
+      if (slots === undefined) return
+      const pose = poseFor(animal)
+      const role = atlasFrameRole(animal, pose)
+      const frames = slots[role] ?? slots.run ?? slots.idle
+      // The gait phase is accumulated from distance travelled, so the feet are
+      // planted on the ground instead of skating: a slow animal takes slow
+      // steps and a fleeing one takes fast ones, without a speed if-chain.
+      const gait = animal.gait ?? 0
+      const phase = animal.phase ?? 0
+      let frame
+      if (role === 'run') frame = frames[Math.min(frames.length - 1, Math.floor(gait * frames.length))]
+      else if (pose.pause) frame = frames[0]
+      else frame = frames[Math.floor(time * 1.15 * pose.speed + phase * 3) % frames.length]
+      const column = frame % ATLAS.columns
+      const row = Math.floor(frame / ATLAS.columns)
+      const stageScale = STAGE_SCALE[animal.stage ?? 'adult'] ?? 1
+      const size = ATLAS_SIZE[animal.species] * baseScale * stageScale
+      // Gallop rhythm: a running animal rises and falls and stretches in step.
+      const running = role === 'run'
+      const gaitPhase = running ? gait * Math.PI * 2 : 0
+      const bob = running ? Math.sin(gaitPhase) * 0.07 * ATLAS.cellHeight * size : 0
+      const stretch = running ? 1 + Math.sin(gaitPhase + Math.PI / 2) * 0.04 : 1
+      // Grazing nod: a slow dip of the whole body. It is the only way two idle
+      // frames can say "head down, eating" without new artwork.
+      const nod = pose.nod > 0 ? Math.sin(time * 3.4 + phase * 6.3) * pose.nod * 0.4 * scale : 0
+      const shake = pose.shake > 0
+        ? (((world.tick + (animal.id ?? 0)) & 1) === 0 ? 1 : -1) * pose.shake * Math.max(0.8, scale * 0.3)
+        : 0
+      const heightScale = pose.squash / stretch
+      const drawWidth = ATLAS.cellWidth * size * stretch
+      const drawHeight = ATLAS.cellHeight * size * heightScale
+      const screenX = (x - view.x) * scale + shake
+      const feetY = (y - view.y) * scale + bob + pose.sink * scale + nod
+      const bottomOffset = (ATLAS.cellHeight - ATLAS.baseline) * size * heightScale
+      const top = feetY - drawHeight + bottomOffset
+      const facingLeft = Math.cos(animal.heading) < 0
+      const species = SPECIES[animal.species]
+      context.save()
+      if (species !== undefined && species.habitat === 'water') {
+        // A ground shadow under a fish makes it read as hovering in mid air.
+        // Water animals get a ripple ring instead, and sit a little higher.
+        context.strokeStyle = 'rgba(214, 246, 255, ' + (0.38 * pose.shadow).toFixed(3) + ')'
+        context.lineWidth = Math.max(1, size * 0.9)
+        context.beginPath()
+        context.ellipse(screenX, feetY - size * 2, ATLAS.cellWidth * size * 0.24,
+          ATLAS.cellHeight * size * 0.085, 0, 0, Math.PI * 2)
+        context.stroke()
+      } else {
+        // A soft shadow on the ground anchors the creature; without it a sprite
+        // reads as a sticker pasted on the meadow. Offsetting it by the sun is
+        // what tells the player it is morning rather than noon.
+        context.fillStyle = 'rgba(10, 22, 14, ' + (0.2 * shadow.strength).toFixed(3) + ')'
+        context.beginPath()
+        context.ellipse(screenX + shadow.x * drawWidth, feetY + 1 + shadow.y * drawWidth * 0.5,
+          ATLAS.cellWidth * size * 0.3 * pose.shadow,
+          ATLAS.cellHeight * size * 0.09 * pose.shadow, 0, 0, Math.PI * 2)
+        context.fill()
+      }
+      context.restore()
+      context.save()
+      if (pose.alpha < 1) context.globalAlpha = Math.max(0.15, pose.alpha)
+      else if (species !== undefined && animal.energy / species.balance.maxEnergy < 0.22) context.globalAlpha = 0.62
+      // Pivot on the feet: a crouched or leaning animal has to stay planted, or
+      // it reads as floating above its own shadow.
+      context.translate(screenX, feetY)
+      if (pose.tilt !== 0) context.rotate((facingLeft ? -pose.tilt : pose.tilt) * Math.PI / 180)
+      if (facingLeft) context.scale(-1, 1)
+      context.drawImage(atlas.image,
+        column * ATLAS.cellWidth, row * ATLAS.cellHeight, ATLAS.cellWidth, ATLAS.cellHeight,
+        -drawWidth / 2, top - feetY, drawWidth, drawHeight)
+      context.restore()
     }
 
 
@@ -224,11 +296,14 @@
      * @param {object} world - the world.
      * @param {object} view - viewport.
      * @param {object} plant - the plant.
+     * @param {object} look - seasonal look (foliage palette and bareness).
+     * @param {object} shadow - shadow offset fractions from `shadowOffset`.
      * @returns {void}
      */
-    function drawPlantSprite(context, world, view, plant) {
-      const set = PLANT_SPRITES[plant.variant] ?? PLANT_SPRITES.tree
-      const sprite = Array.isArray(set) ? set[clamp(plant.size, 1, set.length) - 1] : set
+    function drawPlantSprite(context, world, view, plant, look, shadow) {
+      const set = plantSpritesFor(look)
+      const variant = set[plant.variant] ?? set.tree
+      const sprite = Array.isArray(variant) ? variant[clamp(plant.size, 1, variant.length) - 1] : variant
       if (sprite === undefined) return
       const canvas = spriteToCanvas(sprite)
       if (canvas === null) return
@@ -240,9 +315,12 @@
       const drawHeight = sprite.height * scale
       if (plant.variant !== 'lily' && sprite.width > 4) {
         context.save()
-        context.fillStyle = 'rgba(10, 22, 14, 0.20)'
+        context.fillStyle = 'rgba(10, 22, 14, ' + (0.2 * shadow.strength).toFixed(3) + ')'
         context.beginPath()
-        context.ellipse(left + drawWidth * 0.5, top + drawHeight - 1,
+        // The sun drags the shadow sideways and makes it long at dawn and dusk;
+        // at noon it sits under the canopy.
+        context.ellipse(left + drawWidth * 0.5 + shadow.x * drawWidth,
+          top + drawHeight - 1 + shadow.y * drawWidth,
           drawWidth * 0.4, Math.max(1.5, drawWidth * 0.13), 0, 0, Math.PI * 2)
         context.fill()
         context.restore()
@@ -267,26 +345,27 @@
      * @param {number} alpha - interpolation between the last two ticks.
      * @returns {void}
      */
-    function drawDepthLayers(context, world, view, alpha) {
-      const layers = []
+    function drawDepthLayers(context, world, view, alpha, look) {
+      const seasonal = look ?? seasonLook(world)
+      const shadow = shadowOffset(world)
+      const scratch = beginDepthScratch()
       for (const plant of world.trees) {
         if (plant.x < view.x - 14 || plant.x > view.x + view.width + 14) continue
         if (plant.y < view.y - 34 || plant.y > view.y + view.height + 10) continue
-        layers.push({ y: plant.y, plant })
+        const slot = scratch.count
+        scratch.items[slot] = plant
+        scratch.xs[slot] = plant.x
+        scratch.ys[slot] = plant.y
+        scratch.kinds[slot] = 1
+        scratch.count = slot + 1
       }
-      for (const animal of world.entities) {
-        const x = animal.prevX === undefined ? animal.x : animal.prevX + (animal.x - animal.prevX) * alpha
-        const y = animal.prevY === undefined ? animal.y : animal.prevY + (animal.y - animal.prevY) * alpha
-        if (x < view.x - 12 || x > view.x + view.width + 12) continue
-        if (y < view.y - 14 || y > view.y + view.height + 8) continue
-        layers.push({ y, animal, x })
-      }
-      layers.sort((a, b) => a.y - b.y)
+      collectAnimals(world, view, alpha, scratch)
       context.save()
       context.imageSmoothingEnabled = false
-      for (const layer of layers) {
-        if (layer.plant !== undefined) drawPlantSprite(context, world, view, layer.plant)
-        else drawAtlasAnimal(context, world, view, layer.animal, layer.x, layer.y)
+      for (const index of sortDepth(scratch)) {
+        const item = scratch.items[index]
+        if (scratch.kinds[index] === 1) drawPlantSprite(context, world, view, item, seasonal, shadow)
+        else drawAtlasAnimal(context, world, view, item, scratch.xs[index], scratch.ys[index], seasonal, shadow)
       }
       context.restore()
     }
