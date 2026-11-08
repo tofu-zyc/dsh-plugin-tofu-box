@@ -127,6 +127,11 @@ test('every tool, species, gene, help and speed key exists in both dictionaries'
   for (const tool of ['grass', 'weed', 'tree', 'bush']) required.add(`tool.${tool}`)
   for (const tool of seam.TERRAIN_TOOL_IDS) required.add(`tool.${tool}`)
   for (const id of engine.SPECIES_IDS) required.add(`species.${id}`)
+  // Every species must also be placeable: the life palette is what the player
+  // clicks, so a species missing from it exists only in the counters.
+  for (const id of engine.SPECIES_IDS) {
+    assert.ok(seam.LIFE_TOOLS.includes(id), `LIFE_TOOLS is missing the ${id} tool, so the player cannot place one`)
+  }
   for (const key of engine.GENE_KEYS) required.add(`inspect.gene.${key}`)
   // The inspector renders needs, intents and life stages from a template
   // literal, so those families are enumerated from the engine instead.

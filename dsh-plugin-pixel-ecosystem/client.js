@@ -53,7 +53,7 @@ window.__ModuleLoader__.load({
     const DAY_SECONDS = 120
     /** Global ceiling on animals; per-species caps do the real limiting. */
     const MAX_ENTITIES = 3600
-    const MAX_TREES = 1900
+    const MAX_TREES = 1150
     const MAX_CORPSES = 260
     /** Days per in-world day, exposed for the clock and the day/night wash. */
 
@@ -115,7 +115,7 @@ window.__ModuleLoader__.load({
     // because a 1:1 map would be 300 m across and crossing it would take minutes.
     const SPECIES = {
       rabbit: {
-        habitat: 'land', role: 'grazer', flora: 'grass', meat: 18, cap: 620, minimum: 40, color: '#c9a97b',
+        habitat: 'land', role: 'grazer', flora: 'grass', meat: 18, cap: 400, minimum: 40, color: '#c9a97b',
         territory: { radius: 3, max: 7 },
         herd: { radius: 18, separation: 5, alarmRadius: 15 },
         // Crepuscular: busiest at dawn and dusk, skips the midday heat.
@@ -129,12 +129,12 @@ window.__ModuleLoader__.load({
         balance: {
           startEnergy: 58, maxEnergy: 100, drain: 1.0, breedEnergy: 80, breedCost: 20,
           maturity: 36, litter: [4, 7], eatRate: 1.6, floraEnergy: 6,
-          fleeSpeed: 1.45, fleeDrain: 0.55,
+          fleeSpeed: 1.9, fleeDrain: 0.55,
         },
       },
       deer: {
         habitat: 'land', role: 'grazer', flora: 'grass', browse: true, meat: 45, cap: 260, minimum: 22, color: '#b98a5e',
-        territory: { radius: 7, max: 4 },
+        territory: { radius: 7, max: 6 },
         herd: { radius: 26, separation: 6, alarmRadius: 20 },
         activity: { dawn: 1, day: 0.6, dusk: 1, night: 0.5 },
         flight: { burst: 1.5, burstSeconds: 2.2, tired: 1.15 },
@@ -143,9 +143,9 @@ window.__ModuleLoader__.load({
           metabolism: [1.05, 1.5], lifespan: [1100, 1600], fertility: [110, 130],
         },
         balance: {
-          startEnergy: 110, maxEnergy: 170, drain: 0.92, breedEnergy: 108, breedCost: 46,
-          maturity: 180, litter: [1, 2], eatRate: 2.1, floraEnergy: 8,
-          browseRate: 1.6, browseEnergy: 7, fleeSpeed: 1.35, fleeDrain: 0.8,
+          startEnergy: 110, maxEnergy: 170, drain: 0.88, breedEnergy: 100, breedCost: 42,
+          maturity: 150, litter: [1, 3], eatRate: 2.2, floraEnergy: 9,
+          browseRate: 1.6, browseEnergy: 7, fleeSpeed: 1.85, fleeDrain: 0.8,
         },
       },
       fox: {
@@ -158,7 +158,7 @@ window.__ModuleLoader__.load({
         },
         balance: {
           startEnergy: 72, maxEnergy: 130, drain: 0.88, breedEnergy: 92, breedCost: 34,
-          maturity: 96, litter: [3, 6], catchRadius: 1.15, huntSpeed: 1.1, scavengeShare: 0.6,
+          maturity: 96, litter: [3, 6], catchRadius: 1.15, huntSpeed: 1.5, scavengeShare: 0.6, meatGain: 3.1,
         },
       },
       wolf: {
@@ -172,7 +172,7 @@ window.__ModuleLoader__.load({
         },
         balance: {
           startEnergy: 110, maxEnergy: 200, drain: 1.15, breedEnergy: 126, breedCost: 50,
-          maturity: 240, litter: [3, 5], catchRadius: 1.3, huntSpeed: 1.06, scavengeShare: 0.55,
+          maturity: 240, litter: [3, 5], catchRadius: 1.3, huntSpeed: 1.45, scavengeShare: 0.55, meatGain: 2.4,
         },
       },
       crow: {
@@ -184,12 +184,12 @@ window.__ModuleLoader__.load({
           metabolism: [0.85, 1.3], lifespan: [500, 700], fertility: [110, 130],
         },
         balance: {
-          startEnergy: 40, maxEnergy: 80, drain: 0.75, breedEnergy: 64, breedCost: 18,
-          maturity: 240, litter: [3, 5], scavengeRadius: 1.4, corpseShare: 0.9,
+          startEnergy: 40, maxEnergy: 80, drain: 0.5, breedEnergy: 56, breedCost: 14,
+          maturity: 200, litter: [3, 5], scavengeRadius: 1.7, corpseShare: 1.5,
         },
       },
       fish: {
-        habitat: 'water', role: 'grazer', flora: 'weed', meat: 20, cap: 520, minimum: 55, color: '#5b9fd4',
+        habitat: 'water', role: 'grazer', flora: 'weed', meat: 20, cap: 170, minimum: 40, color: '#5b9fd4',
         territory: { radius: 3, max: 8 },
         herd: { radius: 14, separation: 4, alarmRadius: 10 },
         activity: { dawn: 1, day: 0.9, dusk: 1, night: 0.5 },
@@ -199,13 +199,13 @@ window.__ModuleLoader__.load({
           metabolism: [0.7, 1.2], lifespan: [420, 560], fertility: [110, 130],
         },
         balance: {
-          startEnergy: 40, maxEnergy: 80, drain: 0.75, breedEnergy: 58, breedCost: 12,
-          maturity: 120, litter: [4, 8], eatRate: 1.3, floraEnergy: 8,
-          fleeSpeed: 1.4, fleeDrain: 0.95,
+          startEnergy: 40, maxEnergy: 80, drain: 0.68, breedEnergy: 50, breedCost: 10,
+          maturity: 90, litter: [6, 10], eatRate: 1.5, floraEnergy: 9,
+          fleeSpeed: 1.9, fleeDrain: 0.95,
         },
       },
       pike: {
-        habitat: 'water', role: 'hunter', prey: ['fish'], meat: 60, cap: 120, minimum: 9, color: '#4a6b4a',
+        habitat: 'water', role: 'hunter', prey: ['fish', 'frog'], meat: 60, cap: 70, minimum: 6, color: '#4a6b4a',
         // Ambush: it does not chase across the lake, it waits and then strikes.
         ambush: { approach: 0.45, strikeDistance: 7, strikeSpeed: 1.9, cooldown: 2.5 },
         activity: { dawn: 1, day: 0.8, dusk: 1, night: 0.7 },
@@ -214,8 +214,75 @@ window.__ModuleLoader__.load({
           metabolism: [0.95, 1.4], lifespan: [1000, 1300], fertility: [110, 130],
         },
         balance: {
-          startEnergy: 74, maxEnergy: 130, drain: 1.0, breedEnergy: 84, breedCost: 30,
-          maturity: 360, litter: [2, 4], catchRadius: 1.55, huntSpeed: 1.1, scavengeShare: 0.4,
+          startEnergy: 74, maxEnergy: 130, drain: 0.92, breedEnergy: 76, breedCost: 28,
+          maturity: 260, litter: [2, 4], catchRadius: 1.8, huntSpeed: 1.5, scavengeShare: 0.4, meatGain: 2.8,
+        },
+      },
+      // The next four are the land/water bridge. A heron and a bear stand in the
+      // shallows and take fish out of the lake; an otter goes the other way and
+      // swims after them. That is the cross-habitat link the food web was
+      // missing: before them the lake was a closed loop that nothing on land
+      // could reach.
+      heron: {
+        // Wades: can stand in shallow water, which is how it reaches the fish.
+        habitat: 'land', role: 'hunter', prey: ['fish', 'frog'], meat: 34, cap: 60, minimum: 6, color: '#9aa4b2',
+        wade: true,
+        territory: { radius: 14, max: 3 },
+        activity: { dawn: 1, day: 0.95, dusk: 1, night: 0.25 },
+        genes: {
+          speed: [3.2, 5.0], vision: [12, 22], size: [0.9, 1.3],
+          metabolism: [0.8, 1.2], lifespan: [420, 620], fertility: [110, 130],
+        },
+        balance: {
+          startEnergy: 62, maxEnergy: 110, drain: 0.72, breedEnergy: 74, breedCost: 24,
+          maturity: 150, litter: [2, 4], catchRadius: 2.4, huntSpeed: 1.25, scavengeShare: 0.5, meatGain: 2.5,
+        },
+      },
+      otter: {
+        habitat: 'water', role: 'hunter', prey: ['fish', 'frog'], meat: 30, cap: 70, minimum: 7, color: '#7a5238',
+        amphibious: true,
+        territory: { radius: 12, max: 3 },
+        activity: { dawn: 1, day: 0.85, dusk: 1, night: 0.6 },
+        genes: {
+          speed: [3.6, 5.4], vision: [10, 18], size: [0.9, 1.3],
+          metabolism: [0.95, 1.35], lifespan: [380, 560], fertility: [110, 130],
+        },
+        balance: {
+          startEnergy: 70, maxEnergy: 120, drain: 0.84, breedEnergy: 80, breedCost: 22,
+          maturity: 130, litter: [2, 4], catchRadius: 1.7, huntSpeed: 1.55, scavengeShare: 0.5, meatGain: 2.4,
+        },
+      },
+      bear: {
+        habitat: 'land', role: 'hunter', prey: ['deer', 'fish', 'rabbit'], meat: 120, cap: 40, minimum: 3, color: '#6b4a34',
+        wade: true,
+        territory: { radius: 26, max: 1 },
+        activity: { dawn: 0.9, day: 0.8, dusk: 1, night: 0.7 },
+        genes: {
+          speed: [3.0, 4.4], vision: [10, 18], size: [1.8, 2.6],
+          metabolism: [0.8, 1.15], lifespan: [900, 1300], fertility: [110, 130],
+        },
+        balance: {
+          startEnergy: 170, maxEnergy: 280, drain: 1.0, breedEnergy: 190, breedCost: 72,
+          maturity: 300, litter: [1, 2], catchRadius: 2.1, huntSpeed: 1.3, scavengeShare: 0.7, meatGain: 2.2,
+        },
+      },
+      frog: {
+        // Grazes the shallow weed, so it is the land/water seam in miniature:
+        // water plants feed it, and heron, otter and pike eat it.
+        habitat: 'land', role: 'grazer', flora: 'weed', meat: 7, cap: 160, minimum: 26, color: '#6fae4e',
+        wade: true,
+        territory: { radius: 2, max: 9 },
+        herd: { radius: 10, separation: 3, alarmRadius: 8 },
+        activity: { dawn: 1, day: 0.8, dusk: 1, night: 0.55 },
+        flight: { burst: 2.1, burstSeconds: 0.5, tired: 1.1 },
+        genes: {
+          speed: [1.4, 2.6], vision: [3, 7], size: [0.55, 0.9],
+          metabolism: [0.6, 1.05], lifespan: [150, 260], fertility: [70, 100],
+        },
+        balance: {
+          startEnergy: 18, maxEnergy: 36, drain: 0.42, breedEnergy: 22, breedCost: 5,
+          maturity: 45, litter: [8, 14], eatRate: 1.4, floraEnergy: 7,
+          fleeSpeed: 2.15, fleeDrain: 0.7,
         },
       },
     }
@@ -235,7 +302,10 @@ window.__ModuleLoader__.load({
     }
 
     /** Starting population of a fresh world: fuller meadow, fewer predators. */
-    const DEFAULT_STOCKS = { rabbit: 160, deer: 40, fox: 12, wolf: 5, crow: 20, fish: 120, pike: 12 }
+    const DEFAULT_STOCKS = {
+      rabbit: 160, deer: 40, fox: 12, wolf: 5, crow: 20, fish: 120, pike: 12,
+      heron: 10, otter: 10, bear: 4, frog: 90,
+    }
 
     // ---------------------------------------------------------------------
     // Small helpers
@@ -346,8 +416,19 @@ window.__ModuleLoader__.load({
       const terrain = terrainAt(world, x, y)
       if (terrain < 0) return false
       if (species.habitat === 'air') return true
-      if (species.habitat === 'water') return terrain === TERRAIN.WATER
-      return terrain !== TERRAIN.WATER && terrain !== TERRAIN.STONE
+      if (species.habitat === 'water') {
+        if (terrain === TERRAIN.WATER) return true
+        // An amphibious water animal may haul out on land to rest and to breed.
+        return species.amphibious === true && terrain !== TERRAIN.STONE
+      }
+      if (terrain === TERRAIN.STONE) return false
+      if (terrain !== TERRAIN.WATER) return true
+      // Waders stand in the shallows only: depth is distance from the bank, so
+      // this keeps a heron or a bear at the edge instead of walking the lake bed.
+      if (species.wade !== true) return false
+      const column = Math.max(0, Math.min(world.width - 1, Math.round(x)))
+      const row = Math.max(0, Math.min(world.height - 1, Math.round(y)))
+      return world.depth[row * world.width + column] < 0.34
     }
 
     /**
@@ -433,6 +514,30 @@ window.__ModuleLoader__.load({
         if (y > 0 && distance[index - width] > next) { distance[index - width] = next; queue[tail++] = index - width }
         if (y < height - 1 && distance[index + width] > next) { distance[index + width] = next; queue[tail++] = index + width }
       }
+      // Second pass the other way: how far a water cell is from the bank. This
+      // is the lake's depth, and it drives both the wading rule and the water
+      // shading, so it has to be refreshed with the rest of the hydrology.
+      const depthDistance = new Int32Array(size).fill(1e9)
+      head = 0
+      tail = 0
+      for (let i = 0; i < size; i++) {
+        if (world.terrain[i] !== TERRAIN.WATER) { depthDistance[i] = 0; queue[tail++] = i }
+      }
+      while (head < tail) {
+        const index = queue[head++]
+        const x = index % width
+        const y = (index / width) | 0
+        const next = depthDistance[index] + 1
+        if (x > 0 && depthDistance[index - 1] > next) { depthDistance[index - 1] = next; queue[tail++] = index - 1 }
+        if (x < width - 1 && depthDistance[index + 1] > next) { depthDistance[index + 1] = next; queue[tail++] = index + 1 }
+        if (y > 0 && depthDistance[index - width] > next) { depthDistance[index - width] = next; queue[tail++] = index - width }
+        if (y < height - 1 && depthDistance[index + width] > next) { depthDistance[index + width] = next; queue[tail++] = index + width }
+      }
+      const depth = world.depth !== undefined && world.depth.length === size ? world.depth : new Float32Array(size)
+      for (let i = 0; i < size; i++) {
+        depth[i] = world.terrain[i] === TERRAIN.WATER ? clamp(depthDistance[i] / 16, 0, 1) : 0
+      }
+      world.depth = depth
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
           const i = y * width + x
@@ -652,7 +757,7 @@ window.__ModuleLoader__.load({
         if (world.fertility[index] < 0.52) continue
         let crowded = false
         for (const plant of world.trees) {
-          if (Math.abs(plant.x - x) < 4 && Math.abs(plant.y - y) < 4) { crowded = true; break }
+          if (Math.abs(plant.x - x) < 6 && Math.abs(plant.y - y) < 5) { crowded = true; break }
         }
         if (crowded) continue
         const bush = nextRandom(world) < 0.34
@@ -664,8 +769,62 @@ window.__ModuleLoader__.load({
           size: bush ? 1 : 1 + ((nextRandom(world) * 3) | 0),
           age: randomBetween(world, 20, 160),
           foliage: randomBetween(world, 0.6, 1),
-          seedTimer: randomBetween(world, 30, 90),
+          seedTimer: randomBetween(world, 120, 260),
         })
+      }
+      seedAquaticPlants(world, Math.round(count * 0.22), Math.round(count * 0.14))
+    }
+
+    /**
+     * Plant the shallows: lily pads in the water, reeds on the bank.
+     *
+     * These are not decoration. A lily pad raises the nutrients under it, so the
+     * weed grows thicker there and the fish gather to graze; a reed bed does the
+     * same for the bank and gives the shoreline a readable edge. Both live in
+     * world.trees because they are the same kind of thing — a plant anchored to a
+     * cell that other systems can query.
+     * @param {object} world - the world.
+     * @param {number} lilies - how many lily pads to aim for.
+     * @param {number} reeds - how many reed clumps to aim for.
+     */
+    function seedAquaticPlants(world, lilies, reeds) {
+      let placed = 0
+      for (let attempt = 0; attempt < lilies * 40 && placed < lilies; attempt++) {
+        const x = 2 + ((nextRandom(world) * (world.width - 4)) | 0)
+        const y = 2 + ((nextRandom(world) * (world.height - 4)) | 0)
+        const index = cellIndex(world, x, y)
+        if (index < 0 || world.terrain[index] !== TERRAIN.WATER) continue
+        // Only the shallows: a pad in the middle of the lake reads as a bug.
+        if (world.depth[index] > 0.45) continue
+        let crowded = false
+        for (const plant of world.trees) {
+          if (Math.abs(plant.x - x) < 5 && Math.abs(plant.y - y) < 5) { crowded = true; break }
+        }
+        if (crowded) continue
+        world.trees.push({
+          id: world.nextId++, x, y, variant: 'lily',
+          size: 1, age: randomBetween(world, 10, 90), foliage: 1,
+          seedTimer: randomBetween(world, 60, 140),
+        })
+        placed += 1
+      }
+      let reedCount = 0
+      for (let attempt = 0; attempt < reeds * 40 && reedCount < reeds; attempt++) {
+        const x = 2 + ((nextRandom(world) * (world.width - 4)) | 0)
+        const y = 2 + ((nextRandom(world) * (world.height - 4)) | 0)
+        const index = cellIndex(world, x, y)
+        if (index < 0 || world.terrain[index] !== TERRAIN.SAND) continue
+        let crowded = false
+        for (const plant of world.trees) {
+          if (Math.abs(plant.x - x) < 4 && Math.abs(plant.y - y) < 4) { crowded = true; break }
+        }
+        if (crowded) continue
+        world.trees.push({
+          id: world.nextId++, x, y, variant: 'reed',
+          size: 1, age: randomBetween(world, 10, 90), foliage: 1,
+          seedTimer: randomBetween(world, 50, 120),
+        })
+        reedCount += 1
       }
     }
 
@@ -720,6 +879,7 @@ window.__ModuleLoader__.load({
         rngState: seed === 0 ? 1 : seed,
         terrain: new Uint8Array(size),
         moisture: new Float32Array(size),
+        depth: new Float32Array(size),
         waterFertility: new Float32Array(size),
         fertility: new Float32Array(size),
         grass: new Float32Array(size),
@@ -735,7 +895,7 @@ window.__ModuleLoader__.load({
       generateTerrain(world)
       computeHydrology(world)
       seedProducers(world)
-      seedTrees(world, options.trees ?? 700)
+      seedTrees(world, options.trees ?? 430)
       seedAnimals(world, { ...DEFAULT_STOCKS, ...(options.stocks ?? {}) })
       world.population = countPopulations(world)
       sampleStats(world)
@@ -1183,6 +1343,26 @@ window.__ModuleLoader__.load({
      * @param {number} dt - step in seconds.
      * @param {number} multiplier - speed multiplier.
      */
+    /**
+     * A standing spot near an animal, or null when it is truly boxed in.
+     * @param {object} world - the world.
+     * @param {object} species - species row.
+     * @param {number} x - origin column.
+     * @param {number} y - origin row.
+     * @param {number} radius - search radius in cells.
+     * @returns {{x: number, y: number}|null} reachable spot.
+     */
+    function nearbyStand(world, species, x, y, radius) {
+      for (let attempt = 0; attempt < 14; attempt += 1) {
+        const angle = nextRandom(world) * Math.PI * 2
+        const distance = 1.5 + nextRandom(world) * radius
+        const nx = clamp(x + Math.cos(angle) * distance, 0.5, world.width - 0.5)
+        const ny = clamp(y + Math.sin(angle) * distance, 0.5, world.height - 0.5)
+        if (canStand(world, species, nx, ny)) return { x: nx, y: ny }
+      }
+      return null
+    }
+
     function moveToward(world, entity, species, targetX, targetY, dt, multiplier) {
       let dx = targetX - entity.x
       let dy = targetY - entity.y
@@ -1204,20 +1384,55 @@ window.__ModuleLoader__.load({
         if (delta < -Math.PI) delta += Math.PI * 2
         entity.heading += clamp(delta, -6 * dt, 6 * dt)
       }
-      const pace = entity.genes.speed * multiplier * (0.88 + 0.12 * Math.sin(world.time * 2.6 + entity.phase * 6.28))
+      let wadeFactor = 1
+      if (species.wade === true || species.amphibious === true) {
+        const column = Math.max(0, Math.min(world.width - 1, Math.round(entity.x)))
+        const row = Math.max(0, Math.min(world.height - 1, Math.round(entity.y)))
+        const index = row * world.width + column
+        const wet = world.terrain[index] === TERRAIN.WATER
+        // Hauling out on the bank costs a water animal speed too: the water is
+        // its home, the land is a place it visits.
+        if (wet) wadeFactor = species.wade === true ? 0.62 : 1
+        else if (species.amphibious === true) wadeFactor = 0.72
+      }
+      const pace = entity.genes.speed * multiplier * wadeFactor
+        * (0.88 + 0.12 * Math.sin(world.time * 2.6 + entity.phase * 6.28))
       const stepX = Math.cos(entity.heading) * pace * dt
       const stepY = Math.sin(entity.heading) * pace * dt
-      if (canStand(world, species, entity.x + stepX, entity.y + stepY)) {
-        entity.x += stepX
-        entity.y += stepY
-      } else if (canStand(world, species, entity.x + stepX, entity.y)) {
-        entity.x += stepX
-        entity.heading = nextRandom(world) * Math.PI * 2
-      } else if (canStand(world, species, entity.x, entity.y + stepY)) {
-        entity.y += stepY
-        entity.heading = nextRandom(world) * Math.PI * 2
+      // Steer AROUND an obstacle instead of bouncing off it. The old code threw
+      // away the heading and picked a random one on every blocked step, so an
+      // animal whose target sat across a lake would aim at the water, get
+      // blocked, spin, aim at the water again: that is the "pacing along the
+      // shoreline forever" bug.
+      let moved = false
+      for (const offset of [0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6, 2.4, -2.4]) {
+        const heading = entity.heading + offset
+        const tryX = Math.cos(heading) * pace * dt
+        const tryY = Math.sin(heading) * pace * dt
+        if (!canStand(world, species, entity.x + tryX, entity.y + tryY)) continue
+        entity.x += tryX
+        entity.y += tryY
+        // Face the way it actually travels, or a sliding animal reads as walking
+        // sideways.
+        if (offset !== 0) entity.heading = heading
+        moved = true
+        break
+      }
+      if (moved) {
+        entity.stuck = 0
       } else {
-        entity.heading = nextRandom(world) * Math.PI * 2
+        // Boxed in on every side. Shake loose toward a reachable spot close by
+        // and drop the current target, so the next decision is not the same
+        // unreachable patch on the far bank.
+        entity.stuck = (entity.stuck ?? 0) + dt
+        if (entity.stuck > 0.3) {
+          entity.stuck = 0
+          const spot = nearbyStand(world, species, entity.x, entity.y, 6)
+          if (spot !== null) {
+            entity.targetX = spot.x
+            entity.targetY = spot.y
+          }
+        }
       }
       entity.x = clamp(entity.x, 0.05, world.width - 0.05)
       entity.y = clamp(entity.y, 0.05, world.height - 0.05)
@@ -1235,16 +1450,23 @@ window.__ModuleLoader__.load({
       const field = floraField(world, species)
       if (field === null) return null
       const wanted = species.flora === 'grass' ? TERRAIN.GRASS : TERRAIN.WATER
-      const radius = entity.genes.vision
+      // A starving animal searches further, not harder: nine samples inside its
+      // eyesight almost never hit a patch when the meadow is patchy, which is
+      // exactly why grazers used to stand in a meadow and starve.
+      const hunger = needsOf(entity).hunger
+      const radius = entity.genes.vision * (hunger > 0.4 ? 2.4 : 1)
       let best = null
       let bestScore = 0.05
-      for (let attempt = 0; attempt < 9; attempt++) {
+      for (let attempt = 0; attempt < 12; attempt++) {
         const angle = nextRandom(world) * Math.PI * 2
         const distance = 1 + nextRandom(world) * radius
         const x = (entity.x + Math.cos(angle) * distance) | 0
         const y = (entity.y + Math.sin(angle) * distance) | 0
         const index = cellIndex(world, x, y)
         if (index < 0 || world.terrain[index] !== wanted) continue
+        // A wader must not aim at a patch it cannot stand in: the frog used to
+        // target deep water, drift to the bank and starve in sight of food.
+        if (species.wade === true && wanted === TERRAIN.WATER && world.depth[index] > 0.34) continue
         const herdBias = anchor === undefined || anchor === null
           ? 0
           : Math.hypot(x - anchor.x, y - anchor.y) * 0.007
@@ -1287,6 +1509,7 @@ window.__ModuleLoader__.load({
       let best = null
       let bestDistance = radius * radius
       for (const plant of world.trees) {
+        if (plant.variant === 'lily' || plant.variant === 'reed') continue
         if ((plant.foliage ?? 0) <= 0.06) continue
         const dx = plant.x - entity.x
         const dy = plant.y - entity.y
@@ -1307,6 +1530,7 @@ window.__ModuleLoader__.load({
       let best = null
       let bestScore = 0.2
       for (const plant of world.trees) {
+        if (plant.variant === 'lily' || plant.variant === 'reed') continue
         const dx = plant.x - entity.x
         const dy = plant.y - entity.y
         const distance = Math.hypot(dx, dy)
@@ -1506,7 +1730,7 @@ window.__ModuleLoader__.load({
         const anchor = species.herd === undefined ? null : (entity.herdAnchor ?? null)
         const patch = findFlora(world, entity, species, anchor)
         if (patch !== null) {
-          const pull = anchor === null ? 0 : 0.22
+          const pull = anchor === null ? 0 : 0.12
           const x = patch.x + (anchor === null ? 0 : (anchor.x - patch.x) * pull)
           const y = patch.y + (anchor === null ? 0 : (anchor.y - patch.y) * pull)
           offer('forage', weights.hunger * (needs.hunger + 0.3), x, y)
@@ -1515,13 +1739,18 @@ window.__ModuleLoader__.load({
           if (plant !== null) offer('forage', weights.hunger * (needs.hunger + 0.06), plant.x, plant.y)
         }
       } else if (species.role === 'hunter') {
-        const prey = nearestPrey(entity, species, grids.prey, genes.vision)
-        // Prey in sight beats water or a nap: predators commit to a chase.
+        // Predators work on scent as well as sight. With eyesight alone a fox
+        // has a ~20% chance of a rabbit being in range on this map, so the whole
+        // predator tier used to wander (explore 60%+) and starve at hunger 0.8.
+        const reach = genes.vision * (species.huntReach ?? 2.6)
+        const prey = nearestPrey(entity, species, grids.prey, reach)
         if (prey !== null) offer('hunt', weights.hunger * (needs.hunger + 0.25) * 1.7, prey.x, prey.y)
-        const corpse = nearestCorpse(world, entity.x, entity.y, genes.vision)
+        const corpse = nearestCorpse(world, entity.x, entity.y, genes.vision * 1.7)
         if (corpse !== null) offer('scavenge', weights.hunger * (needs.hunger - 0.1), corpse.x, corpse.y)
       } else {
-        const corpse = nearestCorpse(world, entity.x, entity.y, genes.vision)
+        // Carrion is worth smelling from far off; a crow also patrols between
+        // corpses instead of picking a random wander direction.
+        const corpse = nearestCorpse(world, entity.x, entity.y, genes.vision * 1.9)
         if (corpse !== null) offer('scavenge', weights.hunger * (needs.hunger + 0.2), corpse.x, corpse.y)
       }
 
@@ -1548,9 +1777,20 @@ window.__ModuleLoader__.load({
           entity.herdTimer = 0.8
         }
         if (anchorPoint !== null) {
+          // Stand on a ring around the herd, not on the herd. Without this every
+          // member of a herd walks to the exact same centroid and the meadow
+          // fills with a pile of overlapping sprites. The golden angle gives each
+          // animal its own stable slot in the ring.
+          const separation = species.herd.separation ?? 3
+          // Big animals need a bigger ring: a deer is six cells long, so a
+          // six-cell ring still stacks them.
+          const ring = separation + (species.genes.size?.[1] ?? 1) * 2.6
+          const angle = (entity.id * 2.399963229728653) % (Math.PI * 2)
+          const ringX = anchorPoint.x + Math.cos(angle) * ring
+          const ringY = anchorPoint.y + Math.sin(angle) * ring * 0.75
           const crowd = entity.herdAnchor !== null
           offer('socialize', weights.social * (needs.social + (crowd ? 0.1 : 0.25)),
-            anchorPoint.x, anchorPoint.y)
+            clamp(ringX, 1, world.width - 2), clamp(ringY, 1, world.height - 2))
         }
       }
 
@@ -1638,7 +1878,10 @@ window.__ModuleLoader__.load({
             field[index] = available - bite
             entity.energy += bite * balance.floraEnergy
             needs.hunger = clamp(needs.hunger - bite * 0.55, 0, 1)
-            if (nextRandom(world) < 0.06) spawnEffect(world, entity.x, entity.y + 0.4, PALETTE.effect.eat, 0.3, 0.35)
+            if (nextRandom(world) < 0.06) {
+              const nibble = species.flora === 'weed' ? PALETTE.effect.nibble : PALETTE.effect.eat
+              spawnEffect(world, entity.x, entity.y + 0.4, nibble, 0.3, 0.35)
+            }
             return
           }
         }
@@ -1660,9 +1903,22 @@ window.__ModuleLoader__.load({
         if (victim !== null) {
           victim.fate = 'eaten'
           victim.energy = 0
-          entity.energy += SPECIES[victim.species].meat
+          // Nutrition extracted per kill. A rabbit is worth 18 energy as a
+          // corpse, but a fox gets a whole meal out of it: without this factor a
+          // fox had to kill every 20 seconds just to stay alive and the whole
+          // predator tier starved at hunger 0.8.
+          entity.energy += SPECIES[victim.species].meat * (balance.meatGain ?? 1)
           needs.hunger = clamp(needs.hunger - 0.85, 0, 1)
-          for (let spark = 0; spark < 5; spark++) spawnEffect(world, victim.x, victim.y, PALETTE.effect.hunt, 0.42, 1.4)
+          const inWater = terrainAt(world, victim.x, victim.y) === TERRAIN.WATER
+          if (inWater) {
+            // A heron stabbing a fish or a bear swiping at one is a splash, not a
+            // puff of red: the strike breaks the surface and the water answers.
+            spawnEffect(world, victim.x, victim.y, PALETTE.effect.splash, 0.26, 1.9)
+            spawnEffect(world, victim.x, victim.y, PALETTE.effect.splashDark, 0.3, 1.6)
+            spawnEffect(world, victim.x, victim.y, PALETTE.effect.bubble, 0.55, 0.35, true)
+          } else {
+            for (let spark = 0; spark < 5; spark++) spawnEffect(world, victim.x, victim.y, PALETTE.effect.hunt, 0.42, 1.4)
+          }
           entity.targetX = victim.x
           entity.targetY = victim.y
           return
@@ -1738,6 +1994,42 @@ window.__ModuleLoader__.load({
         pace = entity.intent === 'hunt' || entity.intent === 'scavenge' ? (balance.huntSpeed ?? 1) : 1
       }
       moveToward(world, entity, species, entity.targetX, entity.targetY, dt, pace * activity * stageSpeed)
+      // Animation phase from distance moved. Fish and birds also idle-animate so
+      // a hovering fish keeps swimming instead of freezing mid-pixel.
+      const travelled = Math.hypot(entity.x - entity.prevX, entity.y - entity.prevY)
+      // Running is a decision made here, from the pace multiplier, not re-derived
+      // from distance in the renderer: distance also carries the time-of-day
+      // activity factor, so everything looked like it was running.
+      entity.running = pace >= 1.25
+      // A gallop covers more ground per stride than a walk, but legs still cycle
+      // faster in real time; the cadence boost is what makes a chase read as fast.
+      const gaitRate = (ATLAS_GAIT[entity.species] ?? 0.25) * (entity.running === true ? 1.45 : 1)
+      const drift = species.habitat === 'water' || species.habitat === 'air' ? dt * 0.55 : 0
+      entity.gait = ((entity.gait ?? 0) + travelled * gaitRate + drift) % 1
+      // Personal space. Herds converge on a shared anchor, so without a small
+      // repulsion a warren draws as a stack of sprites on one cell. It is a nudge,
+      // not a collision system: 0.06 cells per tick is enough to unpile them.
+      // Only while resting: pushing a foraging animal off its patch starves it,
+      // and the pile only forms where animals stop.
+      const kinGrid = species.role === 'hunter' ? grids.hunter : grids.prey
+      const kin = entity.intent === 'rest'
+        ? queryNearest(kinGrid, entity.x, entity.y, 1.5,
+          candidate => candidate !== entity && candidate.species === entity.species && candidate.fate === '')
+        : null
+      if (kin !== null) {
+        const awayX = entity.x - kin.x
+        const awayY = entity.y - kin.y
+        const apart = Math.hypot(awayX, awayY) || 1
+        if (apart < 1.2) {
+          const push = (1.2 - apart) * 0.035
+          const nextX = entity.x + (awayX / apart) * push
+          const nextY = entity.y + (awayY / apart) * push
+          if (canStand(world, species, nextX, nextY)) {
+            entity.x = nextX
+            entity.y = nextY
+          }
+        }
+      }
       entity.energy -= (balance.drain * genes.metabolism + (entity.fleeing ? (balance.fleeDrain ?? 0) : 0)) * dt
       if (entity.energy <= 0 || entity.age > genes.lifespan) {
         killEntity(world, entity)
@@ -1852,6 +2144,46 @@ window.__ModuleLoader__.load({
     function growTrees(world, dt) {
       for (const plant of world.trees) {
         plant.age += dt
+        if (plant.variant === 'lily' || plant.variant === 'reed') {
+          // Feed the water (or the bank) under the plant so the producer field
+          // actually grows where the plant is. This is what makes a lily pad a
+          // fishing spot instead of a picture of one.
+          const isLily = plant.variant === 'lily'
+          const radius = isLily ? 3 : 2
+          const enrich = isLily ? 0.06 : 0.04
+          for (let dy = -radius; dy <= radius; dy++) {
+            for (let dx = -radius; dx <= radius; dx++) {
+              if (dx * dx + dy * dy > radius * radius) continue
+              const index = cellIndex(world, plant.x + dx, plant.y + dy)
+              if (index < 0) continue
+              if (isLily && world.terrain[index] === TERRAIN.WATER) {
+                world.waterFertility[index] = Math.min(1, world.waterFertility[index] + dt * enrich)
+              } else if (!isLily && world.terrain[index] === TERRAIN.GRASS) {
+                world.fertility[index] = Math.min(1, world.fertility[index] + dt * enrich * 0.6)
+              }
+            }
+          }
+          plant.seedTimer -= dt
+          if (plant.seedTimer > 0 || world.trees.length >= MAX_TREES) continue
+          plant.seedTimer = randomBetween(world, 70, 160)
+          const spread = isLily ? 7 : 5
+          const x = clamp(Math.round(plant.x + randomBetween(world, -spread, spread)), 1, world.width - 2)
+          const y = clamp(Math.round(plant.y + randomBetween(world, -spread, spread)), 1, world.height - 2)
+          const index = cellIndex(world, x, y)
+          if (index < 0) continue
+          if (isLily ? world.terrain[index] !== TERRAIN.WATER || world.depth[index] > 0.45
+            : world.terrain[index] !== TERRAIN.SAND) continue
+          let crowded = false
+          for (const other of world.trees) {
+            if (Math.abs(other.x - x) < 4 && Math.abs(other.y - y) < 4) { crowded = true; break }
+          }
+          if (crowded) continue
+          world.trees.push({
+            id: world.nextId++, x, y, variant: plant.variant,
+            size: 1, age: 0, foliage: 1, seedTimer: randomBetween(world, 70, 160),
+          })
+          continue
+        }
         const isBush = plant.variant === 'bush'
         // Leaves regrow after browsing; bushes are the fast-growing snack.
         plant.foliage = Math.min(1, (plant.foliage ?? 1) + dt * (isBush ? 0.075 : 0.045))
@@ -1868,7 +2200,9 @@ window.__ModuleLoader__.load({
         }
         plant.seedTimer -= dt
         if (plant.seedTimer > 0) continue
-        plant.seedTimer = isBush ? randomBetween(world, 18, 44) : randomBetween(world, 30, 70)
+        // A forest that doubles itself every minute fills the map in ten. Trees
+        // spread slowly; the meadow keeps room for the herds.
+        plant.seedTimer = isBush ? randomBetween(world, 70, 150) : randomBetween(world, 110, 240)
         if (world.trees.length >= MAX_TREES) continue
         const spread = isBush ? 4 : 6
         const x = clamp(Math.round(plant.x + randomBetween(world, -spread, spread)), 1, world.width - 2)
@@ -1888,9 +2222,30 @@ window.__ModuleLoader__.load({
           size: 1,
           age: 0,
           foliage: 1,
-          seedTimer: randomBetween(world, 30, 80),
+          seedTimer: randomBetween(world, 110, 240),
         })
       }
+    }
+
+    /**
+     * Life under the surface: bubbles off the weed and the odd shimmer.
+     *
+     * Without this the lake is a flat blue rectangle with sprites on it. It is a
+     * constant-cost decoration pass — a couple of random draws per tick, not a
+     * scan of the water.
+     * @param {object} world - the world.
+     * @param {number} dt - step in seconds.
+     */
+    function spawnAmbientEffects(world, dt) {
+      if (nextRandom(world) > dt * 2.2) return
+      const entities = world.entities
+      if (entities.length === 0) return
+      const swimmer = entities[(nextRandom(world) * entities.length) | 0]
+      if (swimmer === undefined) return
+      if (SPECIES[swimmer.species]?.habitat !== 'water') return
+      if (terrainAt(world, swimmer.x, swimmer.y) !== TERRAIN.WATER) return
+      spawnEffect(world, swimmer.x + randomBetween(world, -0.6, 0.6), swimmer.y,
+        PALETTE.effect.bubble, randomBetween(world, 0.5, 1.1), 0.25, true)
     }
 
     /**
@@ -1978,17 +2333,19 @@ window.__ModuleLoader__.load({
      * @param {number} color - packed colour.
      * @param {number} [life] - seconds.
      * @param {number} [spread] - initial velocity in cells/s.
+     * @param {boolean} [rise] - drift upward like a bubble instead of falling.
      */
-    function spawnEffect(world, x, y, color, life = 0.35, spread = 0.6) {
-      if (world.effects.length > 220) world.effects.shift()
+    function spawnEffect(world, x, y, color, life = 0.35, spread = 0.6, rise = false) {
+      if (world.effects.length > 260) world.effects.shift()
       world.effects.push({
         x,
         y,
         vx: randomBetween(world, -spread, spread),
-        vy: randomBetween(world, -spread, spread) - 0.2,
+        vy: rise ? randomBetween(world, -0.5, -1.4) : randomBetween(world, -spread, spread) - 0.2,
         life,
         maxLife: life,
         color,
+        rise,
       })
     }
 
@@ -2005,7 +2362,8 @@ window.__ModuleLoader__.load({
         if (effect.life <= 0) continue
         effect.x += effect.vx * dt
         effect.y += effect.vy * dt
-        effect.vy += dt * 1.6
+        // Bubbles accelerate upward and pop; sparks fall. One flag, not two systems.
+        effect.vy += dt * (effect.rise === true ? -0.5 : 1.6)
         world.effects[write++] = effect
       }
       world.effects.length = write
@@ -2026,6 +2384,7 @@ window.__ModuleLoader__.load({
       growField(world, step, world.weed, TERRAIN.WATER, world.waterFertility)
       growTrees(world, step)
       decayCorpses(world, step)
+      spawnAmbientEffects(world, step)
       stepEffects(world, step)
       handleImmigration(world, step)
       stepEntities(world, step)
@@ -2155,6 +2514,11 @@ window.__ModuleLoader__.load({
           world.grass[index] = 1
         } else if (terrain === TERRAIN.WATER) {
           world.weed[index] = 1
+        } else if (terrain === TERRAIN.SAND || terrain === TERRAIN.DIRT) {
+          // Damp ground right behind the bank grows weed too. It used to do
+          // nothing at all outside water, which reads as "the water-weed brush is
+          // broken": you click the shore next to the pond and the pond stays bare.
+          world.weed[index] = Math.max(world.weed[index], 0.75)
         }
       })
     }
@@ -2494,6 +2858,7 @@ window.__ModuleLoader__.load({
         immigration: data.immigration !== false,
         terrain: decodeBytes(data.terrain, Uint8Array),
         moisture: new Float32Array(size),
+        depth: new Float32Array(size),
         waterFertility: new Float32Array(size),
         fertility: dequantizeField(data.fertility, size),
         grass: dequantizeField(data.grass, size),
@@ -2514,7 +2879,7 @@ window.__ModuleLoader__.load({
           id: Number.isFinite(plant.id) ? plant.id : world.nextId++,
           x: plant.x,
           y: plant.y,
-          variant: plant.variant === 'bush' ? 'bush' : 'tree',
+          variant: ['bush', 'lily', 'reed'].includes(plant.variant) ? plant.variant : 'tree',
           size: clamp(plant.size | 0 || 1, 1, 3),
           age: Number.isFinite(plant.age) ? plant.age : 0,
           foliage: clamp(Number.isFinite(plant.foliage) ? plant.foliage : 1, 0, 1),
@@ -2582,15 +2947,26 @@ window.__ModuleLoader__.load({
     /** The world's palette. Artwork only: the panel chrome uses theme tokens. */
     const PALETTE = {
       water: [rgb(36, 92, 132), rgb(44, 106, 150), rgb(56, 122, 168), rgb(74, 142, 188)],
-      weed: [rgb(58, 122, 96), rgb(72, 146, 108)],
-      sand: [rgb(214, 194, 142), rgb(206, 184, 132), rgb(222, 202, 152)],
-      dirt: [rgb(124, 98, 68), rgb(116, 90, 62), rgb(134, 106, 74)],
-      stone: [rgb(126, 126, 134), rgb(112, 112, 122), rgb(140, 140, 148)],
+      // Depth ramp. Shallow water is bright and green-blue, the lake floor is
+      // nearly navy: that gradient is what makes the lake read as water with a
+      // bottom instead of a blue hole in the ground.
+      waterSurface: rgb(112, 194, 210),
+      waterShallow: rgb(72, 152, 182),
+      waterMid: rgb(34, 100, 146),
+      waterDeep: rgb(28, 76, 118),
+      foam: rgb(210, 242, 248),
+      caustic: rgb(150, 222, 232),
+      weed: [rgb(64, 138, 104), rgb(96, 178, 124)],
+      weedStalk: rgb(126, 210, 146),
+      flowers: [rgb(244, 208, 96), rgb(232, 138, 172), rgb(198, 214, 236), rgb(186, 156, 236)],
+      sand: [rgb(216, 198, 148), rgb(200, 180, 130), rgb(228, 212, 164)],
+      dirt: [rgb(126, 100, 70), rgb(110, 86, 58), rgb(140, 112, 78)],
+      stone: [rgb(126, 126, 134), rgb(108, 108, 118), rgb(146, 146, 154)],
       grassDry: [122, 118, 72],
-      grassLush: [46, 106, 54],
-      leaf: { dark: rgb(34, 74, 42), mid: rgb(48, 100, 50), light: rgb(72, 126, 62) },
-      trunk: rgb(92, 64, 40),
-      trunkDark: rgb(70, 48, 30),
+      grassLush: [44, 104, 52],
+      leaf: { dark: rgb(28, 68, 38), mid: rgb(46, 102, 50), light: rgb(82, 140, 68), outline: rgb(16, 38, 24) },
+      trunk: rgb(96, 66, 42),
+      trunkDark: rgb(64, 44, 28),
       rabbit: { body: rgb(158, 132, 104), belly: rgb(238, 228, 212), ear: rgb(196, 162, 148), eye: rgb(38, 28, 22) },
       deer: { body: rgb(136, 94, 58), belly: rgb(206, 182, 152), antler: rgb(178, 156, 116), eye: rgb(36, 26, 20) },
       fox: { body: rgb(208, 112, 58), belly: rgb(246, 232, 214), eye: rgb(42, 32, 24) },
@@ -2607,6 +2983,12 @@ window.__ModuleLoader__.load({
       death: rgb(96, 78, 70),
       birth: rgb(246, 164, 196),
       alarm: rgb(255, 226, 96),
+      // Water feedback: bubbles for anything that happens under the surface,
+      // splash for a strike that breaks it.
+      bubble: rgb(196, 238, 252),
+      splash: rgb(178, 226, 244),
+      splashDark: rgb(112, 178, 214),
+      nibble: rgb(188, 240, 176),
     }
 
     /**
@@ -2853,53 +3235,162 @@ window.__ModuleLoader__.load({
       flee: compileSprite(set.flee, SPRITE_COLORS[species]),
     }]))
 
-    /** Plants: three tree sizes and a shrub. */
+    /** Plants: three tree sizes, a shrub, and the two aquatic plants. */
     const PLANT_SPRITES = {
-      tree: [
-        compileSprite([
-          '..LL..',
-          '.LLLl.',
-          'LLLlLL',
-          '.LLLL.',
-          '..DD..',
-          '..TT..',
-          '..TT..',
-          '..TT..',
-        ], { L: PALETTE.leaf.mid, l: PALETTE.leaf.light, D: PALETTE.leaf.dark, T: PALETTE.trunk }),
-        compileSprite([
-          '...LL...',
-          '..LLLl..',
-          '.LLLLlL.',
-          'LLLLLlLL',
-          '.LLLLLL.',
-          '..LLLL..',
-          '...DD...',
-          '...TT...',
-          '...TT...',
-          '...TT...',
-        ], { L: PALETTE.leaf.mid, l: PALETTE.leaf.light, D: PALETTE.leaf.dark, T: PALETTE.trunk }),
-        compileSprite([
-          '....LL....',
-          '...LLLl...',
-          '..LLLLlL..',
-          '.LLLLLlLL.',
-          'LLLLLlLLLL',
-          '.LLLLLLLL.',
-          '..LLLLLL..',
-          '...LLLL...',
-          '...DDDD...',
-          '....TT....',
-          '....TT....',
-          '....TT....',
-          '....TT....',
-        ], { L: PALETTE.leaf.mid, l: PALETTE.leaf.light, D: PALETTE.leaf.dark, T: PALETTE.trunk }),
-      ],
-      bush: compileSprite([
-        '.LLL.',
-        'LlllL',
-        '.LLL.',
-        '..T..',
-      ], { L: PALETTE.leaf.mid, l: PALETTE.leaf.light, T: PALETTE.trunkDark }),
+      tree: [1, 2, 3].map(size => buildTreeSprite(size)),
+      bush: buildBushSprite(),
+      lily: [0, 1].map(variant => buildLilySprite(variant)),
+      reed: buildReedSprite(),
+    }
+
+    /**
+     * Build a sprite from a per-pixel painter.
+     * @param {number} width - sprite width in pixels.
+     * @param {number} height - sprite height in pixels.
+     * @param {(x: number, y: number) => number} paint - returns 0 for transparent.
+     * @returns {{width: number, height: number, pixels: Uint32Array}} sprite.
+     */
+    function buildSprite(width, height, paint) {
+      const pixels = new Uint32Array(width * height)
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const color = paint(x, y)
+          if (color !== 0) pixels[y * width + x] = color
+        }
+      }
+      return { width, height, pixels }
+    }
+
+    /**
+     * A tree, drawn rather than hand-lettered so all three sizes share a shape.
+     *
+     * The canopy is three overlapping lobes with a hard dark rim, a lit top-left
+     * and a shaded bottom. The rim is the whole point: a green blob on a green
+     * meadow is invisible, a green blob with a near-black edge and a brown trunk
+     * is a tree.
+     * @param {number} size - 1, 2 or 3.
+     * @returns {{width: number, height: number, pixels: Uint32Array}} sprite.
+     */
+    function buildTreeSprite(size) {
+      const radius = [4.3, 6.0, 7.6][size - 1]
+      const trunkHeight = [2, 2, 3][size - 1]
+      const trunkWidth = size >= 3 ? 3 : 2
+      const width = Math.ceil(radius * 2) + 3
+      const canopyHeight = Math.ceil(radius * 1.85)
+      const height = canopyHeight + trunkHeight + 1
+      const cx = width / 2
+      const cy = canopyHeight / 2
+      const lobes = [
+        [0, -radius * 0.1, radius * 0.82],
+        [-radius * 0.5, radius * 0.3, radius * 0.62],
+        [radius * 0.52, radius * 0.26, radius * 0.6],
+        [0, radius * 0.34, radius * 0.56],
+      ]
+      const leaf = PALETTE.leaf
+      return buildSprite(width, height, (x, y) => {
+        const px = x + 0.5
+        const py = y + 0.5
+        let margin = -Infinity
+        for (const [offsetX, offsetY, lobeRadius] of lobes) {
+          const dx = px - (cx + offsetX)
+          const dy = (py - (cy + offsetY)) / 0.92
+          margin = Math.max(margin, lobeRadius - Math.hypot(dx, dy))
+        }
+        if (margin > 0) {
+          // Light comes from the top left: -dx -dy is brightest up and left.
+          const lit = -(px - cx) / radius * 0.55 - (py - cy) / radius * 0.85
+          if (margin < 1.15) return leaf.outline
+          if (lit > 0.34) return leaf.light
+          if (lit < -0.1) return leaf.dark
+          return ((x * 5 + y * 3) & 15) < 5 ? leaf.light : leaf.mid
+        }
+        const trunkTop = canopyHeight - 2
+        if (y >= trunkTop && y < trunkTop + trunkHeight + 1) {
+          const offset = px - cx
+          if (Math.abs(offset) <= trunkWidth / 2) {
+            if (Math.abs(offset) > trunkWidth / 2 - 1) return PALETTE.trunkDark
+            return PALETTE.trunk
+          }
+        }
+        return 0
+      })
+    }
+
+    /**
+     * A shrub: the tree canopy without a trunk, so the meadow reads as layers.
+     * @returns {{width: number, height: number, pixels: Uint32Array}} sprite.
+     */
+    function buildBushSprite() {
+      const radius = 3.1
+      const width = Math.ceil(radius * 2) + 2
+      const height = Math.ceil(radius * 1.9) + 1
+      const cx = width / 2
+      const cy = height / 2
+      const leaf = PALETTE.leaf
+      return buildSprite(width, height, (x, y) => {
+        const px = x + 0.5
+        const py = y + 0.5
+        let margin = -Infinity
+        for (const [offsetX, offsetY, lobeRadius] of [[0, 0, radius * 0.78], [-radius * 0.55, radius * 0.2, radius * 0.55], [radius * 0.55, radius * 0.16, radius * 0.55]]) {
+          margin = Math.max(margin, lobeRadius - Math.hypot(px - (cx + offsetX), (py - (cy + offsetY)) / 0.9))
+        }
+        if (margin <= 0) return y === height - 1 && Math.abs(px - cx) < 1.2 ? PALETTE.trunkDark : 0
+        const lit = -(px - cx) / radius * 0.5 - (py - cy) / radius * 0.9
+        if (margin < 1.05) return leaf.outline
+        if (lit > 0.3) return leaf.light
+        if (lit < -0.15) return leaf.dark
+        return ((x * 3 + y * 5) & 15) < 5 ? leaf.light : leaf.mid
+      })
+    }
+
+    /**
+     * A lily pad: flat, notched, floating. The second variant carries a flower,
+     * which is the cheapest way to make a pond look alive from a distance.
+     * @param {number} variant - 0 plain, 1 flowering.
+     * @returns {{width: number, height: number, pixels: Uint32Array}} sprite.
+     */
+    function buildLilySprite(variant) {
+      const width = 10
+      const height = variant === 1 ? 7 : 5
+      const cy = height - 2
+      return buildSprite(width, height, (x, y) => {
+        const px = x + 0.5
+        const py = y + 0.5
+        const dx = (px - width / 2) / 4.4
+        const dy = (py - cy) / 2.1
+        if (dx * dx + dy * dy <= 1) {
+          if (x >= 5 && y <= cy - 1) return 0
+          if (py < cy - 0.6) return PALETTE.weedStalk
+          if (py > cy + 0.8) return PALETTE.leaf.dark
+          return PALETTE.weed[1]
+        }
+        if (variant === 1 && y <= 2 && Math.abs(px - width / 2) < 1.6) {
+          return y === 0 ? PALETTE.flowers[1] : PALETTE.flowers[3]
+        }
+        return 0
+      })
+    }
+
+    /**
+     * A reed clump: three stalks leaning out of the shallows.
+     * @returns {{width: number, height: number, pixels: Uint32Array}} sprite.
+     */
+    function buildReedSprite() {
+      const width = 9
+      const height = 11
+      return buildSprite(width, height, (x, y) => {
+        const stalk = (baseX, lean, top) => {
+          const t = 1 - y / top
+          const spanX = baseX + lean * (1 - t) * (1 - t)
+          return Math.abs(x + 0.5 - spanX) < 0.62
+        }
+        if (stalk(3, -1.6, 10) || stalk(5.5, 0.4, 9) || stalk(7.2, 1.8, 7)) {
+          // A reed is olive, not teal: the teal read as a weed stalk in the water.
+          return y < 2 ? PALETTE.trunkDark : (y < 5 ? PALETTE.leaf.light : PALETTE.leaf.mid)
+        }
+        if (y >= height - 2 && Math.abs(x + 0.5 - 5) < 2.4) return PALETTE.leaf.dark
+        return 0
+      })
     }
 
     /** Carcass: two frames, meat then bones. */
@@ -2920,29 +3411,53 @@ window.__ModuleLoader__.load({
     // Sprite atlas (generated pixel-art artwork, embedded as PNG)
     // ---------------------------------------------------------------------
 
-    /** PNG atlas: 4×4 cells of 52×46 px, bottom-aligned creatures. */
-    const SPRITE_ATLAS_PNG = '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'
-    /** Atlas geometry. */
-    const ATLAS = { cellWidth: 52, cellHeight: 46, columns: 4, baseline: 44 }
-    /** Which atlas slot each species uses for its idle and moving frames. */
+    /** PNG atlas: 8 columns of 64x59 cells, bottom-aligned creatures. */
+    const SPRITE_ATLAS_PNG = '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'
+                                                                                                                                            /** Atlas geometry: one cell per animation frame, feet on the baseline. */
+    const ATLAS = { cellWidth: 64, cellHeight: 59, columns: 8, baseline: 52 }
+    /** Frame slot list per species: two idle frames and a four-frame gait cycle. */
     const ATLAS_SLOTS = {
-      rabbit: { idle: 0, run: 1 },
-      deer: { idle: 2, run: 3 },
-      fox: { idle: 4, run: 5 },
-      wolf: { idle: 6, run: 7 },
-      crow: { idle: 8, run: 9 },
-      fish: { idle: 10, run: 11 },
-      pike: { idle: 12, run: 13 },
+      rabbit: { idle: [0, 1], walk: [2, 3, 4, 5], run: [6, 7, 8, 9] },
+      deer: { idle: [10, 11], walk: [12, 13, 14, 15], run: [16, 17, 18, 19] },
+      fox: { idle: [20, 21], walk: [22, 23, 24, 25], run: [26, 27, 28, 29] },
+      wolf: { idle: [30, 31], walk: [32, 33, 34, 35], run: [36, 37, 38, 39] },
+      bear: { idle: [40, 41], walk: [42, 43, 44, 45], run: [46, 47, 48, 49] },
+      otter: { idle: [50, 51], walk: [52, 53, 54, 55], run: [56, 57, 58, 59] },
+      frog: { idle: [60, 61], walk: [62, 63, 64, 65], run: [66, 67, 68, 69] },
+      crow: { idle: [70, 71], run: [72, 73, 74, 75] },
+      heron: { idle: [76, 77], walk: [78, 79, 80, 81], run: [82, 83, 84, 85] },
+      fish: { idle: [86, 87], run: [88, 89, 90, 91] },
+      pike: { idle: [92, 93], run: [94, 95, 96, 97] },
     }
-    /**
-     * Display size of each species relative to the atlas artwork, in atlas pixels
-     * per cell at 6× zoom. Bigger animals read as bigger on screen.
-     */
+    /** Display size of each species relative to the atlas cell at 6x zoom. */
     const ATLAS_SIZE = {
-      rabbit: 0.62, deer: 0.82, fox: 0.68, wolf: 0.82, crow: 0.72, fish: 0.46, pike: 0.6,
+      rabbit: 0.7777777777777778,
+      deer: 1.0232558139534884,
+      fox: 0.9230769230769231,
+      wolf: 1.1111111111111112,
+      bear: 1,
+      otter: 0.8095238095238095,
+      frog: 0.6,
+      crow: 0.72,
+      heron: 0.75,
+      fish: 0.62,
+      pike: 0.75,
+    }
+    /** Gait cycles per cell travelled: a hop is short, a wolf stride is long. */
+    const ATLAS_GAIT = {
+      rabbit: 0.34,
+      deer: 0.2,
+      fox: 0.28,
+      wolf: 0.2,
+      bear: 0.17,
+      otter: 0.26,
+      frog: 0.5,
+      crow: 0.3,
+      heron: 0.22,
+      fish: 0.42,
+      pike: 0.34,
     }
 
-    /** Runtime atlas state, filled by nsureAtlas. */
     const atlas = { started: false, ready: false, image: null }
 
     /**
@@ -2970,9 +3485,15 @@ window.__ModuleLoader__.load({
      * @returns {'idle'|'run'} frame role.
      */
     function atlasFrameRole(animal) {
-      if (animal.fleeing === true) return 'run'
       const moved = animal.prevX === undefined ? 0 : Math.hypot(animal.x - animal.prevX, animal.y - animal.prevY)
-      return moved < 0.06 ? 'idle' : 'run'
+      if (moved < 0.06) return 'idle'
+      const slots = ATLAS_SLOTS[animal.species]
+      if (slots === undefined || slots.walk === undefined) return 'run'
+      if (animal.fleeing === true) return 'run'
+      // The engine already decided the gait from the pace multiplier (1 = walk,
+      // 1.25+ = chase or flight). Re-deriving it from distance here made every
+      // animal run all day, because distance is scaled by the time-of-day factor.
+      return animal.running === true ? 'run' : 'walk'
     }
 
     /**
@@ -2988,8 +3509,6 @@ window.__ModuleLoader__.load({
      */
     function drawAtlasAnimals(context, world, view, alpha) {
       if (atlas.ready !== true) return
-      const scale = view.scale
-      const baseScale = scale / 6
       const visible = []
       for (const animal of world.entities) {
         const x = animal.prevX === undefined ? animal.x : animal.prevX + (animal.x - animal.prevX) * alpha
@@ -3001,26 +3520,71 @@ window.__ModuleLoader__.load({
       visible.sort((a, b) => a.y - b.y)
       context.save()
       context.imageSmoothingEnabled = false
-      for (const { animal, x, y } of visible) {
+      for (const { animal, x, y } of visible) drawAtlasAnimal(context, world, view, animal, x, y)
+      context.restore()
+    }
+
+    /**
+     * Paint one animal from the atlas at display resolution.
+     * @param {CanvasRenderingContext2D} context - display context.
+     * @param {object} world - the world.
+     * @param {object} view - viewport.
+     * @param {object} animal - the animal.
+     * @param {number} x - interpolated world column.
+     * @param {number} y - interpolated world row.
+     * @returns {void}
+     */
+    function drawAtlasAnimal(context, world, view, animal, x, y) {
+      const scale = view.scale
+        const baseScale = scale / 6
+        const time = world.time ?? 0
         const slots = ATLAS_SLOTS[animal.species]
-        if (slots === undefined) continue
+        if (slots === undefined) return
         const role = atlasFrameRole(animal)
-        const slot = role === 'run' ? slots.run : slots.idle
+        const frames = slots[role] ?? slots.run ?? slots.idle
+        // The gait phase is accumulated from distance travelled, so the feet are
+        // planted on the ground instead of skating: a slow animal takes slow
+        // steps and a fleeing one takes fast ones, without a speed if-chain.
+        const gait = animal.gait ?? 0
+        const frame = role === 'run'
+          ? frames[Math.min(frames.length - 1, Math.floor(gait * frames.length))]
+          : frames[Math.floor(time * 1.15 + (animal.phase ?? 0) * 3) % frames.length]
+        const slot = frame
         const column = slot % ATLAS.columns
         const row = Math.floor(slot / ATLAS.columns)
         const stageScale = STAGE_SCALE[animal.stage ?? 'adult'] ?? 1
         const size = ATLAS_SIZE[animal.species] * baseScale * stageScale
         // Gallop rhythm: a running animal rises and falls and stretches in step.
         const running = role === 'run'
-        const gaitPhase = running ? ((world.tick * 0.55 + animal.phase) % 1) * Math.PI * 2 : 0
-        const bob = running ? Math.sin(gaitPhase) * 0.09 * ATLAS.cellHeight * size : 0
-        const stretch = running ? 1 + Math.sin(gaitPhase + Math.PI / 2) * 0.045 : 1
+        const gaitPhase = running ? gait * Math.PI * 2 : 0
+        const bob = running ? Math.sin(gaitPhase) * 0.07 * ATLAS.cellHeight * size : 0
+        const stretch = running ? 1 + Math.sin(gaitPhase + Math.PI / 2) * 0.04 : 1
         const drawWidth = ATLAS.cellWidth * size * stretch
         const drawHeight = ATLAS.cellHeight * size / stretch
         const screenX = (x - view.x) * scale
         const screenY = (y - view.y) * scale + bob
         const left = screenX - drawWidth / 2
         const top = screenY - ATLAS.baseline * size - (drawHeight - ATLAS.cellHeight * size)
+        const speciesRow = SPECIES[animal.species]
+        context.save()
+        if (speciesRow !== undefined && speciesRow.habitat === 'water') {
+          // A ground shadow under a fish makes it read as hovering in mid air.
+          // Water animals get a ripple ring instead, and sit a little higher.
+          context.strokeStyle = 'rgba(214, 246, 255, 0.38)'
+          context.lineWidth = Math.max(1, size * 0.9)
+          context.beginPath()
+          context.ellipse(screenX, screenY - size * 2, ATLAS.cellWidth * size * 0.24,
+            ATLAS.cellHeight * size * 0.085, 0, 0, Math.PI * 2)
+          context.stroke()
+        } else {
+          // A soft shadow on the ground anchors the creature; without it a sprite
+          // reads as a sticker pasted on the meadow.
+          context.fillStyle = 'rgba(10, 22, 14, 0.22)'
+          context.beginPath()
+          context.ellipse(screenX, screenY + 1, ATLAS.cellWidth * size * 0.3, ATLAS.cellHeight * size * 0.09, 0, 0, Math.PI * 2)
+          context.fill()
+        }
+        context.restore()
         const facingLeft = Math.cos(animal.heading) < 0
         context.save()
         context.translate(left + drawWidth / 2, top)
@@ -3032,12 +3596,109 @@ window.__ModuleLoader__.load({
           column * ATLAS.cellWidth, row * ATLAS.cellHeight, ATLAS.cellWidth, ATLAS.cellHeight,
           -drawWidth / 2, 0, drawWidth, drawHeight)
         context.restore()
+    }
+
+
+    /** Offscreen canvases for plant sprites: built once, drawn many times. */
+    const plantCanvasCache = new Map()
+
+    /**
+     * Turn a 1-px-per-cell sprite into a drawable canvas.
+     * @param {object} sprite - sprite record.
+     * @returns {HTMLCanvasElement|null} canvas, or null when there is no DOM.
+     */
+    function spriteToCanvas(sprite) {
+      const cached = plantCanvasCache.get(sprite)
+      if (cached !== undefined) return cached
+      if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null
+      const canvas = document.createElement('canvas')
+      canvas.width = sprite.width
+      canvas.height = sprite.height
+      const painter = canvas.getContext('2d')
+      if (painter === null) return null
+      const image = painter.createImageData(sprite.width, sprite.height)
+      const words = new Uint32Array(image.data.buffer)
+      for (let index = 0; index < sprite.pixels.length; index += 1) {
+        const color = sprite.pixels[index]
+        if (color !== 0) words[index] = color
+      }
+      painter.putImageData(image, 0, 0)
+      plantCanvasCache.set(sprite, canvas)
+      return canvas
+    }
+
+    /**
+     * Paint one plant sprite at display resolution.
+     * @param {CanvasRenderingContext2D} context - display context.
+     * @param {object} world - the world.
+     * @param {object} view - viewport.
+     * @param {object} plant - the plant.
+     * @returns {void}
+     */
+    function drawPlantSprite(context, world, view, plant) {
+      const set = PLANT_SPRITES[plant.variant] ?? PLANT_SPRITES.tree
+      const sprite = Array.isArray(set) ? set[clamp(plant.size, 1, set.length) - 1] : set
+      if (sprite === undefined) return
+      const canvas = spriteToCanvas(sprite)
+      if (canvas === null) return
+      const scale = view.scale
+      const swayX = (((world.tick >> 3) + plant.id) % 16 < 8) ? 0 : 1
+      const left = Math.round((plant.x - view.x - sprite.width / 2 + swayX) * scale)
+      const top = Math.round((plant.y - view.y - sprite.height + 1) * scale)
+      const drawWidth = sprite.width * scale
+      const drawHeight = sprite.height * scale
+      if (plant.variant !== 'lily' && sprite.width > 4) {
+        context.save()
+        context.fillStyle = 'rgba(10, 22, 14, 0.20)'
+        context.beginPath()
+        context.ellipse(left + drawWidth * 0.5, top + drawHeight - 1,
+          drawWidth * 0.4, Math.max(1.5, drawWidth * 0.13), 0, 0, Math.PI * 2)
+        context.fill()
+        context.restore()
+      }
+      context.save()
+      if ((plant.foliage ?? 1) < 0.35) context.globalAlpha = 0.85
+      context.drawImage(canvas, left, top, drawWidth, drawHeight)
+      context.restore()
+    }
+
+    /**
+     * One depth-sorted pass over plants and animals.
+     *
+     * This is the fix for "the trees are made of glass": plants used to be
+     * painted into the 1-px ground buffer and every animal was then drawn on top
+     * of the whole forest, so nothing could ever be hidden behind a canopy.
+     * Sorting both by their base row puts a nearer tree in front of a farther
+     * animal, which is what the scene needs to read as 3D.
+     * @param {CanvasRenderingContext2D} context - display context.
+     * @param {object} world - the world.
+     * @param {object} view - viewport.
+     * @param {number} alpha - interpolation between the last two ticks.
+     * @returns {void}
+     */
+    function drawDepthLayers(context, world, view, alpha) {
+      const layers = []
+      for (const plant of world.trees) {
+        if (plant.x < view.x - 14 || plant.x > view.x + view.width + 14) continue
+        if (plant.y < view.y - 34 || plant.y > view.y + view.height + 10) continue
+        layers.push({ y: plant.y, plant })
+      }
+      for (const animal of world.entities) {
+        const x = animal.prevX === undefined ? animal.x : animal.prevX + (animal.x - animal.prevX) * alpha
+        const y = animal.prevY === undefined ? animal.y : animal.prevY + (animal.y - animal.prevY) * alpha
+        if (x < view.x - 12 || x > view.x + view.width + 12) continue
+        if (y < view.y - 14 || y > view.y + view.height + 8) continue
+        layers.push({ y, animal, x })
+      }
+      layers.sort((a, b) => a.y - b.y)
+      context.save()
+      context.imageSmoothingEnabled = false
+      for (const layer of layers) {
+        if (layer.plant !== undefined) drawPlantSprite(context, world, view, layer.plant)
+        else drawAtlasAnimal(context, world, view, layer.animal, layer.x, layer.y)
       }
       context.restore()
     }
-    // ---------------------------------------------------------------------
-    // Colour helpers
-    // ---------------------------------------------------------------------
 
     /** Eight-step water ripple ramp, indexed by a moving pattern. */
     const WATER_RAMP = [0, 1, 2, 1, 3, 2, 1, 0].map(index => PALETTE.water[index])
@@ -3058,11 +3719,22 @@ window.__ModuleLoader__.load({
       )
     })
 
-    /** 16×16 ordered dither table: texture without a visible weave. */
+    /**
+     * 16x16 cell hash, used as the texture noise everywhere.
+     *
+     * It must be a real hash, not an arithmetic ramp: x*73 + y*151 + x*y*17 has
+     * strong diagonal structure and prints a visible grid over the whole meadow.
+     * The avalanche mix below has no periodic component.
+     */
     const DITHER = (() => {
       const table = new Uint8Array(256)
       for (let y = 0; y < 16; y++) {
-        for (let x = 0; x < 16; x++) table[y * 16 + x] = (x * 73 + y * 151 + x * y * 17) & 255
+        for (let x = 0; x < 16; x++) {
+          let hash = Math.imul(x * 374761393 + y * 668265263 + 1442695040, 1274126177)
+          hash ^= hash >>> 15
+          hash = Math.imul(hash, 1103515245)
+          table[y * 16 + x] = (hash >>> 16) & 255
+        }
       }
       return table
     })()
@@ -3196,7 +3868,8 @@ window.__ModuleLoader__.load({
       const terrain = world.terrain
       const grass = world.grass
       const weed = world.weed
-      const phase = (world.tick >> 1) & 7
+      const depth = world.depth
+      const time = world.tick * 0.05
       for (let row = 0; row < view.height; row++) {
         const worldY = view.y + row
         const rowBase = worldY * world.width
@@ -3205,26 +3878,83 @@ window.__ModuleLoader__.load({
           const worldX = view.x + col
           const index = rowBase + worldX
           const surface = terrain[index]
+          const noise = ditherAt(worldX, worldY)
           let color
           if (surface === TERRAIN.WATER) {
-            color = WATER_RAMP[(worldX * 3 + worldY * 5 + phase) & 7]
+            color = waterColor(worldX, worldY, depth[index], time, noise)
             const cover = weed[index]
-            if (cover > 0.15) color = blendColor(color, PALETTE.weed[cover > 0.6 ? 1 : 0], Math.min(0.7, cover * 0.8))
-          } else if (surface === TERRAIN.SAND) {
-            color = nudgeColor(PALETTE.sand[0], noiseAt(ditherAt(worldX, worldY)))
-          } else if (surface === TERRAIN.DIRT) {
-            color = nudgeColor(PALETTE.dirt[0], noiseAt(ditherAt(worldX, worldY)))
+            if (cover > 0.05) {
+              const lush = cover > 0.55
+              const shade = SWAY[(worldX + (world.tick >> 3)) & 15]
+              color = blendColor(color, PALETTE.weed[lush ? 1 : 0], Math.min(0.82, cover * 1.05))
+              // A bright stalk every few cells turns a flat green wash into
+              // something that reads as plants growing off the bottom.
+              if (cover > 0.34 && noise > 168) color = blendColor(color, PALETTE.weedStalk, 0.5)
+              else if (cover > 0.2 && shade > 2) color = nudgeColor(color, 5)
+            }
+          } else if (surface === TERRAIN.SAND || surface === TERRAIN.DIRT) {
+            color = surface === TERRAIN.SAND
+              ? nudgeColor(PALETTE.sand[noise > 200 ? 2 : 0], noiseAt(noise))
+              : nudgeColor(PALETTE.dirt[noise > 205 ? 2 : 0], noiseAt(noise))
+            // Damp weed on the bank has to be visible, or painting it looks
+            // like nothing happened.
+            const damp = weed[index]
+            if (damp > 0.3) color = blendColor(color, PALETTE.weed[1], Math.min(0.5, damp * 0.55))
           } else if (surface === TERRAIN.STONE) {
-            color = nudgeColor(PALETTE.stone[1], noiseAt(ditherAt(worldX, worldY)))
+            color = nudgeColor(PALETTE.stone[noise > 198 ? 2 : 1], noiseAt(noise))
           } else {
             const cover = grass[index]
             const step = cover <= 0 ? 0 : Math.min(7, (cover * 8) | 0)
-            const sway = SWAY[(worldX + (world.tick >> 2)) & 15]
-            color = nudgeColor(GRASS_RAMP[step], sway + (ditherAt(worldX, worldY) < 48 ? 4 : 0))
+            const sway = SWAY[((worldX * 5 + worldY * 11) + (world.tick >> 2)) & 15]
+            // Two scales of variation: a cell-level flicker (blades) and a slow
+            // field (patches of drier and lusher ground). Without the slow one
+            // the meadow is one flat green sheet.
+            const patch = Math.round(Math.sin(worldX * 0.055 + 0.7) * Math.sin(worldY * 0.043 - 1.1) * 7)
+            color = nudgeColor(GRASS_RAMP[step], sway + patch + (noise < 48 ? 3 : 0))
+            // Grass gets texture the way a real pixel meadow does: a scattering
+            // of brighter blades and the odd flower on the thickest cells. This
+            // is what separates "grass" from "green floor" at 6x zoom.
+            if (cover > 0.3 && (noise & 63) < 3) color = nudgeColor(color, 12)
+            else if (cover > 0.55 && (noise & 255) < 2) color = PALETTE.flowers[(worldX * 3 + worldY * 5) & 3]
+            else if (cover < 0.08 && (noise & 63) === 5) color = blendColor(color, PALETTE.dirt[0], 0.5)
           }
           out[outBase + col] = color
         }
       }
+    }
+
+    /**
+     * One cell of open water.
+     *
+     * Depth gives the lake a floor, the two crossed sine bands are the caustics
+     * the sun throws onto it, and the last two bands of shallow water get foam so
+     * the shoreline has a drawn edge instead of a colour change.
+     * @param {number} x - world column.
+     * @param {number} y - world row.
+     * @param {number} depthValue - 0 at the bank, 1 at the deepest point.
+     * @param {number} time - seconds, for the caustic drift.
+     * @param {number} noise - 0..255 cell hash.
+     * @returns {number} packed colour.
+     */
+    function waterColor(x, y, depthValue, time, noise) {
+      const d = depthValue ?? 0
+      let color = blendColor(PALETTE.waterSurface, PALETTE.waterShallow, Math.min(1, d * 5))
+      color = blendColor(color, PALETTE.waterMid, clamp(d * 2.1, 0, 1))
+      color = blendColor(color, PALETTE.waterDeep, Math.min(0.88, clamp((d - 0.28) * 1.9, 0, 1)))
+      // Caustics: two travelling waves multiplied together give moving patches
+      // rather than a plaid pattern.
+      // Three terms, not two: the product of two sines is a lattice and prints a
+      // visible grid over the whole lake. The third breaks the symmetry.
+      const wave = Math.sin(x * 0.31 + y * 0.17 + time * 1.9) * Math.sin(x * 0.13 - y * 0.41 - time * 1.3)
+        + 0.45 * Math.sin(x * 0.07 - y * 0.09 + time * 0.7)
+      if (wave > 0.38) color = blendColor(color, PALETTE.caustic, Math.min(0.36, (wave - 0.38) * 0.5))
+      // A second, finer ripple: the first band alone reads as a still puddle.
+      if (((x * 3 + y * 5 + Math.round(time * 6)) & 15) < 2 && (d > 0.1)) color = blendColor(color, PALETTE.foam, 0.12)
+      if (d < 0.055) color = blendColor(color, PALETTE.foam, 0.72)
+      else if (d < 0.11) color = blendColor(color, PALETTE.foam, 0.3)
+      else if (d < 0.16 && noise > 210) color = blendColor(color, PALETTE.foam, 0.22)
+      // Dither by hand: nudgeColor takes integer channel deltas.
+      return nudgeColor(color, noise < 60 ? -6 : (noise > 196 ? 6 : 0))
     }
 
     /**
@@ -3235,19 +3965,62 @@ window.__ModuleLoader__.load({
      */
     function paintPlants(world, view, out) {
       const visible = []
+      const margin = 16
       for (const plant of world.trees) {
-        if (plant.x < view.x - 12 || plant.x > view.x + view.width + 12) continue
-        if (plant.y < view.y - 16 || plant.y > view.y + view.height + 6) continue
+        if (plant.x < view.x - margin || plant.x > view.x + view.width + margin) continue
+        if (plant.y < view.y - margin - 10 || plant.y > view.y + view.height + margin) continue
         visible.push(plant)
       }
       visible.sort((a, b) => a.y - b.y)
+      const tick = world.tick
       for (const plant of visible) {
-        const sprite = plant.variant === 'bush' ? PLANT_SPRITES.bush : PLANT_SPRITES.tree[clamp(plant.size, 1, 3) - 1]
-        const swayX = ((world.tick >> 3) + plant.id) % 16 < 8 ? 0 : 1
-        const factor = (plant.foliage ?? 1) < 0.35 ? 0.82 : undefined
+        const set = PLANT_SPRITES[plant.variant] ?? PLANT_SPRITES.tree
+        const sprite = Array.isArray(set) ? set[clamp(plant.size, 1, set.length) - 1] : set
+        if (sprite === undefined) continue
+        const baseX = Math.round(plant.x - view.x)
+        const baseY = Math.round(plant.y - view.y)
+        const swayX = ((tick >> 3) + plant.id) % 16 < 8 ? 0 : 1
+        // Three shades keyed off the plant id: a forest of one identical stamp
+        // reads as wallpaper, three shades read as a forest.
+        const shade = [0.93, 1, 1.07][plant.id % 3]
+        const factor = (plant.foliage ?? 1) < 0.35 ? 0.84 * shade : shade
+        // A shadow anchors the plant to the ground; without it a canopy looks
+        // like it is floating above the meadow.
+        if (plant.variant !== 'lily') {
+          shadeEllipse(out, view, baseX, baseY + 1,
+            Math.max(2, sprite.width * 0.44), Math.max(1.3, sprite.width * 0.19))
+        }
         drawSprite(out, view.width, view.height, sprite,
-          Math.round(plant.x - view.x - sprite.width / 2) + swayX,
-          Math.round(plant.y - view.y - sprite.height + 1), false, factor)
+          baseX - (sprite.width >> 1) + swayX, baseY - sprite.height + 1, false, factor)
+      }
+    }
+
+    /**
+     * Darken a soft ellipse of ground pixels, for plant and creature shadows.
+     * @param {Uint32Array} out - frame buffer.
+     * @param {object} view - viewport.
+     * @param {number} cx - centre column in buffer space.
+     * @param {number} cy - centre row in buffer space.
+     * @param {number} rx - radius x.
+     * @param {number} ry - radius y.
+     */
+    function shadeEllipse(out, view, cx, cy, rx, ry) {
+      const spanX = Math.ceil(rx)
+      const spanY = Math.ceil(ry)
+      for (let dy = -spanY; dy <= spanY; dy++) {
+        for (let dx = -spanX; dx <= spanX; dx++) {
+          const nx = dx / rx
+          const ny = dy / ry
+          const distance = nx * nx + ny * ny
+          if (distance > 1) continue
+          const x = cx + dx
+          const y = cy + dy
+          if (x < 0 || y < 0 || x >= view.width || y >= view.height) continue
+          const index = y * view.width + x
+          // Two steps instead of one: a single flat ellipse reads as a painted
+          // rectangle at the sizes trees have here.
+          out[index] = dimColor(out[index], distance > 0.5 ? 0.86 : 0.72)
+        }
       }
     }
 
@@ -3269,7 +4042,7 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Animals pass, with motion interpolation and the two-frame walk cycle.
+     * Animals pass, with motion interpolation and the low-resolution gait frames.
      *
      * Positions are interpolated between the last two simulation ticks (10 Hz)
      * up to the display refresh rate, which is what turns 10 stepping blobs into
@@ -3381,8 +4154,9 @@ window.__ModuleLoader__.load({
       const size = view.width * view.height
       const out = buffer !== undefined && buffer.length === size ? buffer : new Uint32Array(size)
       const spritesInBuffer = options === null || options.sprites !== false
+      const plantsInBuffer = options === null || options.plants !== false
       paintGround(world, view, out)
-      paintPlants(world, view, out)
+      if (plantsInBuffer) paintPlants(world, view, out)
       paintCorpses(world, view, out)
       if (spritesInBuffer) paintAnimals(world, view, out, alpha)
       paintActivity(world, view, out)
@@ -3687,7 +4461,7 @@ window.__ModuleLoader__.load({
           hover,
           radius: brush.radius,
           selected: selected === undefined ? null : selected,
-        }, { sprites: !useAtlas })
+        }, { sprites: !useAtlas, plants: !useAtlas })
         const canvasWidth = view.width * (offscreenContext === null ? 1 : scale)
         const canvasHeight = view.height * (offscreenContext === null ? 1 : scale)
         if (offscreenContext !== null) {
@@ -3695,7 +4469,9 @@ window.__ModuleLoader__.load({
           offscreenContext.putImageData(imageData, 0, 0)
           context.imageSmoothingEnabled = false
           context.drawImage(offscreen, 0, 0, view.width, view.height, 0, 0, canvasWidth, canvasHeight)
-          if (useAtlas) drawAtlasAnimals(context, world, view, alpha)
+          // Plants and animals share one depth-sorted pass so a tree in front of
+          // an animal actually covers it.
+          if (useAtlas) drawDepthLayers(context, world, view, alpha)
         } else {
           context.putImageData(imageData, 0, 0)
         }
@@ -3959,6 +4735,10 @@ window.__ModuleLoader__.load({
       'species.crow': '乌鸦',
       'species.fish': '小鱼',
       'species.pike': '狗鱼',
+      'species.heron': '苍鹭',
+      'species.otter': '水獭',
+      'species.bear': '棕熊',
+      'species.frog': '青蛙',
       'tool.grass': '草',
       'tool.weed': '水草',
       'tool.tree': '树',
@@ -4024,6 +4804,10 @@ window.__ModuleLoader__.load({
       'species.crow': 'Crow',
       'species.fish': 'Fish',
       'species.pike': 'Pike',
+      'species.heron': 'Heron',
+      'species.otter': 'Otter',
+      'species.bear': 'Bear',
+      'species.frog': 'Frog',
       'tool.grass': 'Grass',
       'tool.weed': 'Weed',
       'tool.tree': 'Tree',
@@ -4255,7 +5039,10 @@ window.__ModuleLoader__.load({
     /** Only wrap in the real React; the test shim has no class components. */
     const PANEL_BOUNDARY = typeof React.Component === 'function' ? PanelBoundary : props => props.children ?? null
     /** Tool groups for the side palette. */
-    const LIFE_TOOLS = ['grass', 'weed', 'tree', 'bush', 'rabbit', 'deer', 'fox', 'wolf', 'crow', 'fish', 'pike']
+    // Every species in SPECIES must appear here or the player cannot place it.
+    // The palette is generated from SPECIES_IDS for exactly that reason: a new
+    // species row used to be visible in the counters but missing from the tools.
+    const LIFE_TOOLS = ['grass', 'weed', 'tree', 'bush', ...SPECIES_IDS]
     const TERRAIN_TOOL_IDS = ['water', 'sand', 'dirt', 'stone', 'erase', 'pointer']
     const BRUSHES = [0, 1, 2]
     const BRUSH_RADIUS = [0, 1, 2]
@@ -5131,6 +5918,11 @@ window.__ModuleLoader__.load({
       SPRITE_GRIDS,
       PLANT_SPRITES,
       SPRITE_COLORS,
+      ATLAS,
+      ATLAS_SLOTS,
+      ATLAS_SIZE,
+      ATLAS_GAIT,
+      SPRITE_ATLAS_PNG,
       TICK,
       DAY_SECONDS,
       MAX_ENTITIES,
@@ -5154,6 +5946,7 @@ window.__ModuleLoader__.load({
       handleImmigration,
       settleTerrain,
       computeHydrology,
+      canStand,
       createStore,
       GLYPHS,
       PANEL_GLYPH,

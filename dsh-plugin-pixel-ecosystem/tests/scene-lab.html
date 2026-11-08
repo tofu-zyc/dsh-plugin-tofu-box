@@ -1,0 +1,220 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pixel-ecosystem scene lab</title>
+<style>
+  html,body{margin:0;background:#0b0d12;color:#cdd6e4;font:12px/1.5 ui-monospace,Consolas,monospace}
+  h2{font:600 13px/1.4 ui-monospace,Consolas,monospace;margin:10px 10px 4px;color:#8fb3d9}
+  canvas{display:block;image-rendering:pixelated;margin:0 10px}
+  #status{padding:8px 10px;white-space:pre-wrap;color:#9fe6b0}
+  .bad{color:#ff8f8f}
+</style>
+</head><body>
+<div id="status">booting…</div>
+<h2>world scene (scale 6, interpolated)</h2>
+<canvas id="scene"></canvas>
+<h2>gait strip — four successive live frames of one rabbit (3× crop)</h2>
+<canvas id="strip"></canvas>
+<h2>species sheet — idle ×2 / run ×4 (atlas cells at 3×)</h2>
+<canvas id="sheet"></canvas>
+<script>
+  window.__failures = []
+  window.addEventListener('error', (e) => { window.__failures.push(String(e.message || e)) })
+  window.addEventListener('unhandledrejection', (e) => { window.__failures.push('rejection: ' + String(e.reason)) })
+  window.__ModuleLoader__ = { load(entry) { window.__entry = entry } }
+</script>
+<script src="../client.js"></script>
+<script>
+  const params = new URLSearchParams(location.search)
+  const SCALE = Number(params.get('scale') || 6)
+  const VIEW_W = Number(params.get('w') || 200)
+  const VIEW_H = Number(params.get('h') || 120)
+  const SEED = Number(params.get('seed') || 777)
+  const TICKS = Number(params.get('ticks') || 4000)
+  const cellScale = Number(params.get('cells') || 3)
+
+  try {
+    const stub = {
+      createElement: (type, props, ...children) => ({ type, props, children }),
+      Component: function Component() {},
+      Fragment: 'Fragment',
+      useState: (value) => [value, () => {}],
+      useEffect() {},
+      useRef: (value) => ({ current: value }),
+      useCallback: (fn) => fn,
+      useMemo: (fn) => fn(),
+      useSyncExternalStore() {},
+    }
+    const plugin = window.__entry.factory((id) => {
+      if (id === 'react') return stub
+      throw new Error('unexpected require: ' + id)
+    })
+    const engine = window.__engine = plugin.__engine
+
+    // The store owns the world; build one through it so the scene and this
+    // script are looking at the same simulation.
+    const store = engine.createStore({ storage: null })
+    store.ensureWorld()
+    const world = store.getWorld()
+    for (let i = 0; i < TICKS; i++) engine.stepWorld(world, engine.TICK)
+
+    // `focus=hunt` stages the cross-habitat scene: fish in the shallows with a
+    // heron and a bear on the bank, so a screenshot can show a land animal
+    // working the water instead of a lucky coincidence.
+    const CLOCK = new URLSearchParams(location.search).get('clock')
+    if (CLOCK === 'noon') world.time = engine.DAY_SECONDS * 0.5
+    else if (CLOCK === 'dusk') world.time = engine.DAY_SECONDS * 0.76
+
+    const FOCUS = new URLSearchParams(location.search).get('focus')
+    if (FOCUS === 'hunt') {
+      const shallow = []
+      for (let y = 6; y < world.height - 6; y++) {
+        for (let x = 6; x < world.width - 6; x++) {
+          const index = y * world.width + x
+          if (world.terrain[index] !== 0) continue
+          const depth = world.depth[index]
+          if (depth < 0.08 || depth > 0.2) continue
+          shallow.push([x, y])
+        }
+      }
+      if (shallow.length > 0) {
+        const [sx, sy] = shallow[(shallow.length / 2) | 0]
+        for (const [species, count] of [['fish', 7], ['frog', 3]]) {
+          for (let i = 0; i < count; i++) {
+            engine.spawnEntity(world, species, sx + ((Math.random() - 0.5) * 10), sy + ((Math.random() - 0.5) * 6))
+          }
+        }
+        for (const [species, dx] of [['heron', -7], ['heron', 8], ['bear', 11], ['otter', -11]]) {
+          engine.spawnEntity(world, species, sx + dx, sy + 3)
+        }
+        for (let i = 0; i < 120; i++) engine.stepWorld(world, engine.TICK)
+      }
+    }
+
+    // Centre the camera on the busiest water edge so the first screenshot has
+    // fish, a heron and a bear in frame instead of an empty meadow.
+    let bestX = world.width / 2
+    let bestY = world.height / 2
+    let bestScore = -1
+    for (const animal of world.entities) {
+      const cx = Math.round(animal.x)
+      const cy = Math.round(animal.y)
+      if (engine.SPECIES[animal.species].habitat !== 'water') continue
+      let score = 0
+      for (const other of world.entities) {
+        if (Math.hypot(other.x - cx, other.y - cy) < 45) score += 1
+      }
+      // Weight by the depth under the camera: a deep frame shows the underwater
+      // shading, the foam edge and the lily pads all at once.
+      const index = cy * world.width + cx
+      score += (world.depth[index] || 0) * 26
+      if (score > bestScore) { bestScore = score; bestX = cx; bestY = cy }
+    }
+    const view = {
+      x: Math.max(0, Math.min(world.width - VIEW_W, Math.round(bestX - VIEW_W / 2))),
+      y: Math.max(0, Math.min(world.height - VIEW_H, Math.round(bestY - VIEW_H / 2))),
+      width: VIEW_W, height: VIEW_H, scale: SCALE,
+    }
+
+    const canvas = document.getElementById('scene')
+    canvas.width = VIEW_W * SCALE
+    canvas.height = VIEW_H * SCALE
+    store.setView(view)
+    store.attach(canvas)
+
+    // Species sheet straight from the shipped atlas.
+    const image = new Image()
+    image.onload = () => {
+      const slots = engine.ATLAS_SLOTS
+      const ids = Object.keys(slots)
+      const cellW = engine.ATLAS.cellWidth
+      const cellH = engine.ATLAS.cellHeight
+      const frames = 6
+      const sheet = document.getElementById('sheet')
+      sheet.width = 90 + frames * cellW * cellScale
+      sheet.height = ids.length * cellH * cellScale
+      const ctx = sheet.getContext('2d')
+      ctx.imageSmoothingEnabled = false
+      ctx.fillStyle = '#141820'
+      ctx.fillRect(0, 0, sheet.width, sheet.height)
+      ctx.font = '12px Consolas, monospace'
+      ids.forEach((id, row) => {
+        ctx.fillStyle = '#7f97b4'
+        ctx.fillText(id, 6, row * cellH * cellScale + cellH * cellScale / 2 + 4)
+        const list = [...slots[id].idle, ...slots[id].run]
+        list.forEach((slot, column) => {
+          if (column >= frames) return
+          const sx = (slot % engine.ATLAS.columns) * cellW
+          const sy = Math.floor(slot / engine.ATLAS.columns) * cellH
+          ctx.drawImage(image, sx, sy, cellW, cellH,
+            90 + column * cellW * cellScale, row * cellH * cellScale, cellW * cellScale, cellH * cellScale)
+        })
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)'
+        ctx.beginPath()
+        ctx.moveTo(0, (row + 1) * cellH * cellScale)
+        ctx.lineTo(sheet.width, (row + 1) * cellH * cellScale)
+        ctx.stroke()
+      })
+      buildStrip()
+
+      const stats = engine.sampleStats(world)
+      document.getElementById('status').textContent =
+        'seed=' + SEED + ' ticks=' + TICKS +
+        ' view=' + view.x + ',' + view.y + ' ' + VIEW_W + 'x' + VIEW_H + '@' + SCALE +
+        '\ncounts ' + JSON.stringify(stats.counts) +
+        '\nplants ' + JSON.stringify(world.trees.reduce((acc, p) => { acc[p.variant] = (acc[p.variant] || 0) + 1; return acc }, {})) +
+        '\nfailures=' + JSON.stringify(window.__failures)
+      document.title = 'ready'
+    }
+    image.src = 'data:image/png;base64,' + engine.SPRITE_ATLAS_PNG
+
+    /**
+     * Capture four successive frames of the running animation from the live
+     * canvas. This is the check the unit tests cannot make: it proves the atlas
+     * frames are actually being swapped while the render loop runs.
+     */
+    async function buildStrip() {
+      const strip = document.getElementById('strip')
+      const S = 3
+      // Source window in display pixels, drawn at S x.
+      const box = 84
+      strip.width = 4 * (box * S + 6) + 6
+      strip.height = box * S + 6
+      const sctx = strip.getContext('2d')
+      sctx.imageSmoothingEnabled = false
+      sctx.fillStyle = '#151a24'
+      sctx.fillRect(0, 0, strip.width, strip.height)
+      const visible = world.entities.filter((entity) =>
+        entity.species === 'rabbit' &&
+        entity.x > view.x + 6 && entity.x < view.x + view.width - 6 &&
+        entity.y > view.y + 8 && entity.y < view.y + view.height - 6)
+      if (visible.length === 0) return
+      // Walk the subject deliberately: a resting rabbit would give four identical
+      // crops, which proves nothing about the animation.
+      const target = visible[0]
+      target.thinkTimer = 99999
+      target.intent = 'explore'
+      target.targetX = Math.max(2, Math.min(world.width - 3, target.x + 26))
+      target.targetY = target.y
+      const canvas = document.getElementById('scene')
+      const gaitSeen = []
+      for (let frame = 0; frame < 4; frame++) {
+        // Advance the simulation in fixed steps and let the render loop repaint,
+        // so the four crops are four real animation frames rather than four
+        // samples of the same wall clock.
+        for (let tick = 0; tick < 3; tick++) engine.stepWorld(world, engine.TICK)
+        await new Promise((resolve) => requestAnimationFrame(() => resolve()))
+        await new Promise((resolve) => requestAnimationFrame(() => resolve()))
+        const cx = (target.x - view.x) * SCALE
+        const cy = (target.y - view.y) * SCALE
+        gaitSeen.push((target.gait ?? 0).toFixed(2))
+        sctx.drawImage(canvas, Math.round(cx - box / 2), Math.round(cy - box * 0.68),
+          box, box, 6 + frame * (box * S + 6), 6, box * S, box * S)
+      }
+      strip.title = 'gait ' + gaitSeen.join(' -> ')
+      const status = document.getElementById('status')
+      status.textContent += '\ngait phases ' + gaitSeen.join(' -> ')
+    }
+  } catch (error) {
+    document.getElementById('status').textContent = 'FATAL: ' + (error && error.stack ? error.stack : error)
+  }
+</script>
+</body></html>

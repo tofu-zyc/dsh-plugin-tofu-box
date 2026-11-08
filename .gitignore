@@ -35,6 +35,14 @@ dist/
 /.workbuddy/
 /.chrome-new-instance/
 
+# Agent/调试产物：截图、探针、临时渲染（见各插件 HANDOVER §12）
+/.scratch/
+/.agents/
+**/.scratch/
+**/__pycache__/
+*.pyc
+**/.chrome-verify/
+
 # 系统与编辑器
 .DS_Store
 *.log

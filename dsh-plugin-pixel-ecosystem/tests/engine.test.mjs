@@ -759,3 +759,64 @@ test('sampleStats and pushHistory report the live world', () => {
   assert.equal(sample.t, Math.round(world.time))
   for (const id of SPECIES_IDS) assert.equal(typeof sample.counts[id], 'number', `history must carry ${id}`)
 })
+// ---------------------------------------------------------------------------
+// The land/water bridge: wading, amphibious animals and the cross-habitat hunt
+// ---------------------------------------------------------------------------
+
+test('a wader stands in the shallows but not in deep water', () => {
+  const world = blankWorld({ width: 60, height: 40 })
+  fillRegion(world, TERRAIN.WATER, 10, 5, 50, 35)
+  computeHydrology(world)
+  const shallowIndex = 20 * world.width + 11
+  const deepIndex = 20 * world.width + 30
+  assert.ok(world.depth[shallowIndex] < 0.34, 'the bank must be shallow, got ' + world.depth[shallowIndex])
+  assert.ok(world.depth[deepIndex] > 0.8, 'the middle must be deep, got ' + world.depth[deepIndex])
+  const { canStand } = engine
+  assert.equal(canStand(world, SPECIES.heron, 11.5, 20.5), true, 'a heron must be able to wade at the bank')
+  assert.equal(canStand(world, SPECIES.heron, 30.5, 20.5), false, 'a heron must not walk the lake bed')
+  assert.equal(canStand(world, SPECIES.bear, 11.5, 20.5), true, 'a bear also wades')
+  assert.equal(canStand(world, SPECIES.rabbit, 11.5, 20.5), false, 'a rabbit must not enter water')
+  assert.equal(canStand(world, SPECIES.frog, 11.5, 20.5), true, 'a frog wades')
+  assert.equal(canStand(world, SPECIES.otter, 30.5, 20.5), true, 'an otter swims')
+  assert.equal(canStand(world, SPECIES.otter, 2.5, 2.5), true, 'an amphibious otter may haul out')
+  assert.equal(canStand(world, SPECIES.fish, 2.5, 2.5), false, 'a fish must stay in the water')
+  assert.equal(canStand(world, SPECIES.crow, 30.5, 20.5), true, 'a crow flies over everything')
+})
+
+test('a heron takes fish out of the shallows and leaves a carcass', () => {
+  const world = blankWorld({ width: 40, height: 30 })
+  fillRegion(world, TERRAIN.WATER, 0, 0, 9, 29)
+  fillRegion(world, TERRAIN.GRASS, 10, 0, 39, 29)
+  computeHydrology(world)
+  const fish = spawnEntity(world, 'fish', 5.5, 15.5)
+  const heron = spawnEntity(world, 'heron', 4.5, 15.5)
+  assert.ok(fish !== null && heron !== null, 'both animals must spawn')
+  for (let tick = 0; tick < 600 && countSpecies(world, 'fish') > 0; tick++) stepWorld(world, TICK)
+  assert.equal(countSpecies(world, 'fish'), 0, 'the heron must catch the fish in its reach')
+  assert.ok(world.corpses.some(corpse => corpse.species === 'fish'), 'the kill must leave a carcass')
+})
+
+test('a lily pad feeds the water under it, which is where fish graze', () => {
+  const world = blankWorld({ width: 40, height: 30 })
+  fillRegion(world, TERRAIN.WATER, 0, 0, 19, 29)
+  fillRegion(world, TERRAIN.GRASS, 20, 0, 39, 29)
+  computeHydrology(world)
+  world.waterFertility.fill(0.05)
+  world.trees.push({ id: 9001, x: 8, y: 15, variant: 'lily', size: 1, age: 0, foliage: 1, seedTimer: 9999 })
+  for (let tick = 0; tick < 40; tick++) stepWorld(world, TICK)
+  const under = world.waterFertility[15 * world.width + 8]
+  const far = world.waterFertility[5 * world.width + 3]
+  assert.ok(under > 0.06, 'the lily must enrich the water beneath it, got ' + under)
+  assert.ok(Math.abs(far - 0.05) < 1e-6, 'water out of the lily footprint must be untouched, got ' + far)
+})
+
+test('the food web reaches across the water line', () => {
+  for (const id of ['heron', 'bear', 'otter']) {
+    assert.ok(SPECIES[id].prey.includes('fish'), id + ' must hunt fish')
+  }
+  assert.ok(SPECIES.pike.prey.includes('frog'), 'the pike also takes frogs')
+  assert.ok(SPECIES.bear.prey.includes('deer'), 'the bear still takes deer on land')
+  assert.ok(SPECIES.frog.flora === 'weed', 'the frog grazes the water plants')
+  assert.equal(SPECIES_IDS.length, 11, 'the roster is eleven species')
+})
+
