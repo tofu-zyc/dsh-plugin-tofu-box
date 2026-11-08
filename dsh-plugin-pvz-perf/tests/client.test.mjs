@@ -264,6 +264,7 @@ test('hub shows state, version and directory, and blocks start while missing', a
   assert.ok(readyText.includes('E:\\Games\\pvz_perf_web'), 'hub shows the resolved directory')
   assert.ok(readyText.includes('就绪'), 'hub shows the ready chip')
   assert.ok(readyText.includes('开始游戏'), 'hub offers the primary start action')
+  assert.ok(readyText.includes('Toolkit 阵型码导入'), 'hub shows the toolkit lineup import card')
 
   const start = byTag(readyTree, 'button').find((button) => textOf(button).includes('开始游戏'))
   assert.ok(start, 'start button exists')
@@ -338,18 +339,79 @@ test('locale dictionaries cover the same keys and resolve in both languages', as
     await store.refresh()
     store.open()
     const trees = [
+      expand(seam.COMPONENTS.HubPanel({ store, locale, layout: { selectPanel() {} } })),
       expand(seam.COMPONENTS.PvzPanel({ store, locale, layout: { selectPanel() {} } })),
       expand(seam.COMPONENTS.FooterLaunch({ store, locale, layout: { selectPanel() {} }, wide: true })),
     ]
     const text = trees.map(textOf).join(' ')
-    assert.ok(!/\b(hub|game|footer|panel|common|error)\.[a-z]/i.test(text),
-      'unresolved locale key surfaced in ' + id + ': ' + text.match(/\b(hub|game|footer|panel|common|error)\.[a-z.]+/i))
+    assert.ok(!/\b(hub|game|footer|panel|common|error|toolkit)\.[a-z]/i.test(text),
+      'unresolved locale key surfaced in ' + id + ': ' + text.match(/\b(hub|game|footer|panel|common|error|toolkit)\.[a-z.]+/i))
     assert.ok(text.includes('3.3.4') || text.includes('植物大战僵尸') || text.includes('Plants vs. Zombies'))
   }
 })
 
-test('game view stays inside the panel and never covers the app chrome', () => {
-  // The Electron shell draws minimize/maximize/close above the page at the
+/** A minimal localStorage-like double for the toolkit import tests. */
+function createFakeStorage(seed = {}) {
+  const map = new Map(Object.entries(seed))
+  return {
+    getItem: (key) => (map.has(key) ? map.get(key) : null),
+    setItem: (key, value) => { map.set(key, String(value)) },
+    removeItem: (key) => { map.delete(key) },
+    dump: () => Object.fromEntries(map),
+  }
+}
+
+test('toolkit lineups merge into the game list without dropping the user entries', () => {
+  const merged = seam.mergeToolkitLineups(
+    [{ name: 'mine', code: 'MINE' }, { junk: true }],
+    [{ name: 'a', code: 'AAAA' }, { name: 'dup', code: 'MINE' }, { name: '', code: 'BBBB' }, null],
+  )
+  assert.deepEqual(merged.list, [{ name: 'mine', code: 'MINE' }, { name: 'a', code: 'AAAA' }])
+  assert.deepEqual(merged.added, ['AAAA'])
+  assert.equal(merged.skipped, 3)
+})
+
+test('toolkit import is idempotent, records its own codes and can be cleared', () => {
+  const storage = createFakeStorage()
+  const first = seam.importToolkitLineups(storage, {
+    ok: true,
+    version: '3:1',
+    lineups: [{ name: 'a', code: 'AAAA' }, { name: 'b', code: 'BBBB' }],
+  })
+  assert.equal(first.added, 2)
+  assert.equal(first.skipped, 0)
+  assert.equal(seam.countCustomLineups(storage), 2)
+  assert.equal(storage.getItem(seam.TOOLKIT_MARKER_KEY), '3:1')
+
+  const second = seam.importToolkitLineups(storage, {
+    ok: true,
+    version: '3:1',
+    lineups: [{ name: 'a again', code: 'AAAA' }, { name: 'c', code: 'CCCC' }],
+  })
+  assert.equal(second.added, 1, 'only the new code is appended')
+  assert.equal(second.skipped, 1)
+  assert.equal(seam.countCustomLineups(storage), 3)
+
+  const current = JSON.parse(storage.getItem(seam.CUSTOM_LINEUPS_KEY))
+  current.push({ name: 'mine', code: 'MINE' })
+  storage.setItem(seam.CUSTOM_LINEUPS_KEY, JSON.stringify(current))
+
+  const cleared = seam.clearToolkitLineups(storage)
+  assert.equal(cleared.removed, 3, 'only the three imported codes go away')
+  assert.deepEqual(JSON.parse(storage.getItem(seam.CUSTOM_LINEUPS_KEY)), [{ name: 'mine', code: 'MINE' }])
+  assert.equal(storage.getItem(seam.TOOLKIT_MARKER_KEY), null, 'clearing resets the auto-import marker')
+})
+
+test('toolkit import rejects an invalid payload and works with no storage', () => {
+  const storage = createFakeStorage()
+  assert.equal(seam.importToolkitLineups(storage, { ok: false }).ok, false)
+  assert.equal(seam.importToolkitLineups(storage, null).ok, false)
+  assert.equal(seam.importToolkitLineups(null, { ok: true, lineups: [] }).ok, false)
+  assert.equal(seam.countCustomLineups(null), 0)
+  assert.deepEqual(seam.clearToolkitLineups(null), { removed: 0, total: 0 })
+})
+
+test('game view stays inside the panel and never covers the app chrome', () => {  // The Electron shell draws minimize/maximize/close above the page at the
   // window's right edge; anything placed under them is invisible and inert.
   // The game view must therefore live inside the panel and never paint a
   // full-window bar: that was the first real-machine round's bug.
@@ -379,3 +441,4 @@ test('styling stays inside pvz- classes and theme tokens', () => {
   }
   assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(css.replace(/#(000|fff|ffffff)\b/gi, '')), 'chrome colours must use theme tokens')
 })
+

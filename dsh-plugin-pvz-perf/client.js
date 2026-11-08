@@ -82,6 +82,16 @@ window.__ModuleLoader__.load({
       'hub.help.version': '需要 pvz_perf 网页版 v3.3.x（含 web-build-manifest.json；WebGPU 或 WebGL2 都能跑）。',
       'hub.help.saves': '存档在浏览器本地（同一个 GUI origin 的 IndexedDB），换浏览器/换端口不共享；游戏里正常退出才会把当前关卡写回去。',
       'hub.missing.hint': '没有在默认位置找到网页版游戏文件。',
+      'toolkit.title': 'Toolkit 阵型码导入',
+      'toolkit.loading': '正在读取本机 PvZ Toolkit 的 setups.yml…',
+      'toolkit.found': '找到 {count} 个阵型：{file}',
+      'toolkit.missing': '没有找到本机 Toolkit 阵型文件（含 setups.yml 的 PvZ_Toolkit 目录，如 E:\\Games\\PvZ_Toolkit_v1.22.0）。',
+      'toolkit.import': '导入到游戏阵型列表',
+      'toolkit.clear': '清空插件导入的阵型',
+      'toolkit.imported': '已导入 {count} 个（跳过 {skipped} 个重复/无效）。重开「自定义存档 → 布阵与关卡」即可在阵型下拉里看到。',
+      'toolkit.cleared': '已移除 {count} 个由插件导入的阵型，你自己保存的阵型不受影响。',
+      'toolkit.state': '游戏当前自定义阵型 {custom} 个，其中插件导入 {imported} 个。',
+      'toolkit.hint': '导入写的是游戏自己的 pvz_custom_lineups（和插件同源）；游戏里那个对话框开着的话，关掉重开即可刷新。',
       'game.title': '植物大战僵尸 · 摸鱼中',
       'game.fullscreen': '全屏',
       'game.exitFullscreen': '退出全屏',
@@ -121,6 +131,16 @@ window.__ModuleLoader__.load({
       'hub.help.version': 'Requires the pvz_perf web build v3.3.x (it ships web-build-manifest.json; WebGPU and WebGL2 both work).',
       'hub.help.saves': 'Saves live in this browser (IndexedDB on the GUI origin), so another browser or port does not share them, and a level is written back only on a normal in-game quit.',
       'hub.missing.hint': 'No web build was found at the default locations.',
+      'toolkit.title': 'Toolkit lineup import',
+      'toolkit.loading': 'Reading the local PvZ Toolkit setups.yml…',
+      'toolkit.found': 'Found {count} lineups: {file}',
+      'toolkit.missing': 'No local Toolkit lineup file found (a PvZ_Toolkit folder with setups.yml, e.g. E:\\Games\\PvZ_Toolkit_v1.22.0).',
+      'toolkit.import': 'Import into the game list',
+      'toolkit.clear': 'Remove imported lineups',
+      'toolkit.imported': 'Imported {count} lineups (skipped {skipped} duplicates/invalid). Reopen 自定义存档 → 布阵与关卡 to see them in the lineup picker.',
+      'toolkit.cleared': 'Removed {count} plugin-imported lineups; lineups you saved yourself are untouched.',
+      'toolkit.state': 'The game currently stores {custom} custom lineups, {imported} of them imported by this plugin.',
+      'toolkit.hint': 'The import writes the game\'s own pvz_custom_lineups key (same origin); reopen the in-game dialog if it is already open.',
       'game.title': 'Plants vs. Zombies · break',
       'game.fullscreen': 'Fullscreen',
       'game.exitFullscreen': 'Exit fullscreen',
@@ -288,6 +308,165 @@ window.__ModuleLoader__.load({
     }
 
     // ---------------------------------------------------------------------
+    // PvZ Toolkit lineup import
+    // ---------------------------------------------------------------------
+    //
+    // The web build's "自定义存档 → 布阵与关卡" reads user lineups from the game
+    // origin's localStorage key `pvz_custom_lineups`. The Host half parses the
+    // local Toolkit's setups.yml; this half merges those codes into the same
+    // store (the plugin page and the game iframe share one origin), so hundreds
+    // of codes arrive without pasting each of them into the game UI.
+
+    /** Host route returning the parsed Toolkit list. */
+    const TOOLKIT_URL = ROUTE + '/toolkit/lineups'
+    /** The game's own custom-lineup storage key. */
+    const CUSTOM_LINEUPS_KEY = 'pvz_custom_lineups'
+    /** Codes this plugin added, so "清空" only removes its own imports. */
+    const TOOLKIT_IMPORTED_KEY = 'dsh_pvz_toolkit_imported'
+    /** Toolkit version already imported automatically, to avoid re-import noise. */
+    const TOOLKIT_MARKER_KEY = 'dsh_pvz_toolkit_marker'
+
+    /**
+     * The page's localStorage, or null where the environment has none (tests,
+     * opaque origins). Same-origin game iframe shares this store.
+     * @returns {Storage|null} the storage area.
+     */
+    function safeStorage() {
+      try {
+        return typeof localStorage === 'undefined' ? null : localStorage
+      } catch {
+        return null
+      }
+    }
+
+    /**
+     * Read a JSON array from one storage key, tolerating corruption.
+     * @param {Storage|null} storage - the storage area.
+     * @param {string} key - the key.
+     * @returns {unknown[]} the parsed array, or [].
+     */
+    function readStoredArray(storage, key) {
+      if (storage === null) return []
+      try {
+        const value = JSON.parse(storage.getItem(key) ?? '[]')
+        return Array.isArray(value) ? value : []
+      } catch {
+        return []
+      }
+    }
+
+    /**
+     * Write JSON into one storage key, swallowing quota/privacy failures.
+     * @param {Storage|null} storage - the storage area.
+     * @param {string} key - the key.
+     * @param {unknown} value - a JSON-safe value.
+     * @returns {boolean} true when the write succeeded.
+     */
+    function writeStoredJson(storage, key, value) {
+      if (storage === null) return false
+      try {
+        storage.setItem(key, JSON.stringify(value))
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    /**
+     * Merge Toolkit entries into the game's custom lineup list.
+     *
+     * Entries are `{ name, code }`; codes are unique, and an entry already in
+     * the list (by code) is skipped rather than replaced so the user's own name
+     * for a lineup survives.
+     * @param {unknown[]} existing - the current custom lineup list.
+     * @param {unknown[]} incoming - Toolkit entries from the Host.
+     * @returns {{ list: Array<{ name: string, code: string }>, added: string[], skipped: number }}
+     *   the merged list, the codes appended, and the entries skipped.
+     */
+    function mergeToolkitLineups(existing, incoming) {
+      const list = []
+      for (const item of Array.isArray(existing) ? existing : []) {
+        if (item === null || typeof item !== 'object') continue
+        if (typeof item.name !== 'string' || typeof item.code !== 'string' || item.code === '') continue
+        list.push({ name: item.name, code: item.code })
+      }
+      const known = new Set(list.map((item) => item.code))
+      const added = []
+      let skipped = 0
+      for (const item of Array.isArray(incoming) ? incoming : []) {
+        if (item === null || typeof item !== 'object' || typeof item.name !== 'string' || typeof item.code !== 'string' || item.name === '' || item.code === '') {
+          skipped += 1
+          continue
+        }
+        if (known.has(item.code) === true) {
+          skipped += 1
+          continue
+        }
+        known.add(item.code)
+        list.push({ name: item.name.slice(0, 60), code: item.code })
+        added.push(item.code)
+      }
+      return { list, added, skipped }
+    }
+
+    /**
+     * Merge one Host Toolkit payload into the game's custom lineups.
+     * @param {Storage|null} storage - the shared origin storage.
+     * @param {object} payload - `/pvz-perf/toolkit/lineups` payload.
+     * @returns {{ ok: boolean, added: number, skipped: number, total: number, error?: string }}
+     *   the import result.
+     */
+    function importToolkitLineups(storage, payload) {
+      if (storage === null) return { ok: false, added: 0, skipped: 0, total: 0, error: 'no localStorage' }
+      if (payload === null || typeof payload !== 'object' || payload.ok !== true || Array.isArray(payload.lineups) !== true) {
+        return { ok: false, added: 0, skipped: 0, total: 0, error: 'invalid payload' }
+      }
+      const merged = mergeToolkitLineups(readStoredArray(storage, CUSTOM_LINEUPS_KEY), payload.lineups)
+      writeStoredJson(storage, CUSTOM_LINEUPS_KEY, merged.list)
+      const imported = new Set(readStoredArray(storage, TOOLKIT_IMPORTED_KEY).filter((code) => typeof code === 'string'))
+      for (const code of merged.added) imported.add(code)
+      writeStoredJson(storage, TOOLKIT_IMPORTED_KEY, [...imported])
+      try {
+        storage.setItem(TOOLKIT_MARKER_KEY, String(payload.version ?? ''))
+      } catch {
+        /* quota: the import itself still succeeded */
+      }
+      return { ok: true, added: merged.added.length, skipped: merged.skipped, total: merged.list.length }
+    }
+
+    /**
+     * Remove only the lineups this plugin imported, leaving the user's own.
+     * @param {Storage|null} storage - the shared origin storage.
+     * @returns {{ removed: number, total: number }} the result.
+     */
+    function clearToolkitLineups(storage) {
+      if (storage === null) return { removed: 0, total: 0 }
+      const imported = new Set(readStoredArray(storage, TOOLKIT_IMPORTED_KEY).filter((code) => typeof code === 'string'))
+      const current = readStoredArray(storage, CUSTOM_LINEUPS_KEY)
+      const kept = current.filter((item) => {
+        const code = item !== null && typeof item === 'object' && typeof item.code === 'string' ? item.code : ''
+        return code === '' || imported.has(code) !== true
+      })
+      writeStoredJson(storage, CUSTOM_LINEUPS_KEY, kept)
+      writeStoredJson(storage, TOOLKIT_IMPORTED_KEY, [])
+      try {
+        storage.removeItem(TOOLKIT_MARKER_KEY)
+      } catch {
+        /* nothing depends on the marker for clearing */
+      }
+      return { removed: current.length - kept.length, total: kept.length }
+    }
+
+    /**
+     * How many custom lineups the game currently stores.
+     * @param {Storage|null} storage - the shared origin storage.
+     * @returns {number} the count.
+     */
+    function countCustomLineups(storage) {
+      return readStoredArray(storage, CUSTOM_LINEUPS_KEY).length
+    }
+
+    // ---------------------------------------------------------------------
     // Shared art
     // ---------------------------------------------------------------------
 
@@ -399,6 +578,76 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * The Toolkit lineup import card.
+     *
+     * Reads the Host's parsed `setups.yml`, then merges the codes into the game
+     * origin's own custom-lineup storage. Purely a convenience view: the game
+     * never learns this plugin exists.
+     * @param {{ locale: object }} props - locale service.
+     * @returns {object} React element.
+     */
+    function ToolkitCard(props) {
+      const t = props.locale.bind(NS)
+      const storage = safeStorage()
+      const [state, setState] = React.useState({ phase: 'loading', payload: null, message: null })
+
+      /** Fetch the Host's Toolkit payload. */
+      const load = () => {
+        setState({ phase: 'loading', payload: null, message: null })
+        try {
+          const pending = fetch(TOOLKIT_URL, { cache: 'no-store', credentials: 'same-origin' })
+          pending
+            .then((response) => (response.ok === true ? response.json() : Promise.reject(new Error('HTTP ' + response.status))))
+            .then((payload) => {
+              setState({ phase: payload !== null && typeof payload === 'object' && payload.ok === true ? 'ready' : 'missing', payload, message: null })
+            })
+            .catch((error) => setState({ phase: 'error', payload: null, message: error instanceof Error ? error.message : String(error) }))
+        } catch (error) {
+          setState({ phase: 'error', payload: null, message: error instanceof Error ? error.message : String(error) })
+        }
+      }
+      React.useEffect(() => { load() }, [])
+
+      const payload = state.payload
+      const found = state.phase === 'ready' && payload !== null && typeof payload === 'object'
+      const custom = countCustomLineups(storage)
+      const imported = readStoredArray(storage, TOOLKIT_IMPORTED_KEY).length
+      const runImport = () => {
+        const result = importToolkitLineups(storage, payload)
+        if (result.ok !== true) {
+          setState({ ...state, message: '导入失败：' + (result.error ?? 'unknown') })
+          return
+        }
+        setState({
+          ...state,
+          message: fill(t('toolkit.imported'), { count: String(result.added), skipped: String(result.skipped) }),
+        })
+      }
+      const runClear = () => {
+        const result = clearToolkitLineups(storage)
+        setState({ ...state, message: fill(t('toolkit.cleared'), { count: String(result.removed) }) })
+      }
+
+      const lines = []
+      if (state.phase === 'loading') lines.push(t('toolkit.loading'))
+      else if (found) lines.push(fill(t('toolkit.found'), { count: String(payload.count), file: String(payload.file ?? '') }))
+      else if (payload !== null && typeof payload === 'object' && typeof payload.hint === 'string' && payload.hint !== '') lines.push(payload.hint)
+      else if (state.message === null) lines.push(t('toolkit.missing'))
+      if (state.phase === 'error' && state.message !== null) lines.push(state.message)
+      if (state.message !== null && state.phase !== 'error') lines.push(state.message)
+      lines.push(fill(t('toolkit.state'), { custom: String(custom), imported: String(imported) }))
+      lines.push(t('toolkit.hint'))
+
+      return h('section', { className: 'pvz-card' },
+        h('div', { className: 'pvz-toolkit-head' }, h('div', { className: 'pvz-card-title' }, t('toolkit.title'))),
+        h('ul', { className: 'pvz-help' }, lines.map((line, index) => h('li', { key: index }, line))),
+        h('div', { className: 'pvz-actions' },
+          h('button', { type: 'button', className: 'pvz-btn', disabled: found !== true, onClick: runImport }, t('toolkit.import')),
+          h('button', { type: 'button', className: 'pvz-btn pvz-btn-ghost', onClick: runClear }, t('toolkit.clear')),
+          h('button', { type: 'button', className: 'pvz-btn pvz-btn-ghost', onClick: load }, t('hub.refresh'))))
+    }
+
+    /**
      * The hub: status, version, directory, primary action, and the install help.
      * @param {object} props - slot props plus `{ store, locale, layout }`.
      * @returns {object} React element.
@@ -462,6 +711,7 @@ window.__ModuleLoader__.load({
               h('button', { type: 'button', className: 'pvz-btn', onClick: () => store.refresh() }, t('hub.refresh')),
               h('button', { type: 'button', className: 'pvz-btn', disabled: blocked, onClick: openTab }, t('hub.external')),
               h('button', { type: 'button', className: 'pvz-btn pvz-btn-ghost', onClick: back }, t('hub.back')))),
+          h(ToolkitCard, { locale: props.locale }),
           h('section', { className: 'pvz-card' },
             h('div', { className: 'pvz-card-title' }, t('hub.help.title')),
             h('ul', { className: 'pvz-help' },
@@ -732,6 +982,8 @@ window.__ModuleLoader__.load({
 .pvz-footer-wide{width:100%;justify-content:flex-start;padding:0 8px}
 .pvz-footer-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex:none}
 .pvz-footer-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pvz-toolkit-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.pvz-toolkit-head .pvz-card-title{flex:1;min-width:0}
 @media (max-width: 720px){.pvz-hub-inner{padding:14px 12px 20px}.pvz-row{grid-template-columns:74px minmax(0,1fr)}}
 `
 
@@ -763,6 +1015,26 @@ window.__ModuleLoader__.load({
         ctx.effect(() => () => store.dispose())
         const layout = typeof ctx.get === 'function' ? ctx.get('layout') : undefined
 
+        // One-time convenience: pull the local Toolkit lineups into the game's
+        // own custom-lineup list on first activation (and again whenever the
+        // Toolkit file version changes). The hub card can re-run or undo it.
+        const storage = safeStorage()
+        if (storage !== null && typeof fetch === 'function') {
+          void (async () => {
+            try {
+              const response = await fetch(TOOLKIT_URL, { cache: 'no-store', credentials: 'same-origin' })
+              if (response.ok !== true) return
+              const payload = await response.json()
+              if (payload === null || typeof payload !== 'object' || payload.ok !== true || Array.isArray(payload.lineups) !== true) return
+              if (payload.lineups.length === 0) return
+              if (storage.getItem(TOOLKIT_MARKER_KEY) === String(payload.version)) return
+              importToolkitLineups(storage, payload)
+            } catch {
+              /* the import is a convenience; the hub card retries on demand */
+            }
+          })()
+        }
+
         ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
           name: 'sidebar.panellist',
           id: PANEL_ID,
@@ -792,14 +1064,22 @@ window.__ModuleLoader__.load({
       ROUTE,
       GAME_URL,
       STATUS_URL,
+      TOOLKIT_URL,
       PANEL_ID,
       SEAT_FOOTER,
       DEFAULT_DIR_HINT,
       ENV_OVERRIDE,
+      CUSTOM_LINEUPS_KEY,
+      TOOLKIT_IMPORTED_KEY,
+      TOOLKIT_MARKER_KEY,
       createGameStore,
       registerDictionaries,
+      mergeToolkitLineups,
+      importToolkitLineups,
+      clearToolkitLineups,
+      countCustomLineups,
       LOCALES: { zh: ZH, en: EN },
-      COMPONENTS: { SproutMark, StateDot, HubPanel, GameEmbed, PvzPanel, FooterLaunch },
+      COMPONENTS: { SproutMark, StateDot, HubPanel, ToolkitCard, GameEmbed, PvzPanel, FooterLaunch },
     }
 
     return module.exports

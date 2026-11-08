@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-pvz-perf",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "engines": {
     "dsh": ">=0.2.0-rc.2 <0.3.0-0"
   },
@@ -27,7 +27,7 @@
     "url": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/issues"
   },
   "homepage": "https://github.com/tofu-zyc/dsh-plugin-tofu-box/tree/main/dsh-plugin-pvz-perf",
-  "description": "植物大战僵尸·摸鱼面板：把 pvz_perf 的网页版（WebGPU/WebGL 构建）嵌进 DSH 中央面板。侧栏点开就在主内容区开打，侧栏、会话和标题栏都不会被遮挡；随时「返回对话」切回去。游戏文件留在本地磁盘，插件不打包、不分发任何游戏资源。",
+  "description": "植物大战僵尸·摸鱼面板：把 pvz_perf 的网页版（WebGPU/WebGL 构建）嵌进 DSH 中央面板，并把本机 PvZ Toolkit 的阵型码一键导入游戏的自定义存档阵型列表。侧栏、会话和标题栏都不会被遮挡；随时「返回对话」。游戏文件留在本地磁盘，插件不打包、不分发任何游戏资源。",
   "type": "module",
   "main": "index.js",
   "exports": {

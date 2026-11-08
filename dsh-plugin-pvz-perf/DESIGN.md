@@ -252,3 +252,26 @@ Verification for this revision: rc-dev web instance, real headless Chrome —
 game rect starts at x=280 (sidebar occupies 0..280), computed position `static`,
 zero fixed full-window layers, all four tool-bar buttons present, the iframe
 loads the pvz_perf launcher and "返回对话" returns to the conversation.
+
+## 7. Toolkit lineup import (0.1.3)
+
+The web build's Custom Save → 布阵与关卡 picker reads `pvz_custom_lineups` from the
+game origin's localStorage. The standalone PvZ Toolkit keeps a 339-entry list in
+`setups.yml` next to its exe. 0.1.3 adds a one-way convenience import:
+
+- Host: `findToolkitSetups()` resolves `DSH_PVZ_TOOLKIT_DIR` / `PVZ_TOOLKIT_DIR`,
+  `PvZ_Toolkit*` folders next to the game build, drive `\Games` folders, then the
+  user's Games folder; `parseToolkitSetups()` parses the Toolkit's documented YAML
+  subset and normalises codes exactly like the game's `decodeLineup` (URL-safe →
+  Base64, padding restored). `GET /pvz-perf/toolkit/lineups` returns
+  `{ ok, file, count, skipped, version, lineups }`, re-read at most every 5 s.
+- Browser: `mergeToolkitLineups()` dedupes by code and preserves the user's names;
+  `importToolkitLineups()` writes `pvz_custom_lineups` plus a marker of the codes
+  this plugin added; `clearToolkitLineups()` removes only those. `apply()` runs the
+  import once per Toolkit version on activation; the hub card can re-run it and
+  clear it. Same-origin plugin page and game iframe share that storage, so no game
+  UI automation is needed.
+- Verified on the rc-dev web instance: route returned 339/339 codes from
+  `E:\Games\PvZ_Toolkit_v1.22.0\setups.yml`, the plugin auto-imported all 339, and
+  the game's own Custom Save lineup picker then listed 343 options (4 built-ins +
+  339 imported).

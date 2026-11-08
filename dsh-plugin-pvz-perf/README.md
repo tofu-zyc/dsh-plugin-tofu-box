@@ -9,7 +9,8 @@
 - **中央面板里玩游戏**：游戏渲染在 shell 已经分配给本插件的 `main` 面板里，不再是全窗口浮层——侧栏、标题栏、窗口按钮全部保持可见可用。
 - **侧栏图标 + hub**：图标点开先看到状态页（游戏状态、版本、解析到的目录），一个按钮开始游戏；游戏开起来后同一块面板顶部是一条紧凑工具条：`返回对话 / 全屏 / 重新载入 / 结束`，右侧侧栏始终在。
 - **侧栏底部快捷入口**：Settings 旁边的幼苗图标，一键切到插件面板并开始游戏；游戏开着时显示「回到植物大战僵尸」。
-- **全屏是可选动作**：只有你自己点「全屏」时才会铺满（按 Esc 退出全屏），平时永远只是中央面板。
+- **Toolkit 阵型码一键导入**：插件读取本机 `PvZ_Toolkit_v1.22.0\setups.yml`（339 条在线阵型）并写进游戏「自定义存档 → 布阵与关卡」用的 `pvz_custom_lineups`，不用再一条条粘贴。首次激活会自动导入一次；hub 里有「导入 / 清空插件导入的阵型」可手动重跑或撤销（只删插件导入的，保留你自己存的阵型）。
+- **全屏是可选动作**：只有你自己点「全屏」时才会铺满（按 Esc 或右上角「退出全屏」回来），平时永远只是中央面板。
 - **自动找游戏**：按 `DSH_PVZ_GAME_DIR` → `PVZ_PERF_WEB_DIR` → 常见目录（各盘 `\Games\pvz_perf_web`、`\Games\pvz_perf`、`\Downloads\pvz_perf_web` 等）依次查找，找到含 `index.html` + `web-build-manifest.json` + `launcher.js` 的那一层就用它。
 - 只读、同源、loopback：Host 路由只服务解析到的那个游戏目录，不做目录列表，不写任何文件。
 
@@ -53,10 +54,20 @@ Windows 下从桌面图标启动的 Harness 读不到临时 shell 的环境变�
 
 hub 面板的「游戏目录」一栏会显示实际解析到的路径，`/pvz-perf/status` 也能直接看到。
 
+## Toolkit 阵型码导入
+
+游戏自带的「自定义存档 → 布阵与关卡」里有一个阵型下拉，读的是 `pvz_custom_lineups`（游戏 origin 的 localStorage，和插件同源）。插件把本机 PvZ Toolkit 的阵型表读出来批量写进去：
+
+- 自动查找顺序：`DSH_PVZ_TOOLKIT_DIR` / `PVZ_TOOLKIT_DIR`（目录或直接给 `setups.yml`）→ 游戏目录旁边的 `PvZ_Toolkit*` 目录 → 各盘 `\Games\PvZ_Toolkit*` 与用户 `Games` 目录。
+- 插件**首次激活会自动导入一次**（之后 Toolkit 文件版本变了才会再自动导入）；hub 面板有「导入到游戏阵型列表 / 清空插件导入的阵型」按钮，清空只删插件导入的，你自己存的阵型不受影响。
+- 用的时候：游戏 →「自定义存档」→「布阵与关卡」→ 阵型下拉；对话框已经开着的话关掉重开一次。
+- 当前机器实测：`E:\Games\PvZ_Toolkit_v1.22.0\setups.yml` → 339 条，全部解析成功。
+
 ## 工作原理
 
 - Host half（`index.js`）：`ctx.webServer.register({ kind: 'prefix', path: '/pvz-perf', handler })`，提供
   - `GET /pvz-perf/status` — JSON：`{ ok, dir, version, sourceCommit, gameUrl, hint }`
+  - `GET /pvz-perf/toolkit/lineups` — 本机 Toolkit 解析结果：`{ ok, file, count, version, lineups }`（只读 `setups.yml`）
   - `GET|HEAD /pvz-perf/game/…` — 游戏文件（`content-length` + `no-store`，流式发送，不做目录列表）
   - 游戏目录缺失时，`/game/` 返回一张中英文说明页，所以面板里看到的是“怎么装”，不是白屏。
 - Browser half（`client.js`）：三个 additive 座位，不覆盖官方 UI——
@@ -83,6 +94,7 @@ hub 面板的「游戏目录」一栏会显示实际解析到的路径，`/pvz-p
 
 ## 变更
 
+- **0.1.3**（2026-11-08）：新增 Toolkit 阵型码一键导入（读本机 `setups.yml` → 写入游戏的 `pvz_custom_lineups`，含自动导入、手动重跑、只清插件导入的部分）。
 - **0.1.2**（2026-11-08，真机第二轮后的修复）：全屏改成真正的切换：进入后工具条隐藏、游戏铺满整屏，右上角常驻「退出全屏」浮标，Esc 也可退出，退出后工具条恢复；再点按钮是切换而不是重复进入。
 ode --test 客户端 19/19。
 - **0.1.1**（2026-11-08，真机首轮后的修复）：不再使用 `shell.overlay` 全窗口浮层；游戏改为渲染在 `main` 中央面板内，侧栏与窗口控件不再被遮挡，游戏工具条四个按钮（返回对话/全屏/重新载入/结束）全部可见可点。

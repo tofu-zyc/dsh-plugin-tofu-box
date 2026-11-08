@@ -21,11 +21,15 @@ import {
   CANDIDATE_SUFFIXES,
   GAME_PREFIX,
   ROUTE,
+  TOOLKIT_ROUTE,
   apply,
   createGameHandler,
+  createToolkitHandler,
+  findToolkitSetups,
   gameRelativePath,
   isGameDir,
   mimeTypeFor,
+  parseToolkitSetups,
   readManifest,
   resolveGameDir,
 } from '../index.js'
@@ -37,6 +41,7 @@ const INCOMPLETE_DIR = path.join(FIXTURES, 'game-incomplete')
 const BAD_MANIFEST_DIR = path.join(FIXTURES, 'game-bad-manifest')
 const SECRET_FILE = path.join(FIXTURES, 'secret.txt')
 const MISSING_DIR = path.join(FIXTURES, 'does-not-exist')
+const TOOLKIT_ROOT = path.join(FIXTURES, 'toolkit')
 
 const MANIFEST = readManifest(GAME_DIR)
 const ALT_MANIFEST = readManifest(ALT_DIR)
@@ -502,6 +507,60 @@ test('the game route streams files instead of buffering them', async () => {
   assert.doesNotMatch(source, /\bfs\.readFile\(/, 'the route must never buffer a whole game file')
 })
 
+test('parseToolkitSetups keeps valid lineups, normalises codes, skips the rest', async () => {
+  const text = await fs.readFile(path.join(TOOLKIT_ROOT, 'PvZ_Toolkit_Test', 'setups.yml'), 'utf8')
+  const parsed = parseToolkitSetups(text)
+  assert.deepEqual(parsed.lineups.map((lineup) => lineup.name), ['[DE] 双核无炮', '[DE] 长矛无炮', '我的阵型'])
+  assert.equal(parsed.skipped, 3, 'one duplicate, one junk line and one short code are skipped')
+  for (const lineup of parsed.lineups) {
+    assert.match(lineup.code, /^[A-Za-z0-9+/]{16,164}={0,2}$/)
+    assert.equal(lineup.code.length % 4, 0, 'codes are padded for the game decoder')
+  }
+  const urlSafe = parseToolkitSetups('"n": ' + 'A'.repeat(16) + '-_A=')
+  assert.equal(urlSafe.lineups[0].raw_code, undefined)
+  assert.match(urlSafe.lineups[0].code, /^[A-Za-z0-9+/]+={0,2}$/, 'URL-safe characters are normalised')
+})
+
+test('findToolkitSetups scans Toolkit directories and honours the env override', async () => {
+  const byRoot = findToolkitSetups({ env: {}, roots: [TOOLKIT_ROOT] })
+  assert.ok(byRoot, 'the fixture Toolkit directory is found')
+  assert.equal(byRoot.lineups.length, 3)
+  assert.ok(byRoot.file.endsWith('setups.yml'))
+  assert.match(byRoot.version, /^3:\d+$/)
+
+  const byEnv = findToolkitSetups({
+    env: { DSH_PVZ_TOOLKIT_DIR: path.join(TOOLKIT_ROOT, 'PvZ_Toolkit_Test', 'setups.yml') },
+    roots: [MISSING_DIR],
+  })
+  assert.ok(byEnv, 'a direct .yml path is accepted')
+  assert.equal(byEnv.lineups.length, 3)
+
+  assert.equal(findToolkitSetups({ env: {}, roots: [MISSING_DIR] }), null, 'a missing Toolkit yields null')
+})
+
+test('the toolkit route answers the parsed list and degrades to an empty hint', async () => {
+  const found = await startServer(createToolkitHandler({
+    resolve: () => findToolkitSetups({ env: {}, roots: [TOOLKIT_ROOT] }),
+  }))
+  const answer = await fetch(found.origin + TOOLKIT_ROUTE)
+  assert.equal(answer.status, 200)
+  const payload = await answer.json()
+  assert.equal(payload.ok, true)
+  assert.equal(payload.count, 3)
+  assert.equal(payload.lineups.length, 3)
+  assert.ok(payload.version.length > 0)
+  assert.ok(payload.file.endsWith('setups.yml'))
+
+  const missing = await startServer(createToolkitHandler({ resolve: () => null }))
+  const absentPayload = await (await fetch(missing.origin + TOOLKIT_ROUTE)).json()
+  assert.equal(absentPayload.ok, false)
+  assert.equal(absentPayload.count, 0)
+  assert.ok(absentPayload.hint.includes('PvZ_Toolkit'), 'the hint names the expected Toolkit folder')
+
+  const rejected = await fetch(found.origin + TOOLKIT_ROUTE, { method: 'POST' })
+  assert.equal(rejected.status, 405)
+})
+
 test('apply registers one prefix route and logs the resolved build', () => {
   const previous = process.env.DSH_PVZ_GAME_DIR
   process.env.DSH_PVZ_GAME_DIR = GAME_DIR
@@ -522,10 +581,13 @@ test('apply registers one prefix route and logs the resolved build', () => {
       },
     }
     apply(ctx)
-    assert.equal(routes.length, 1, 'exactly one route is registered')
+    assert.equal(routes.length, 2, 'the game prefix route plus the exact toolkit route')
     assert.equal(routes[0].kind, 'prefix')
     assert.equal(routes[0].path, ROUTE)
     assert.equal(typeof routes[0].handler, 'function')
+    assert.equal(routes[1].kind, 'exact')
+    assert.equal(routes[1].path, TOOLKIT_ROUTE)
+    assert.equal(typeof routes[1].handler, 'function')
     assert.equal(logs.length, 1, 'exactly one log line on activation')
     assert.ok(logs[0].includes(GAME_DIR), 'the log names the resolved directory')
     assert.ok(logs[0].includes('3.3.4'), 'the log names the build version')

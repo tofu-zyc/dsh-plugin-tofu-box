@@ -308,6 +308,199 @@ export function resolveGameDir(options = {}) {
   return null
 }
 
+// -----------------------------------------------------------------------------
+// Toolkit lineup import
+// -----------------------------------------------------------------------------
+//
+// The web build's "自定义存档 → 布阵与关卡" tab stores user lineups in the
+// game origin's localStorage key `pvz_custom_lineups` (array of `{ name, code }`,
+// Toolkit code format). The standalone PvZ Toolkit keeps its own lineup list in
+// `setups.yml` next to its executable and auto-loads it at start. This half only
+// finds and parses that read-only file; the browser half merges the codes into
+// the game's list (same origin), so a bulk import does not need 339 manual pastes.
+
+/** Directory-name prefix used by the standalone PvZ Toolkit releases. */
+const TOOLKIT_DIR_PATTERN = /^pvz[_-]?toolkit/i
+/** The lineup file the Toolkit auto-loads from its own directory. */
+const TOOLKIT_SETUPS_FILE = 'setups.yml'
+/** Shape the web build accepts after URL-safe normalisation and padding. */
+const TOOLKIT_CODE_PATTERN = /^[A-Za-z0-9+/]{16,164}={0,2}$/
+
+/**
+ * Parse a Toolkit `setups.yml` lineup list.
+ *
+ * The file is the Toolkit's documented YAML subset: one `"name": CODE` line per
+ * lineup, comments starting with `#`, other lines ignored. Codes are normalised
+ * the same way the game's own `decodeLineup` does (URL-safe characters back to
+ * Base64, padding restored) so the imported list is directly loadable.
+ * @param {string} text - the file contents.
+ * @returns {{ lineups: Array<{ name: string, code: string }>, skipped: number }}
+ *   parsed lineups in file order plus the count of lines that did not qualify.
+ */
+export function parseToolkitSetups(text) {
+  const lineups = []
+  const seen = new Set()
+  let skipped = 0
+  for (const raw of String(text ?? '').split(/\r?\n/)) {
+    const line = raw.trim()
+    if (line === '' || line.startsWith('#')) continue
+    const match = /^"((?:[^"\\]|\\.)*)"\s*:\s*([A-Za-z0-9+/=_-]{16,220})$/.exec(line)
+    if (match === null) {
+      skipped += 1
+      continue
+    }
+    const name = match[1].replace(/\\(["\\])/g, '$1').trim().slice(0, 60)
+    let code = match[2].replace(/-/g, '+').replace(/_/g, '/')
+    if (code.length % 4 !== 0) code += '='.repeat(4 - (code.length % 4))
+    if (name === '' || TOOLKIT_CODE_PATTERN.test(code) !== true || seen.has(code) === true) {
+      skipped += 1
+      continue
+    }
+    seen.add(code)
+    lineups.push({ name, code })
+  }
+  return { lineups, skipped }
+}
+
+/**
+ * Find the Toolkits's `setups.yml` on this machine, read-only.
+ *
+ * Resolution order: `DSH_PVZ_TOOLKIT_DIR` / `PVZ_TOOLKIT_DIR` (a Toolkit folder,
+ * or a direct `.yml` path), then directories named like `PvZ_Toolkit*` under the
+ * game folder's parent, then every drive's `Games` folder and the user's Games
+ * folder. The first file that parses into at least one lineup wins.
+ * @param {{ gameDir?: string, env?: object, roots?: string[] }} [options] -
+ *   `env` defaults to `process.env`; `roots` overrides the search roots (tests).
+ * @returns {{ dir: string, file: string, lineups: Array<{ name: string, code: string }>, skipped: number, version: string } | null}
+ *   the parsed list, or null when no Toolkit lineups exist.
+ */
+export function findToolkitSetups(options = {}) {
+  const settings = options !== null && typeof options === 'object' ? options : {}
+  const env = settings.env !== null && typeof settings.env === 'object' ? settings.env : process.env
+  const files = []
+  const seenFiles = new Set()
+  /**
+   * @param {string} value - a Toolkit directory or a `.yml`/`.yaml` file path.
+   */
+  const pushCandidate = (value) => {
+    if (typeof value !== 'string' || value.trim() === '') return
+    let resolved
+    try {
+      resolved = path.resolve(value.trim())
+    } catch {
+      return
+    }
+    const lower = resolved.toLowerCase()
+    const file = lower.endsWith('.yml') || lower.endsWith('.yaml') ? resolved : path.join(resolved, TOOLKIT_SETUPS_FILE)
+    if (seenFiles.has(file) !== true) {
+      seenFiles.add(file)
+      files.push(file)
+    }
+  }
+  for (const key of ['DSH_PVZ_TOOLKIT_DIR', 'PVZ_TOOLKIT_DIR']) pushCandidate(env[key])
+  const roots = Array.isArray(settings.roots) ? settings.roots.filter((root) => typeof root === 'string' && root.trim() !== '') : []
+  if (roots.length === 0) {
+    const gameDir = typeof settings.gameDir === 'string' ? settings.gameDir.trim() : ''
+    if (gameDir !== '') roots.push(path.dirname(path.resolve(gameDir)))
+    if (process.platform === 'win32') {
+      for (const letter of DRIVE_LETTERS) roots.push(letter + ':\\Games')
+    }
+    const profile = profileRoot(env)
+    if (profile !== '') roots.push(path.join(profile, 'Games'))
+  }
+  for (const root of roots) {
+    let entries
+    try {
+      entries = fs.readdirSync(root, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory() !== true || TOOLKIT_DIR_PATTERN.test(entry.name) !== true) continue
+      pushCandidate(path.join(root, entry.name))
+    }
+  }
+  for (const file of files) {
+    try {
+      const text = fs.readFileSync(file, 'utf8')
+      const parsed = parseToolkitSetups(text)
+      if (parsed.lineups.length === 0) continue
+      const stat = fs.statSync(file)
+      return {
+        dir: path.dirname(file),
+        file,
+        lineups: parsed.lineups,
+        skipped: parsed.skipped,
+        version: parsed.lineups.length + ':' + Math.round(stat.mtimeMs),
+      }
+    } catch {
+      /* unreadable candidate: try the next one */
+    }
+  }
+  return null
+}
+
+/** Payload the browser half fetches before importing. */
+export const TOOLKIT_ROUTE = ROUTE + '/toolkit/lineups'
+
+/** Hint returned while no Toolkit lineups were found. */
+const TOOLKIT_MISSING_HINT = '没有找到 PvZ Toolkit 的阵型文件：找一个含 setups.yml 的 PvZ_Toolkit 目录'
+  + '（如 E:\\Games\\PvZ_Toolkit_v1.22.0），或设置 DSH_PVZ_TOOLKIT_DIR 指向它，然后重试。'
+
+/**
+ * Build the read-only HTTP handler for the Toolkit lineup list.
+ *
+ * Always answers 200 JSON so the browser half can distinguish "no Toolkit" from
+ * a transport failure; the parsed file is re-read at most once every few seconds
+ * so adding lineups in the Toolkit and pressing refresh shows up without a
+ * plugin restart.
+ * @param {{ resolve?: () => (object | null) }} [options] - the resolver.
+ * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => Promise<void>}
+ *   the route handler.
+ */
+export function createToolkitHandler(options = {}) {
+  const settings = options !== null && typeof options === 'object' ? options : {}
+  const resolve = typeof settings.resolve === 'function' ? settings.resolve : () => null
+  let cached = null
+  let cachedAt = 0
+  return async function toolkitRoute(req, res) {
+    try {
+      const method = typeof req?.method === 'string' ? req.method.toUpperCase() : 'GET'
+      if (method !== 'GET' && method !== 'HEAD') {
+        sendText(res, 405, 'pvz-perf: GET only', { allow: 'GET, HEAD' })
+        return
+      }
+      const now = Date.now()
+      if (cached === null || now - cachedAt > 5000) {
+        try {
+          cached = await Promise.resolve().then(() => resolve())
+        } catch {
+          cached = null
+        }
+        cachedAt = now
+      }
+      const payload = cached === null
+        ? { ok: false, file: null, count: 0, skipped: 0, version: null, lineups: [], hint: TOOLKIT_MISSING_HINT }
+        : {
+            ok: true,
+            file: cached.file,
+            count: cached.lineups.length,
+            skipped: typeof cached.skipped === 'number' ? cached.skipped : 0,
+            version: typeof cached.version === 'string' ? cached.version : '',
+            lineups: cached.lineups,
+            hint: '',
+          }
+      sendJson(res, 200, payload, method === 'HEAD')
+    } catch (error) {
+      try {
+        sendText(res, 500, 'pvz-perf: ' + (error instanceof Error ? error.message : String(error)))
+      } catch {
+        /* the response is already gone */
+      }
+    }
+  }
+}
+
 /**
  * The content type one file path is served as.
  *
@@ -727,5 +920,18 @@ export function apply(ctx) {
   ctx.effect(
     () => ctx.webServer.register({ kind: 'prefix', path: ROUTE, handler }),
     'pvz-perf: game route',
+  )
+  // Read-only Toolkit lineup list for the browser half's bulk import. Resolution
+  // stays lazy: a Toolkit installed/moved after activation is picked up on the
+  // next request, and the handler re-reads the file at most every few seconds.
+  const toolkitHandler = createToolkitHandler({
+    resolve: () => {
+      const game = resolveGameDir()
+      return findToolkitSetups({ gameDir: game === null ? '' : game.dir })
+    },
+  })
+  ctx.effect(
+    () => ctx.webServer.register({ kind: 'exact', path: TOOLKIT_ROUTE, handler: toolkitHandler }),
+    'pvz-perf: toolkit lineups route',
   )
 }
