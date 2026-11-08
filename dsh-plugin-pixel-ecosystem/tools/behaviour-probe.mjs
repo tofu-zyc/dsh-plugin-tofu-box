@@ -411,6 +411,14 @@ function createSpeciesStats() {
     samples: 0,
     hungerSum: 0,
     energySum: 0,
+    // Energy ledger, in kJ summed over individuals and ticks. Dividing by
+    // `days` (= entitySeconds / DAY_SECONDS) turns each into kJ/day/individual,
+    // which is the unit the panel's budget table and the Sankey chart speak.
+    reserveDelta: 0,
+    structureDelta: 0,
+    respired: 0,
+    reproduction: 0,
+    ledgerSamples: 0,
   }
 }
 
@@ -497,6 +505,8 @@ function soak(engine, options) {
     return lowest
   }
 
+  // World-level pool snapshot at the start, for the conservation residual.
+  const firstSnapshot = typeof engine.snapshotEnergy === 'function' ? engine.snapshotEnergy(world) : null
   let stepMs = 0
   let tick = 0
   const started = performance.now()
@@ -535,6 +545,15 @@ function soak(engine, options) {
           lastAge: entity.age,
           lastFate: entity.fate,
           lastOnGrass: false,
+          prevE: entity.body === undefined ? undefined : entity.body.E,
+          prevV: entity.body === undefined ? undefined : entity.body.V,
+        }
+        const newborn = entity.body
+        if (newborn !== undefined && !initialIds.has(entity.id)) {
+          // Creation is booked the way the engine books it (06-genes-spawn):
+          // structure at MEAT_ENERGY per kg.
+          const meatEnergy = engine.BIO === undefined ? 7000 : engine.BIO.MEAT_ENERGY
+          entry.reproduction += Number.isFinite(newborn.V) ? newborn.V * meatEnergy : 0
         }
         tracked.set(entity.id, record)
         // Every animal past the founding herd is a birth or an immigration.
@@ -570,6 +589,21 @@ function soak(engine, options) {
       }
       entry.intentSeconds.set(intent, (entry.intentSeconds.get(intent) ?? 0) + TICK)
       entry.entitySeconds += TICK
+      // Energy ledger: what the reserve gained, what the body built, what it
+      // burned. Every term is read from the body the engine maintains, so the
+      // table reports measurements rather than re-deriving the equations.
+      const body = entity.body
+      if (body !== undefined && Number.isFinite(body.E) && Number.isFinite(body.V)) {
+        if (record.prevE !== undefined) entry.reserveDelta += body.E - record.prevE
+        if (record.prevV !== undefined) {
+          const structureCost = engine.BIO === undefined ? 7000 : engine.BIO.STRUCTURE_COST
+          entry.structureDelta += (body.V - record.prevV) * structureCost
+        }
+        if (Number.isFinite(body.pMetabolism)) entry.respired += body.pMetabolism * (TICK / DAY_SECONDS)
+        entry.ledgerSamples += 1
+        record.prevE = body.E
+        record.prevV = body.V
+      }
       record.lastEnergyRatio = accessors.energyRatioOf(entity)
       record.lastAge = entity.age
       record.lastFate = entity.fate
@@ -649,6 +683,12 @@ function soak(engine, options) {
   }
   const elapsedMs = performance.now() - started
   const finalTick = steps
+  // Conservation residual, straight from the engine's own ledger.
+  let residual = null
+  if (firstSnapshot !== null && typeof engine.snapshotEnergy === 'function' && typeof engine.energyResidual === 'function') {
+    const lastSnapshot = engine.snapshotEnergy(world)
+    residual = { snapshot: lastSnapshot, residual: engine.energyResidual(firstSnapshot, lastSnapshot) }
+  }
 
   // Survivors still hold trackers; fold them into the individual stats too.
   for (const record of tracked.values()) {
@@ -677,7 +717,7 @@ function soak(engine, options) {
 
   return {
     options, world, steps, stepMs, elapsedMs, area, producers, scatter, population,
-    initialCounts, living, stageCounts, stats, accessors, detected, TICK, DAY_SECONDS, SPECIES_IDS,
+    initialCounts, living, stageCounts, stats, accessors, detected, residual, TICK, DAY_SECONDS, SPECIES_IDS,
     ticksPerSecondWall: steps / (elapsedMs / 1000),
     ticksPerSecondSim: steps / (Math.max(1e-6, stepMs) / 1000),
   }
@@ -902,6 +942,24 @@ function toJson(result) {
     engineGeneration: result.detected === undefined ? 'legacy' : result.detected.generation,
     fieldSources: result.detected,
     species,
+    energyBudget: Object.fromEntries(result.SPECIES_IDS.map(id => {
+      const entry = result.stats.get(id)
+      if (entry.ledgerSamples === 0 || entry.entitySeconds === 0) return [id, null]
+      const days = entry.entitySeconds / result.DAY_SECONDS
+      const respire = entry.respired / days
+      const growth = entry.structureDelta / days
+      const repro = entry.reproduction / days
+      const net = entry.reserveDelta / days
+      return [id, {
+        alive: result.living[id] ?? 0,
+        intakeKjPerDay: round3(net + respire + growth + repro),
+        respireKjPerDay: round3(respire),
+        growthKjPerDay: round3(growth),
+        reproductionKjPerDay: round3(repro),
+        netReserveKjPerDay: round3(net),
+      }]
+    })),
+    conservationResidual: result.residual === null ? null : result.residual.residual,
     producers: {
       grassMean: round3(meanOf(result.producers.grass)),
       grassBareShare: round3(meanOf(result.producers.grassBare)),
@@ -1070,6 +1128,45 @@ function printReport(result, options) {
     if (entry.samples === 0) { write(id.padEnd(7) + '(never sampled)'); continue }
     write(id.padEnd(7) + 'reserve ' + fixed(entry.energySum / entry.samples, 2, 5)
       + '  hunger ' + fixed(entry.hungerSum / entry.samples, 2, 5))
+  }
+
+  rule('energy budget per species (kJ per in-world day, per individual)')
+  const anyLedger = result.SPECIES_IDS.some(id => result.stats.get(id).ledgerSamples > 0)
+  if (!anyLedger) {
+    write('unavailable: this engine has no body.V / body.pMetabolism (legacy generation)')
+  } else {
+    write('species   alive  assimilated   respire    growth     repro       net   (kJ per in-world day, per individual)')
+    for (const id of result.SPECIES_IDS) {
+      const entry = result.stats.get(id)
+      if (entry.ledgerSamples === 0 || entry.entitySeconds === 0) { write(id.padEnd(7) + '  (no body data)'); continue }
+      const days = entry.entitySeconds / result.DAY_SECONDS
+      const respire = entry.respired / days
+      const growth = entry.structureDelta / days
+      const repro = entry.reproduction / days
+      const net = entry.reserveDelta / days
+      // Reserve change = intake - burned - built - spawned, so intake is the
+      // only term that has to be reconstructed, and it is reconstructed from
+      // four independently measured flows.
+      const intake = net + respire + growth + repro
+      write(id.padEnd(7) + count(result.living[id], 6)
+        + fixed(intake, 1, 9) + fixed(respire, 1, 10) + fixed(growth, 1, 10)
+        + fixed(repro, 1, 10) + fixed(net, 1, 10) + '   x' + (days === 0 ? 'n/a' : '1'))
+    }
+    write('assimilated = net + respire + growth + repro. respire/growth/repro/net are')
+    write('measured (body.pMetabolism, dV x STRUCTURE_COST, newborn structure, dE); assimilated')
+    write('is the term that balances them, i.e. the energy the species had to take in.')
+    write('Divide by the species assimilation efficiency (0.4 herbivore / 0.8 carnivore) for gross intake.')
+    for (const [label, key] of [['gross grazed', 'grazed'], ['carnivory', 'carnivory'], ['animal respiration', 'animalRespired'], ['reproduction', 'reproduction']]) {
+      if (result.residual === null || result.residual.snapshot === undefined) continue
+      const snapshot = result.residual.snapshot
+      if (snapshot.budget === undefined || !Number.isFinite(snapshot.budget[key])) continue
+      const perDay = snapshot.budget[key] / Math.max(1e-9, (result.steps * result.TICK) / result.DAY_SECONDS)
+      write('world ' + label.padEnd(20) + fixed(perDay, 0, 12) + ' kJ/day (whole world)')
+    }
+    if (result.residual !== null) {
+      const r = result.residual.residual
+      write('world conservation residual: ' + (typeof r === 'number' ? r.toExponential(2) : JSON.stringify(r)))
+    }
   }
 
   rule('producers')

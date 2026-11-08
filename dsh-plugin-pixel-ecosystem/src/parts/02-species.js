@@ -40,8 +40,9 @@
     //   https://www.fws.gov/sites/default/files/documents/northern-pike.pdf
     //
     // Time compression: one in-world DAY is 90 s and one YEAR is 8 days
-    // (docs/10-SCALE-AND-UNITS.md), so "maturity" is stored in game seconds and
-    // lengths are compressed by SPEED_SCALE (a 45 km/h sprint is 4.4 cells/s).
+    // (docs/10-SCALE-AND-UNITS.md), so `history` is authored in YEARS and
+    // converted by deriveLifeHistory(); lengths are compressed by SPEED_SCALE
+    // (a 45 km/h sprint is 4.4 cells/s).
     const SPECIES = {
       rabbit: {
         habitat: 'land', role: 'grazer', flora: 'grass', prey: [], mass: 2, taxon: 'mammal',
@@ -56,7 +57,8 @@
           speed: [2.6, 4.3], vision: [5, 13], size: [0.75, 1.35],
           metabolism: [0.75, 1.3], lifespan: [140, 240], fertility: [70, 110],
         },
-        balance: { maturity: 36, litter: [4, 7], fleeSpeed: 1.9 },
+        history: { maturityYears: 0.3, lifespanYears: [1, 3], littersPerYear: 4.5 },
+        balance: { litter: [4, 7], fleeSpeed: 1.9 },
       },
       deer: {
         habitat: 'land', role: 'grazer', flora: 'grass', prey: [], browse: true, mass: 60, taxon: 'mammal',
@@ -69,7 +71,8 @@
           speed: [2.6, 3.8], vision: [8, 16], size: [1.4, 2.2],
           metabolism: [1.05, 1.5], lifespan: [1100, 1600], fertility: [600, 720],
         },
-        balance: { maturity: 150, litter: [1, 3], fleeSpeed: 1.85 },
+        history: { maturityYears: 2, lifespanYears: [10, 15], littersPerYear: 1 },
+        balance: { litter: [1, 3], fleeSpeed: 1.85 },
       },
       fox: {
         habitat: 'land', role: 'hunter', prey: ['rabbit'], mass: 6, taxon: 'mammal',
@@ -80,7 +83,8 @@
           speed: [3.9, 5.7], vision: [9, 19], size: [0.85, 1.55],
           metabolism: [0.85, 1.35], lifespan: [300, 420], fertility: [600, 720],
         },
-        balance: { maturity: 96, litter: [3, 6], catchRadius: 1.15, huntSpeed: 1.5, scavengeShare: 0.6 },
+        history: { maturityYears: 0.8, lifespanYears: [3, 10], littersPerYear: 1 },
+        balance: { litter: [3, 6], catchRadius: 1.15, huntSpeed: 1.5, scavengeShare: 0.6 },
       },
       wolf: {
         habitat: 'land', role: 'hunter', prey: ['deer', 'rabbit'], mass: 40, taxon: 'mammal',
@@ -92,7 +96,8 @@
           speed: [4.3, 6.0], vision: [11, 22], size: [1.3, 2.1],
           metabolism: [1.25, 1.9], lifespan: [700, 900], fertility: [600, 720],
         },
-        balance: { maturity: 240, litter: [3, 5], catchRadius: 1.3, huntSpeed: 1.45, scavengeShare: 0.55 },
+        history: { maturityYears: 2.5, lifespanYears: [6, 8], littersPerYear: 1 },
+        balance: { litter: [3, 5], catchRadius: 1.3, huntSpeed: 1.45, scavengeShare: 0.55 },
       },
       crow: {
         habitat: 'air', role: 'scavenger', prey: [], mass: 0.45, taxon: 'bird',
@@ -103,7 +108,8 @@
           speed: [5.2, 7.6], vision: [14, 26], size: [0.8, 1.2],
           metabolism: [0.85, 1.3], lifespan: [500, 700], fertility: [360, 600],
         },
-        balance: { maturity: 200, litter: [3, 5], scavengeRadius: 1.7, corpseShare: 0.8 },
+        history: { maturityYears: 1, lifespanYears: [4, 8], littersPerYear: 1 },
+        balance: { litter: [3, 5], scavengeRadius: 1.7, corpseShare: 0.8 },
       },
       fish: {
         habitat: 'water', role: 'grazer', flora: 'weed', prey: [], mass: 1.2, taxon: 'ectotherm',
@@ -116,7 +122,8 @@
           speed: [2.2, 4.0], vision: [5, 11], size: [0.7, 1.3],
           metabolism: [0.7, 1.2], lifespan: [420, 560], fertility: [500, 700],
         },
-        balance: { maturity: 90, litter: [6, 10], fleeSpeed: 1.9 },
+        history: { maturityYears: 1.5, lifespanYears: [5, 10], littersPerYear: 1 },
+        balance: { litter: [6, 10], fleeSpeed: 1.9 },
       },
       pike: {
         habitat: 'water', role: 'hunter', prey: ['fish', 'frog'], mass: 4.5, taxon: 'ectotherm',
@@ -128,7 +135,8 @@
           speed: [4.4, 6.2], vision: [8, 16], size: [1.1, 1.9],
           metabolism: [0.95, 1.4], lifespan: [1000, 1300], fertility: [600, 720],
         },
-        balance: { maturity: 260, litter: [2, 4], catchRadius: 1.8, huntSpeed: 1.5, scavengeShare: 0.4 },
+        history: { maturityYears: 2.5, lifespanYears: [7, 15], littersPerYear: 1 },
+        balance: { litter: [2, 4], catchRadius: 1.8, huntSpeed: 1.5, scavengeShare: 0.4 },
       },
       // The next four are the land/water bridge. A heron and a bear stand in the
       // shallows and take fish out of the lake; an otter goes the other way and
@@ -146,7 +154,8 @@
           speed: [3.2, 5.0], vision: [12, 22], size: [0.9, 1.3],
           metabolism: [0.8, 1.2], lifespan: [420, 620], fertility: [500, 700],
         },
-        balance: { maturity: 150, litter: [2, 4], catchRadius: 2.4, huntSpeed: 1.25, scavengeShare: 0.5 },
+        history: { maturityYears: 1.5, lifespanYears: [5, 8], littersPerYear: 1 },
+        balance: { litter: [2, 4], catchRadius: 2.4, huntSpeed: 1.25, scavengeShare: 0.5 },
       },
       otter: {
         habitat: 'water', role: 'hunter', prey: ['fish', 'frog'], mass: 8, taxon: 'mammal',
@@ -158,7 +167,8 @@
           speed: [3.6, 5.4], vision: [10, 18], size: [0.9, 1.3],
           metabolism: [0.95, 1.35], lifespan: [380, 560], fertility: [500, 700],
         },
-        balance: { maturity: 130, litter: [2, 4], catchRadius: 1.7, huntSpeed: 1.55, scavengeShare: 0.5 },
+        history: { maturityYears: 1.5, lifespanYears: [5, 8], littersPerYear: 1 },
+        balance: { litter: [2, 4], catchRadius: 1.7, huntSpeed: 1.55, scavengeShare: 0.5 },
       },
       bear: {
         habitat: 'land', role: 'hunter', prey: ['deer', 'fish', 'rabbit'], mass: 200, taxon: 'mammal',
@@ -170,7 +180,8 @@
           speed: [3.0, 4.4], vision: [10, 18], size: [1.8, 2.6],
           metabolism: [0.8, 1.15], lifespan: [900, 1300], fertility: [1200, 1440],
         },
-        balance: { maturity: 300, litter: [1, 2], catchRadius: 2.1, huntSpeed: 1.3, scavengeShare: 0.7 },
+        history: { maturityYears: 4.5, lifespanYears: [20, 25], littersPerYear: 0.4 },
+        balance: { litter: [1, 2], catchRadius: 2.1, huntSpeed: 1.3, scavengeShare: 0.7 },
       },
       frog: {
         // Grazes the shallow weed, so it is the land/water seam in miniature:
@@ -186,11 +197,46 @@
           speed: [1.4, 2.6], vision: [3, 7], size: [0.55, 0.9],
           metabolism: [0.6, 1.05], lifespan: [150, 260], fertility: [500, 700],
         },
-        balance: { maturity: 45, litter: [8, 14], fleeSpeed: 2.15 },
+        history: { maturityYears: 1, lifespanYears: [3, 5], littersPerYear: 1 },
+        balance: { litter: [8, 14], fleeSpeed: 2.15 },
       },
     }
     /** Species ids in table order (also the legend/chip order). */
     const SPECIES_IDS = Object.keys(SPECIES)
+
+    /**
+     * Derive every life-history number from the YEAR, and write it back.
+     *
+     * The species table authors maturity, lifespan and litter spacing in
+     * ECOLOGICAL YEARS, which is the only unit that survives a change to
+     * DAY_SECONDS or YEAR_DAYS. 0.2.x hard-coded seconds, and when the year went
+     * from one day to eight the rabbit kept a 36-second maturity while its
+     * lifespan stayed under three game-days — it physically could not live long
+     * enough to breed. Nothing below may be typed as a number of seconds again:
+     *
+     *   maturity  = maturityYears x YEAR_SECONDS
+     *   lifespan  = lifespanYears x YEAR_SECONDS
+     *   cooldown  = YEAR_SECONDS / littersPerYear   (+/- 15% gene spread)
+     *   elderAt   = 80% of the mean lifespan (senescence, not half a life)
+     */
+    function deriveLifeHistory() {
+      for (const id of SPECIES_IDS) {
+        const species = SPECIES[id]
+        const history = species.history
+        if (history === undefined) continue
+        const balance = species.balance ?? (species.balance = {})
+        balance.maturity = history.maturityYears * YEAR_SECONDS
+        const meanLifespan = (history.lifespanYears[0] + history.lifespanYears[1]) / 2
+        balance.elderAt = 0.8 * meanLifespan * YEAR_SECONDS
+        const genes = species.genes ?? (species.genes = {})
+        genes.lifespan = [
+          history.lifespanYears[0] * YEAR_SECONDS,
+          history.lifespanYears[1] * YEAR_SECONDS,
+        ]
+        const cooldown = YEAR_SECONDS / Math.max(0.05, history.littersPerYear)
+        genes.fertility = [Math.round(cooldown * 0.85), Math.round(cooldown * 1.15)]
+      }
+    }
 
     /**
      * Derive every number physics dictates and write it back into `balance`.
@@ -209,7 +255,7 @@
         const capacity = reserveCapacity(species, adultMassOf(species))
         balance.maxEnergy = capacity
         balance.startEnergy = capacity * SPAWN_RESERVE_SHARE
-        balance.breedEnergy = capacity * 0.7
+        balance.breedEnergy = capacity * 0.6
         balance.breedCost = capacity * 0.22
         // The reserve is spent inside metabolise() and nowhere else. These two
         // keys stay because other layers read them; they must stay zero or the

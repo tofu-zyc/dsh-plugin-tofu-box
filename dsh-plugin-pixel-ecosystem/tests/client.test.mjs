@@ -202,8 +202,8 @@ test('every key the panels render exists in both dictionaries, and no key is dea
   for (const key of ['count', 'energy', 'age', 'causes']) required.add('metric.' + key)
   // Energy panel.
   for (const key of [
-    'panelTitle', 'sun', 'plants', 'herbivores', 'carnivores', 'respire', 'gpp',
-    'stock', 'animals', 'unit', 'note', 'waiting',
+    'panelTitle', 'sun', 'plants', 'herbivores', 'carnivores', 'respire', 'plantRespire',
+    'gpp', 'stock', 'animals', 'unit', 'note', 'waiting',
   ]) required.add('flow.' + key)
   for (const key of ['title', 'species', 'respire', 'intake', 'net']) required.add('budget.' + key)
   // Tabs, guide, status and the save-file notice.
@@ -358,7 +358,7 @@ test('the energy panel draws the four-stage cascade once the world runs', () => 
   assert.ok(snapshot.flows.herbs >= 0 && snapshot.flows.carns >= 0, 'both animal flows must be numbers')
   const tree = expand(TerrariumPanel({ store, locale, layout: undefined }))
   const flowRows = findAll(tree, element => element.props?.className === 'pe-flow-row')
-  assert.equal(flowRows.length, 4, 'sun, plants, herbivores and respiration each get a bar')
+  assert.equal(flowRows.length, 5, 'sun, plants, herbivores and both respiration sides each get a bar')
   const rendered = textOf(tree)
   assert.ok(rendered.includes(CHINESE['flow.sun']), 'the cascade must name the sun stage')
   assert.ok(rendered.includes(CHINESE['budget.title']), 'the panel must show the per-species budget')

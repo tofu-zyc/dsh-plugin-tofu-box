@@ -81,6 +81,12 @@ window.__ModuleLoader__.load({
     const TICKS_PER_DAY = Math.round(DAY_SECONDS / TICK)
     /** In-world days per ecological year (the season cycle). */
     const YEAR_DAYS = 8
+    /**
+     * One ecological year in seconds. Every life-history number in the species
+     * table is authored in YEARS and divided by this, so a change to the day
+     * length cannot silently turn a rabbit into a mayfly again.
+     */
+    const YEAR_SECONDS = YEAR_DAYS * DAY_SECONDS
     /** Global ceiling on animals; per-species caps do the real limiting. */
     const MAX_ENTITIES = 3600
     const MAX_TREES = 2900
@@ -106,7 +112,7 @@ window.__ModuleLoader__.load({
       FMR_BIRD_A: 10.5,
       FMR_BIRD_B: 0.681,
       /** Ectotherms (fish, amphibians) run far below the endotherm line. */
-      FMR_ECTO_A: 1.2,
+      FMR_ECTO_A: 0.6,
       FMR_ECTO_B: 0.75,
       // --- digestion -------------------------------------------------------
       /** Assimilated fraction of gross intake: herbage vs animal tissue. */
@@ -131,8 +137,16 @@ window.__ModuleLoader__.load({
       // --- animals ---------------------------------------------------------
       /** DEB fraction of surplus power that becomes structure (not reserve). */
       KAPPA_DEB: 0.8,
-      /** Reserve buffer, in days of field metabolic rate. */
-      RESERVE_DAYS: 5,
+      /**
+       * Reserve buffer, in days of field metabolic rate.
+       *
+       * Real animals carry 5-10 days of fat, but a fat animal is a slow animal
+       * to reproduce: at 5 days it takes five game-days of surplus to fill the
+       * tank, and the player watches an empty world for ten minutes. Three days
+       * is still a real body-fat figure for a small mammal and it keeps the
+       * first generation inside one watching session.
+       */
+      RESERVE_DAYS: 2,
       /** Energy cost of one kg of new wet tissue (structure growth), kJ. */
       STRUCTURE_COST: 7000,
       /** Edible share of a body's wet mass when something eats it. */
@@ -270,8 +284,9 @@ window.__ModuleLoader__.load({
     //   https://www.fws.gov/sites/default/files/documents/northern-pike.pdf
     //
     // Time compression: one in-world DAY is 90 s and one YEAR is 8 days
-    // (docs/10-SCALE-AND-UNITS.md), so "maturity" is stored in game seconds and
-    // lengths are compressed by SPEED_SCALE (a 45 km/h sprint is 4.4 cells/s).
+    // (docs/10-SCALE-AND-UNITS.md), so `history` is authored in YEARS and
+    // converted by deriveLifeHistory(); lengths are compressed by SPEED_SCALE
+    // (a 45 km/h sprint is 4.4 cells/s).
     const SPECIES = {
       rabbit: {
         habitat: 'land', role: 'grazer', flora: 'grass', prey: [], mass: 2, taxon: 'mammal',
@@ -286,7 +301,8 @@ window.__ModuleLoader__.load({
           speed: [2.6, 4.3], vision: [5, 13], size: [0.75, 1.35],
           metabolism: [0.75, 1.3], lifespan: [140, 240], fertility: [70, 110],
         },
-        balance: { maturity: 36, litter: [4, 7], fleeSpeed: 1.9 },
+        history: { maturityYears: 0.3, lifespanYears: [1, 3], littersPerYear: 4.5 },
+        balance: { litter: [4, 7], fleeSpeed: 1.9 },
       },
       deer: {
         habitat: 'land', role: 'grazer', flora: 'grass', prey: [], browse: true, mass: 60, taxon: 'mammal',
@@ -299,7 +315,8 @@ window.__ModuleLoader__.load({
           speed: [2.6, 3.8], vision: [8, 16], size: [1.4, 2.2],
           metabolism: [1.05, 1.5], lifespan: [1100, 1600], fertility: [600, 720],
         },
-        balance: { maturity: 150, litter: [1, 3], fleeSpeed: 1.85 },
+        history: { maturityYears: 2, lifespanYears: [10, 15], littersPerYear: 1 },
+        balance: { litter: [1, 3], fleeSpeed: 1.85 },
       },
       fox: {
         habitat: 'land', role: 'hunter', prey: ['rabbit'], mass: 6, taxon: 'mammal',
@@ -310,7 +327,8 @@ window.__ModuleLoader__.load({
           speed: [3.9, 5.7], vision: [9, 19], size: [0.85, 1.55],
           metabolism: [0.85, 1.35], lifespan: [300, 420], fertility: [600, 720],
         },
-        balance: { maturity: 96, litter: [3, 6], catchRadius: 1.15, huntSpeed: 1.5, scavengeShare: 0.6 },
+        history: { maturityYears: 0.8, lifespanYears: [3, 10], littersPerYear: 1 },
+        balance: { litter: [3, 6], catchRadius: 1.15, huntSpeed: 1.5, scavengeShare: 0.6 },
       },
       wolf: {
         habitat: 'land', role: 'hunter', prey: ['deer', 'rabbit'], mass: 40, taxon: 'mammal',
@@ -322,7 +340,8 @@ window.__ModuleLoader__.load({
           speed: [4.3, 6.0], vision: [11, 22], size: [1.3, 2.1],
           metabolism: [1.25, 1.9], lifespan: [700, 900], fertility: [600, 720],
         },
-        balance: { maturity: 240, litter: [3, 5], catchRadius: 1.3, huntSpeed: 1.45, scavengeShare: 0.55 },
+        history: { maturityYears: 2.5, lifespanYears: [6, 8], littersPerYear: 1 },
+        balance: { litter: [3, 5], catchRadius: 1.3, huntSpeed: 1.45, scavengeShare: 0.55 },
       },
       crow: {
         habitat: 'air', role: 'scavenger', prey: [], mass: 0.45, taxon: 'bird',
@@ -333,7 +352,8 @@ window.__ModuleLoader__.load({
           speed: [5.2, 7.6], vision: [14, 26], size: [0.8, 1.2],
           metabolism: [0.85, 1.3], lifespan: [500, 700], fertility: [360, 600],
         },
-        balance: { maturity: 200, litter: [3, 5], scavengeRadius: 1.7, corpseShare: 0.8 },
+        history: { maturityYears: 1, lifespanYears: [4, 8], littersPerYear: 1 },
+        balance: { litter: [3, 5], scavengeRadius: 1.7, corpseShare: 0.8 },
       },
       fish: {
         habitat: 'water', role: 'grazer', flora: 'weed', prey: [], mass: 1.2, taxon: 'ectotherm',
@@ -346,7 +366,8 @@ window.__ModuleLoader__.load({
           speed: [2.2, 4.0], vision: [5, 11], size: [0.7, 1.3],
           metabolism: [0.7, 1.2], lifespan: [420, 560], fertility: [500, 700],
         },
-        balance: { maturity: 90, litter: [6, 10], fleeSpeed: 1.9 },
+        history: { maturityYears: 1.5, lifespanYears: [5, 10], littersPerYear: 1 },
+        balance: { litter: [6, 10], fleeSpeed: 1.9 },
       },
       pike: {
         habitat: 'water', role: 'hunter', prey: ['fish', 'frog'], mass: 4.5, taxon: 'ectotherm',
@@ -358,7 +379,8 @@ window.__ModuleLoader__.load({
           speed: [4.4, 6.2], vision: [8, 16], size: [1.1, 1.9],
           metabolism: [0.95, 1.4], lifespan: [1000, 1300], fertility: [600, 720],
         },
-        balance: { maturity: 260, litter: [2, 4], catchRadius: 1.8, huntSpeed: 1.5, scavengeShare: 0.4 },
+        history: { maturityYears: 2.5, lifespanYears: [7, 15], littersPerYear: 1 },
+        balance: { litter: [2, 4], catchRadius: 1.8, huntSpeed: 1.5, scavengeShare: 0.4 },
       },
       // The next four are the land/water bridge. A heron and a bear stand in the
       // shallows and take fish out of the lake; an otter goes the other way and
@@ -376,7 +398,8 @@ window.__ModuleLoader__.load({
           speed: [3.2, 5.0], vision: [12, 22], size: [0.9, 1.3],
           metabolism: [0.8, 1.2], lifespan: [420, 620], fertility: [500, 700],
         },
-        balance: { maturity: 150, litter: [2, 4], catchRadius: 2.4, huntSpeed: 1.25, scavengeShare: 0.5 },
+        history: { maturityYears: 1.5, lifespanYears: [5, 8], littersPerYear: 1 },
+        balance: { litter: [2, 4], catchRadius: 2.4, huntSpeed: 1.25, scavengeShare: 0.5 },
       },
       otter: {
         habitat: 'water', role: 'hunter', prey: ['fish', 'frog'], mass: 8, taxon: 'mammal',
@@ -388,7 +411,8 @@ window.__ModuleLoader__.load({
           speed: [3.6, 5.4], vision: [10, 18], size: [0.9, 1.3],
           metabolism: [0.95, 1.35], lifespan: [380, 560], fertility: [500, 700],
         },
-        balance: { maturity: 130, litter: [2, 4], catchRadius: 1.7, huntSpeed: 1.55, scavengeShare: 0.5 },
+        history: { maturityYears: 1.5, lifespanYears: [5, 8], littersPerYear: 1 },
+        balance: { litter: [2, 4], catchRadius: 1.7, huntSpeed: 1.55, scavengeShare: 0.5 },
       },
       bear: {
         habitat: 'land', role: 'hunter', prey: ['deer', 'fish', 'rabbit'], mass: 200, taxon: 'mammal',
@@ -400,7 +424,8 @@ window.__ModuleLoader__.load({
           speed: [3.0, 4.4], vision: [10, 18], size: [1.8, 2.6],
           metabolism: [0.8, 1.15], lifespan: [900, 1300], fertility: [1200, 1440],
         },
-        balance: { maturity: 300, litter: [1, 2], catchRadius: 2.1, huntSpeed: 1.3, scavengeShare: 0.7 },
+        history: { maturityYears: 4.5, lifespanYears: [20, 25], littersPerYear: 0.4 },
+        balance: { litter: [1, 2], catchRadius: 2.1, huntSpeed: 1.3, scavengeShare: 0.7 },
       },
       frog: {
         // Grazes the shallow weed, so it is the land/water seam in miniature:
@@ -416,11 +441,46 @@ window.__ModuleLoader__.load({
           speed: [1.4, 2.6], vision: [3, 7], size: [0.55, 0.9],
           metabolism: [0.6, 1.05], lifespan: [150, 260], fertility: [500, 700],
         },
-        balance: { maturity: 45, litter: [8, 14], fleeSpeed: 2.15 },
+        history: { maturityYears: 1, lifespanYears: [3, 5], littersPerYear: 1 },
+        balance: { litter: [8, 14], fleeSpeed: 2.15 },
       },
     }
     /** Species ids in table order (also the legend/chip order). */
     const SPECIES_IDS = Object.keys(SPECIES)
+
+    /**
+     * Derive every life-history number from the YEAR, and write it back.
+     *
+     * The species table authors maturity, lifespan and litter spacing in
+     * ECOLOGICAL YEARS, which is the only unit that survives a change to
+     * DAY_SECONDS or YEAR_DAYS. 0.2.x hard-coded seconds, and when the year went
+     * from one day to eight the rabbit kept a 36-second maturity while its
+     * lifespan stayed under three game-days — it physically could not live long
+     * enough to breed. Nothing below may be typed as a number of seconds again:
+     *
+     *   maturity  = maturityYears x YEAR_SECONDS
+     *   lifespan  = lifespanYears x YEAR_SECONDS
+     *   cooldown  = YEAR_SECONDS / littersPerYear   (+/- 15% gene spread)
+     *   elderAt   = 80% of the mean lifespan (senescence, not half a life)
+     */
+    function deriveLifeHistory() {
+      for (const id of SPECIES_IDS) {
+        const species = SPECIES[id]
+        const history = species.history
+        if (history === undefined) continue
+        const balance = species.balance ?? (species.balance = {})
+        balance.maturity = history.maturityYears * YEAR_SECONDS
+        const meanLifespan = (history.lifespanYears[0] + history.lifespanYears[1]) / 2
+        balance.elderAt = 0.8 * meanLifespan * YEAR_SECONDS
+        const genes = species.genes ?? (species.genes = {})
+        genes.lifespan = [
+          history.lifespanYears[0] * YEAR_SECONDS,
+          history.lifespanYears[1] * YEAR_SECONDS,
+        ]
+        const cooldown = YEAR_SECONDS / Math.max(0.05, history.littersPerYear)
+        genes.fertility = [Math.round(cooldown * 0.85), Math.round(cooldown * 1.15)]
+      }
+    }
 
     /**
      * Derive every number physics dictates and write it back into `balance`.
@@ -439,7 +499,7 @@ window.__ModuleLoader__.load({
         const capacity = reserveCapacity(species, adultMassOf(species))
         balance.maxEnergy = capacity
         balance.startEnergy = capacity * SPAWN_RESERVE_SHARE
-        balance.breedEnergy = capacity * 0.7
+        balance.breedEnergy = capacity * 0.6
         balance.breedCost = capacity * 0.22
         // The reserve is spent inside metabolise() and nowhere else. These two
         // keys stay because other layers read them; they must stay zero or the
@@ -1793,14 +1853,14 @@ window.__ModuleLoader__.load({
      * considers its options again.
      */
     const STATE_PLAN = {
-      flee: { min: 2.5, duration: [4, 7] },
-      drink: { min: 3, duration: [4, 8] },
-      forage: { min: 8, duration: [14, 26] },
-      hunt: { min: 8, duration: [14, 26] },
-      scavenge: { min: 6, duration: [12, 22] },
+      flee: { min: 3, duration: [4, 7] },
+      drink: { min: 5, duration: [6, 10] },
+      forage: { min: 10, duration: [16, 28] },
+      hunt: { min: 10, duration: [16, 28] },
+      scavenge: { min: 8, duration: [14, 24] },
       rest: { min: 10, duration: [20, 40] },
-      socialize: { min: 6, duration: [10, 18] },
-      explore: { min: 8, duration: [14, 26] },
+      socialize: { min: 8, duration: [12, 20] },
+      explore: { min: 10, duration: [16, 28] },
     }
 
     /** How much better a rival must score before it may cut a state short. */
@@ -2295,6 +2355,16 @@ window.__ModuleLoader__.load({
       },
     }
 
+    /**
+     * Structural maturity at which an animal counts as grown up, 0..1.
+     * 0.98 rather than 1 because growth asymptotes: a body a fraction under its
+     * adult size is an adult, not a juvenile that will never breed.
+     */
+    const ADULT_MATURITY_SHARE = 0.98
+
+    /** Share of its own lifespan after which an animal counts as an elder. */
+    const ELDER_LIFESPAN_SHARE = 0.75
+
     /** Size, speed and appetite multipliers per life stage. */
     const STAGE_SCALE = { juvenile: 0.6, adult: 1, elder: 1.03 }
     const STAGE_SPEED = { juvenile: 0.78, adult: 1, elder: 0.82 }
@@ -2311,7 +2381,7 @@ window.__ModuleLoader__.load({
     const SATIETY_DEADBAND = 0.12
 
     /** Seconds of normal activity that fill the thirst ledger. */
-    const THIRST_SECONDS = 150
+    const THIRST_SECONDS = 220
 
     /** Seconds a bout of company keeps the social channel satisfied. */
     const SOCIAL_SATIATION_SECONDS = 35
@@ -2383,17 +2453,51 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Life stage from age: juveniles are smaller, slower and cannot breed.
+     * Lifespan of one animal in seconds (gene first, species ceiling second).
+     * @param {object} entity - the animal.
+     * @param {object} species - species row.
+     * @returns {number} seconds, or Infinity when unknown.
+     */
+    function lifespanOf(entity, species) {
+      const gene = entity.genes === undefined ? undefined : entity.genes.lifespan
+      if (Number.isFinite(gene)) return gene
+      if (Array.isArray(gene)) return gene[1]
+      const ranges = species.genes === undefined ? undefined : species.genes.lifespan
+      return Array.isArray(ranges) ? ranges[1] : Infinity
+    }
+
+    /**
+     * Life stage.
+     *
+     * Maturity is a fact about the BODY, not about the clock: an animal is an
+     * adult when its structure has actually grown (body.M), and a stunted
+     * animal that never grew up stays a juvenile however old it is. The old
+     * age-based rule marked a 174 s rabbit as an elder while its body was 9%
+     * adult — and since only adults may breed, it banned reproduction for more
+     * than half of every species' life.
+     *
+     * Age only decides the other end: an elder is an animal past three quarters
+     * of its own lifespan. Elders still breed (see stepEntity); being old is a
+     * handicap, not a prohibition.
      * @param {object} entity - the animal.
      * @param {object} species - species row.
      * @returns {'juvenile'|'adult'|'elder'} stage.
      */
     function stageOf(entity, species) {
-      const maturity = species.balance.maturity
-      const elder = species.balance.elderAt ?? maturity * 2.6
-      if (entity.age < maturity) return 'juvenile'
-      if (entity.age > elder) return 'elder'
-      return 'adult'
+      const lifespan = lifespanOf(entity, species)
+      const aged = Number.isFinite(lifespan) && entity.age > lifespan * ELDER_LIFESPAN_SHARE
+      const body = entity.body
+      const grown = body === undefined || !Number.isFinite(body.M)
+        ? entity.age >= species.balance.maturity
+        : body.M >= ADULT_MATURITY_SHARE
+      // Still growing AND still inside its species' maturation window: juvenile.
+      // The second half matters: structural growth is capped by what the animal
+      // can afford to eat, so a poorly fed rabbit can reach the end of its life
+      // with a 13% body. Calling that a baby for life would ban it from breeding
+      // for ever (measured on seed 12345: 279 of 282 rabbits, median maturity
+      // 0.13) which empties the food web. A stunted animal is a stunted ADULT.
+      if (!grown && entity.age < species.balance.maturity) return 'juvenile'
+      return aged && grown ? 'elder' : 'adult'
     }
 
     /**
@@ -2503,15 +2607,21 @@ window.__ModuleLoader__.load({
       }
 
       // Curiosity: only when fed, calm and not just back from a look around.
+      // Juveniles get extra: dispersal away from the natal range is one of the
+      // most universal patterns in nature, and it is also what stops a booming
+      // cohort from grazing its own birth metre to dust.
       const habituation = clamp(entity.habituation ?? 0, 0, 1)
+      const dispersal = entity.stage === 'juvenile' ? 1.5 : 1
       const curiosity = clamp(traits.curious, 0, 1)
         * clamp(1 - hunger * 0.85, 0, 1)
         * clamp(1 - fear, 0, 1)
         * clamp(fatness * 4, 0, 1)
         * (1 - habituation)
+        * dispersal
 
-      // Libido: mature and fat enough to spare the energy, and not on cooldown.
-      const libido = clamp(body.maturity, 0, 1)
+      // Libido: grown (by life stage, not by body size alone) and fat enough to
+      // spare the energy, and not on cooldown.
+      const libido = (entity.stage === 'juvenile' ? 0 : 1)
         * clamp((fatness - 0.5) / 0.35, 0, 1)
         * (entity.cooldown > 0 ? 0 : 1)
 
@@ -2605,7 +2715,7 @@ window.__ModuleLoader__.load({
     /** Reserve an adult is spawned with, as a share of capacity. */
     const SPAWN_RESERVE_SHARE = 0.7
     /** Peak tissue growth, as a multiple of the body's own maintenance power. */
-    const GROWTH_RATE_CEILING = 1.5
+    const GROWTH_RATE_CEILING = 4
     /** Reserve share below which a juvenile stops growing (it is starving). */
     const GROWTH_RESERVE_FLOOR = 0.3
     /** How fast a predator strips a carcass, as a multiple of its own upkeep. */
@@ -2837,8 +2947,17 @@ window.__ModuleLoader__.load({
       // Assimilation lands in the reserve one step after the meal was taken: the
       // gut is a one-tick buffer, never a second ledger.
       if (body.gut !== 0) {
-        body.E += body.gut
+        // A big meal can overflow the reserve. The excess has to be booked here,
+        // because the reserve accessor clamps and a silent clamp is exactly how a
+        // joule goes missing.
+        const total = body.E + body.gut
         body.gut = 0
+        if (total > body.Emax) {
+          world.budget.overflow += total - body.Emax
+          body.E = body.Emax
+        } else {
+          body.E = total
+        }
       }
 
       growBody(world, entity, species, body, days)
@@ -2860,7 +2979,7 @@ window.__ModuleLoader__.load({
       // through the same reserve so the ledger stays single-entry.
       if (body.handling !== null) {
         const corpse = body.handling.corpse
-        if (corpse === undefined || !(corpse.energy > 0)) {
+        if (corpse === undefined || corpse.removed === true || !(corpse.energy > 0)) {
           body.handling = null
         } else {
           // A predator strips a carcass at a few times its upkeep. Everything it
@@ -2999,6 +3118,9 @@ window.__ModuleLoader__.load({
       // tissue. That is exactly the animal's entry in the world energy book, so
       // the transfer is neutral and a fat animal really does feed more.
       const structure = Math.max(0, body.V) * BIO.MEAT_ENERGY
+      // Read the gut BEFORE clearing it: food that was in the animal when it died
+      // is part of the carcass, not something the world may forget.
+      const carried = body.E + (body.gut ?? 0)
       body.gut = 0
       const corpse = {
         id: world.nextId++,
@@ -3006,12 +3128,22 @@ window.__ModuleLoader__.load({
         y: entity.y,
         species: entity.species,
         decay: 0,
-        energy: body.E + (body.gut ?? 0) + structure,
+        energy: carried + structure,
         mass: Math.max(0, body.V) * BIO.MEAT_FRACTION,
         cause: body.cause,
       }
       world.corpses.push(corpse)
-      if (world.corpses.length > MAX_CORPSES) world.corpses.shift()
+      if (world.corpses.length > MAX_CORPSES) {
+        // The carcass table has a hard ceiling (the renderer and the UI both walk
+        // it). A corpse evicted by that ceiling is energy leaving the world, so it
+        // is booked as overflow instead of quietly disappearing.
+        const evicted = world.corpses.shift()
+        // A carcass the table has forgotten must not keep feeding the predator
+        // that was still holding it, or its energy would be spent twice: once as
+        // the overflow the eviction booked, and once as a meal.
+        evicted.removed = true
+        if (world.budget !== undefined) world.budget.overflow += evicted.energy
+      }
       if (world.deaths === undefined) world.deaths = {}
       world.deaths[body.cause] = (world.deaths[body.cause] ?? 0) + 1
       world.lastDeath = { species: entity.species, cause: body.cause, at: world.time, x: entity.x, y: entity.y }
@@ -3145,6 +3277,7 @@ window.__ModuleLoader__.load({
      * the allometry declared above; the species table itself only carries the
      * design choices (docs/00-VISION.md: numbers come from physics, not balance).
      */
+    deriveLifeHistory()
     deriveSpeciesEnergy()
 
     // ---------------------------------------------------------------------
@@ -3349,7 +3482,7 @@ window.__ModuleLoader__.load({
           offer('forage', weights.hunger * drives.hunger * quality, food.x, food.y, 'hunger')
         } else if (drives.hunger > 0.25) {
           // Nothing edible is in sight and the reserve is draining: go look.
-          const spot = wanderTarget(world, entity, species, genes.vision * (1.1 + drives.hunger))
+          const spot = wanderTarget(world, entity, species, Math.min(40, genes.vision * (1.6 + drives.hunger * 1.6)))
           offer('explore', weights.hunger * drives.hunger * 0.6, spot.x, spot.y, 'search')
         }
       } else if (species.role === 'hunter') {
@@ -3362,7 +3495,7 @@ window.__ModuleLoader__.load({
         if (carrion !== null && carrion !== undefined) {
           offer('scavenge', weights.hunger * drives.hunger * 0.85, carrion.x, carrion.y, 'hunger')
         } else if (drives.hunger > 0.45 && (prey === null || prey === undefined)) {
-          const spot = wanderTarget(world, entity, species, genes.vision * 1.3)
+          const spot = wanderTarget(world, entity, species, Math.min(40, genes.vision * 2.1))
           offer('explore', weights.hunger * drives.hunger * 0.55, spot.x, spot.y, 'search')
         }
       } else {
@@ -3371,7 +3504,7 @@ window.__ModuleLoader__.load({
           offer('scavenge', weights.hunger * clamp(drives.hunger + 0.1, 0, 1) * (0.6 + carrion.value * 0.5),
             carrion.x, carrion.y, 'hunger')
         } else if (drives.hunger > 0.3) {
-          const spot = wanderTarget(world, entity, species, genes.vision * 1.4)
+          const spot = wanderTarget(world, entity, species, Math.min(40, genes.vision * 2.2))
           offer('explore', weights.hunger * drives.hunger * 0.5, spot.x, spot.y, 'search')
         }
       }
@@ -3402,7 +3535,7 @@ window.__ModuleLoader__.load({
 
       // --- curiosity --------------------------------------------------------
       if (drives.curiosity > 0.06) {
-        const reach = genes.vision * (0.7 + drives.curiosity * 1.2)
+        const reach = Math.min(40, genes.vision * (1.2 + drives.curiosity * 2.4))
         const spot = wanderTarget(world, entity, species, reach)
         offer('explore', weights.curiosity * drives.curiosity, spot.x, spot.y, 'curiosity')
       }
@@ -3620,6 +3753,9 @@ window.__ModuleLoader__.load({
     /** Seconds between re-aim checks inside a state. */
     const AIM_INTERVAL = 0.5
 
+    /** Patch quality below which the animal has cropped the ground bare. */
+    const CROPPED_SWARD = 0.12
+
     /** Seconds of no progress before a state gives up and re-decides. */
     const PROGRESS_WINDOW = 1.3
     /** Consecutive stalled windows before the animal abandons its target. */
@@ -3829,6 +3965,11 @@ window.__ModuleLoader__.load({
           if (local === null) done = true
         }
         if (hunger < 0.12) done = true
+        // A cropped cell pays almost nothing under Holling II, so standing on it
+        // is pointless: move on to a better patch. Without this an animal keeps
+        // its head down on a bare cell and its whole life's path is spent
+        // shuffling inside one metre.
+        if (local !== null && local.value < CROPPED_SWARD && hunger > 0.2) done = true
       } else if (state.id === 'hunt' || state.id === 'scavenge') {
         reaim(world, entity, species, state)
         const distance = Math.hypot(state.x - entity.x, state.y - entity.y)
@@ -3883,7 +4024,8 @@ window.__ModuleLoader__.load({
           // the direction the animal is already facing. A walk that re-rolls
           // its angle on every arrival is a random walk however fast it moves;
           // three legs of the same heading is a trip.
-          const reach = entity.genes.vision * (0.8 + (drives === undefined ? 0.2 : drives.curiosity) * 1.2)
+          const reach = Math.min(40, entity.genes.vision * (1.2 + (drives === undefined ? 0.2 : drives.curiosity) * 2.4))
+            * (entity.stage === 'juvenile' ? 1.4 : 1)
           const ahead = wanderTarget(world, entity, species, reach)
           state.x = ahead.x
           state.y = ahead.y
@@ -3925,9 +4067,13 @@ window.__ModuleLoader__.load({
     //   intake(B) = I_max * B / (K + B)          Holling type II
     //
     // with the two constants fixed by the physics instead of chosen:
-    //   I_max = INTAKE_CEILING * requirement     (an animal can eat ~3x upkeep)
-    //   K     = (INTAKE_CEILING - 1) * reference (it reaches 2/3 of I_max on a
-    //                                            sward of GRAZE_REFERENCE)
+    //   I_max = INTAKE_CEILING * requirement     (peak intake, x upkeep)
+    //   K     = (INTAKE_CEILING - 1) * GRAZE_REFERENCE
+    //
+    // The reference is the sward density at which intake equals upkeep, i.e. the
+    // height a grazed lawn settles to. Everything above it is surplus, and
+    // surplus is what pays for growth and for filling a breeding reserve: an
+    // animal that only ever breaks even never matures.
     //
     // Consequences that matter to the player: a grazer on a bare cell starves
     // even with grass in sight, a depleted patch pays less than a lush one (so
@@ -3938,7 +4084,7 @@ window.__ModuleLoader__.load({
     /** Reference sward density, kg dry matter/m^2, where intake is 2/3 of max. */
     const GRAZE_REFERENCE = 0.12
     /** Peak intake as a multiple of the animal's own maintenance requirement. */
-    const INTAKE_CEILING = 3
+    const INTAKE_CEILING = 5
 
     /**
      * Gross dry matter intake rate at a given local biomass, kg per day.
@@ -4278,14 +4424,17 @@ window.__ModuleLoader__.load({
       const ownGrid = species.role === 'hunter' ? grids.hunter : grids.prey
       const crowded = territory !== undefined && countNearby(ownGrid, entity.x, entity.y, territory.radius,
         candidate => candidate !== entity && candidate.fate === '' && candidate.species === entity.species) >= territory.max
-      // Juveniles are still growing: only adults reproduce. The gate is the
-      // reserve relative to the animal's OWN capacity, so a body that is still
-      // growing cannot be asked for an adult's absolute reserve.
+      // Juveniles are still growing and do not reproduce; elders do, because
+      // real animals breed until senescence and forbidding it turned every
+      // species sterile for the back half of its life. Old age shows up as a
+      // longer recovery instead. The reserve gate is relative to the animal's
+      // OWN capacity, so a growing body is not asked for an adult's reserve.
       const breedTarget = balance.maxEnergy > 0
         ? balance.breedEnergy * clamp((hasBody ? body.Emax : balance.maxEnergy) / balance.maxEnergy, 0, 1.2)
         : balance.breedEnergy
       const breedReserve = hasBody ? body.E : entity.energy
-      if (!crowded && entity.stage === 'adult' && breedReserve >= breedTarget && entity.cooldown <= 0) {
+      const mature = entity.stage === 'adult' || entity.stage === 'elder'
+      if (!crowded && mature && breedReserve >= breedTarget && entity.cooldown <= 0) {
         // A litter, not a single pup: rabbits drop 4-7 kits at once, wolves 3-5.
         const range = balance.litter ?? [1, 1]
         const litterSize = range[0] + Math.floor(nextRandom(world) * (range[1] - range[0] + 1))
@@ -4304,7 +4453,9 @@ window.__ModuleLoader__.load({
           for (let heart = 0; heart < 3; heart++) spawnEffect(world, entity.x, entity.y - 0.5, PALETTE.effect.birth, 0.8, 0.5)
           if (hasBody) body.E = Math.max(0, body.E - balance.breedCost)
           else entity.energy -= balance.breedCost
-          entity.cooldown = genes.fertility
+          // An elder is slower to recover, which is what "reduced fertility"
+          // means without banning it outright.
+          entity.cooldown = genes.fertility * (entity.stage === 'elder' ? 1.6 : 1)
           entity.children += born
         }
       }
@@ -6088,16 +6239,6 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Blend a packed colour toward the snow palette.
-     * @param {number} color - packed colour.
-     * @param {number} amount - 0..1.
-     * @returns {number} packed colour.
-     */
-    function snowed(color, amount) {
-      return blendColor(color, SNOW_COLORS.light, amount)
-    }
-
-    /**
      * Compile a character-grid sprite into a pixel buffer.
      * `0` is transparent; every other character must name a palette colour.
      * @param {string[]} rows - equal-length rows of characters.
@@ -7129,24 +7270,9 @@ window.__ModuleLoader__.load({
       context.restore()
     }
 
-    /** Eight-step water ripple ramp, indexed by a moving pattern. */
-    const WATER_RAMP = [0, 1, 2, 1, 3, 2, 1, 0].map(index => PALETTE.water[index])
-
-    /**
-     * Eight-step vegetation ramp: bare olive ground → mid green → lush cover.
-     */
-    const GRASS_RAMP = Array.from({ length: 8 }, (_, step) => {
-      const t = step / 7
-      const anchor = [78, 122, 58]
-      const from = t < 0.5 ? PALETTE.grassDry : anchor
-      const to = t < 0.5 ? anchor : PALETTE.grassLush
-      const local = t < 0.5 ? t * 2 : (t - 0.5) * 2
-      return rgb(
-        Math.round(mix(from[0], to[0], local)),
-        Math.round(mix(from[1], to[1], local)),
-        Math.round(mix(from[2], to[2], local)),
-      )
-    })
+    // The grass and water ramps used to live here as fixed tables. Both are now
+    // seasonal and are built by `seasonLook` (17-palette) into the ground tables
+    // in 20-render, so nothing is left to keep in sync at this level.
 
     /**
      * 16x16 cell hash, used as the texture noise everywhere.
@@ -7363,6 +7489,10 @@ window.__ModuleLoader__.load({
       return patchState
     }
 
+    /** Snow tints as channel triplets, for the fixed-point snow blend. */
+    const SNOW_TINT_LIGHT = [SNOW_COLORS.light & 0xFF, (SNOW_COLORS.light >>> 8) & 0xFF, (SNOW_COLORS.light >>> 16) & 0xFF]
+    const SNOW_TINT_MID = [SNOW_COLORS.mid & 0xFF, (SNOW_COLORS.mid >>> 8) & 0xFF, (SNOW_COLORS.mid >>> 16) & 0xFF]
+
     /** Water depth buckets: the depth ramp is sampled, not recomputed per cell. */
     const WATER_BUCKETS = 128
     /** Caustic brightness steps; 17 keeps the banding below one channel step. */
@@ -7530,10 +7660,13 @@ window.__ModuleLoader__.load({
             // middle does, and that white edge is most of what says "frozen".
             if (snow > 0.4 && d < 0.22) color = blendColor(color, SNOW_COLORS.light, snow * (0.22 - d) * 2.2)
             const cover = weed[index]
-            if (cover > 0.05) {
+            // Submerged weed dies back under the ice, so the frozen water shows
+            // through in winter instead of staying a green soup.
+            const weedStrength = snow > 0.4 ? 1 - snow * 0.55 : 1
+            if (cover > 0.05 && weedStrength > 0.05) {
               const lush = cover > 0.55
               const sway = SWAY[(worldX + (world.tick >> 3)) & 15]
-              color = blendColor(color, weedColors[lush ? 1 : 0], Math.min(0.82, cover * 1.05))
+              color = blendColor(color, weedColors[lush ? 1 : 0], Math.min(0.82, cover * 1.05) * weedStrength)
               // A bright stalk every few cells turns a flat green wash into
               // something that reads as plants growing off the bottom.
               if (cover > 0.34 && noise > 168) color = blendColor(color, PALETTE.weedStalk, 0.5)
@@ -7549,10 +7682,10 @@ window.__ModuleLoader__.load({
             if (damp > 0.3) color = blendColor(color, weedColors[1], Math.min(0.5, damp * 0.55))
             // Snow settles in patches, not per-pixel: the dither is sampled in
             // 2x2 blocks, which at 6x reads as banks of snow instead of static.
-            if (snow > 0.15 && ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3) < snow * 190) color = snowed(color, 0.55 + snow * 0.4)
+            if (snow > 0.15) color = snowCovered(color, snow, 1, ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3))
           } else if (surface === TERRAIN.STONE) {
             color = nudgeColor(PALETTE.stone[noise > 198 ? 2 : 1], noiseAt(noise))
-            if (snow > 0.15 && ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3) < snow * 150) color = snowed(color, 0.6 + snow * 0.35)
+            if (snow > 0.15) color = snowCovered(color, snow, 0.8, ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3))
           } else {
             const cover = grass[index]
             const step = cover <= 0 ? 0 : Math.min(7, (cover * 8) | 0)
@@ -7573,15 +7706,7 @@ window.__ModuleLoader__.load({
             else if (cover < 0.08 && (noise & 63) === 5) color = blendColor(color, PALETTE.dirt[0], 0.5)
             // Snow settles on open ground first: tall cover still pokes through,
             // which is the difference between "winter" and "white paint".
-            if (snow > 0.15) {
-              const settle = snow * 205 - cover * 70
-              const flake = ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3)
-              // Two snow tones, chosen on a coarser (4x4) sample so the cover
-              // reads as banks with shading rather than a checkerboard.
-              if (flake < settle) {
-                color = ditherAt((worldX >> 2) + 11, (worldY >> 2) + 7) > 120 ? SNOW_COLORS.light : SNOW_COLORS.mid
-              }
-            }
+            if (snow > 0.15) color = snowCovered(color, snow, 0.75 + cover * 0.2, ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3))
           }
           out[outBase + col] = color
         }
@@ -7638,6 +7763,34 @@ window.__ModuleLoader__.load({
         drawSprite(out, view.width, view.height, sprite,
           baseX - (sprite.width >> 1) + swayX, baseY - sprite.height + 1, false, factor)
       }
+    }
+
+    /**
+     * Lay snow over one ground pixel.
+     *
+     * A binary "white or grass" test printed a checkerboard at 6x, which read as
+     * static rather than snow. Blending by a blocky noise value instead keeps the
+     * underlying terrain visible through the shallow cover and builds up to solid
+     * white where the noise is high, so the meadow turns into banks.
+     * @param {number} color - the ground colour.
+     * @param {number} snow - seasonal snow cover 0..1.
+     * @param {number} exposure - how much the surface pokes through (1 = open).
+     * @param {number} flake - 0..255 blocky noise sample.
+     * @returns {number} packed colour.
+     */
+    function snowCovered(color, snow, exposure, flake) {
+      const amount = snow * (0.35 + 0.8 * (flake / 255)) - (exposure - 1) * 0.35
+      if (amount < 0.06) return color
+      // Fixed-point blend instead of blendColor: this runs on every land pixel
+      // of a winter frame, and the float version measured 13 ms of the 32 ms
+      // winter ground pass on its own.
+      const q = amount > 1 ? 256 : (amount * 256) | 0
+      const inv = 256 - q
+      const tint = amount > 0.66 ? SNOW_TINT_LIGHT : SNOW_TINT_MID
+      return (0xFF000000
+        | (((((color >>> 16) & 0xFF) * inv + tint[2] * q) >> 8) << 16)
+        | (((((color >>> 8) & 0xFF) * inv + tint[1] * q) >> 8) << 8)
+        | ((((color & 0xFF) * inv + tint[0] * q) >> 8))) >>> 0
     }
 
     /**
@@ -8117,7 +8270,7 @@ window.__ModuleLoader__.load({
           maturity: Number.isFinite(body.M) ? body.M : null,
           health: Number.isFinite(body.health) ? body.health : null,
           fatigue: Number.isFinite(body.fatigue) ? body.fatigue : null,
-          cause: typeof body.cause === 'string' ? body.cause : null,
+          cause: typeof body.cause === 'string' && body.cause !== '' ? body.cause : null,
           derived: false,
         }
       }
@@ -8576,7 +8729,7 @@ window.__ModuleLoader__.load({
       const placedIds = new Set()
       const corpseSeen = new Set()
       const rateIntake = {}
-      const rates = { gpp: 0, herbs: 0, carns: 0, respire: 0 }
+      const rates = { gpp: 0, herbs: 0, carns: 0, respire: 0, plantRespire: 0 }
 
       /**
        * Drop the observation state and start watching a new world.
@@ -8598,6 +8751,7 @@ window.__ModuleLoader__.load({
         rates.herbs = 0
         rates.carns = 0
         rates.respire = 0
+        rates.plantRespire = 0
       }
 
       /**
@@ -8800,14 +8954,10 @@ window.__ModuleLoader__.load({
               else row.count += 1
             }
           }
-          // A corpse whose animal vanished in an earlier sweep still explains a
-          // death: tally its cause, but never add to the death count twice.
-          for (const [speciesId, pool] of explained) {
-            for (const hit of pool) {
-              const causes = causeBucket(speciesId)
-              causes[hit.cause] = (causes[hit.cause] ?? 0) + 1
-            }
-          }
+          // Deaths are counted exactly once, by the population diff above. A
+          // corpse that no vanished animal claimed is a death from an earlier
+          // sweep whose cause was already attributed (or inferred) then, so it
+          // is dropped rather than tallied twice.
         }
 
         // One ticker line per species per kind: a litter of seven is one piece of
@@ -8869,9 +9019,15 @@ window.__ModuleLoader__.load({
           const before = previous.budget
           let gpp = 0
           let plantRespired = 0
+          let animalRespired = respire
           if (budget !== undefined && budget !== null && before !== null && before !== undefined) {
             gpp = Math.max(0, (budget.gpp - before.gpp) * perDay)
             plantRespired = Math.max(0, (budget.plantRespired - before.plantRespired) * perDay)
+            // The engine's own animal-respiration counter, when it exists, beats
+            // summing pMetabolism here: it is what actually left the reserves.
+            if (Number.isFinite(budget.animalRespired) && Number.isFinite(before.animalRespired)) {
+              animalRespired = Math.max(0, (budget.animalRespired - before.animalRespired) * perDay)
+            }
           } else {
             // No budget in this world: fall back to the net stock rise, which
             // understates growth by whatever the grazers took.
@@ -8880,7 +9036,8 @@ window.__ModuleLoader__.load({
           rates.gpp += (gpp - rates.gpp) * 0.35
           rates.herbs += (herbs - rates.herbs) * 0.35
           rates.carns += (carns - rates.carns) * 0.35
-          rates.respire += (respire + plantRespired - rates.respire) * 0.35
+          rates.respire += (animalRespired - rates.respire) * 0.35
+          rates.plantRespire += (plantRespired - rates.plantRespire) * 0.35
         }
 
         const caches = new Map()
@@ -8904,7 +9061,12 @@ window.__ModuleLoader__.load({
           caches,
           budget: budget === undefined || budget === null
             ? null
-            : { gpp: budget.gpp, plantRespired: budget.plantRespired, mineralised: budget.mineralised },
+            : {
+                gpp: budget.gpp,
+                plantRespired: budget.plantRespired,
+                animalRespired: Number.isFinite(budget.animalRespired) ? budget.animalRespired : 0,
+                mineralised: budget.mineralised,
+              },
         }
         return observation
       }
@@ -8950,7 +9112,13 @@ window.__ModuleLoader__.load({
             ? { count: 0, sumE: 0, sumMax: 0, sumAge: 0, respire: 0, hungry: 0 }
             : observation.species[id]
           const causes = causeTally[id] ?? {}
-          const dead = deathCount[id] ?? 0
+          let tally = 0
+          for (const key of CAUSE_KEYS) tally += causes[key] ?? 0
+          // A corpse can arrive one sweep after its animal vanished, so the cause
+          // tally and the population diff can differ by one; report the larger of
+          // the two so the number next to the bar never contradicts the bar.
+          const dead = Math.max(deathCount[id] ?? 0, tally)
+          const smoothed = rateIntake[id] ?? 0
           rows.push({
             id,
             count: bucket.count,
@@ -8959,7 +9127,8 @@ window.__ModuleLoader__.load({
             meanAge: bucket.count === 0 ? 0 : bucket.sumAge / bucket.count,
             hungry: bucket.hungry,
             respire: bucket.respire,
-            intake: rateIntake[id] ?? 0,
+            net: smoothed,
+            intake: Math.max(0, smoothed),
             deaths: causes,
             dead,
             extinct: bucket.count === 0 && dead > 0,
@@ -8985,6 +9154,7 @@ window.__ModuleLoader__.load({
           herbs: Math.max(0, rates.herbs),
           carns: Math.max(0, rates.carns),
           respire: Math.max(0, rates.respire),
+          plantRespire: Math.max(0, rates.plantRespire),
           plantStock: observation === null ? 0 : observation.plants.energy,
           animalStock,
         }
@@ -9127,7 +9297,7 @@ window.__ModuleLoader__.load({
             events: [],
             pulse: { births: 0, deaths: 0, predations: 0 },
             species: [],
-            flows: { gpp: 0, herbs: 0, carns: 0, respire: 0, plantStock: 0, animalStock: 0 },
+            flows: { gpp: 0, herbs: 0, carns: 0, respire: 0, plantRespire: 0, plantStock: 0, animalStock: 0 },
             plants: { grass: 0, weed: 0, energy: 0 },
             climate: { temperature: null, sunlight: 1, dayPhase: 0.26, yearPhase: null, season: null },
             onboarding: onboardingSeen(),
@@ -9956,6 +10126,21 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Translation for the phase of a timed state. Behaviour may add a phase, and
+     * an unknown one must fall back to its raw id instead of leaking the key.
+     * @param {Function} t - translator.
+     * @param {string} phase - phase id.
+     * @returns {string} label.
+     */
+    function phaseLabel(t, phase) {
+      if (typeof phase !== 'string' || phase === '') return ''
+      if (phase === 'approach' || phase === 'execute' || phase === 'done') return t('phase.' + phase)
+      if (phase === 'do') return t('phase.execute')
+      if (phase === 'adopted') return t('phase.approach')
+      return phase
+    }
+
+    /**
      * Translation for the drive code a decision says it acted on.
      * @param {Function} t - translator.
      * @param {string} code - why code from the decision record.
@@ -10225,7 +10410,7 @@ window.__ModuleLoader__.load({
           h(KeyValue, { label: t('inspect.state') }),
           h('span', { className: 'pe-kv-value' },
             intentLabel(t, state === null ? selected.intent : state.id) +
-            (state === null || state.phase === null ? '' : ' · ' + t('phase.' + state.phase))),
+            (state === null || state.phase === null ? '' : ' · ' + phaseLabel(t, state.phase))),
           h(KeyValue, { label: t('inspect.remaining') }),
           h('span', { className: 'pe-kv-value' },
             state === null || state.remaining === null || state.remaining === undefined
@@ -10332,9 +10517,9 @@ window.__ModuleLoader__.load({
      */
     function EnergyFlowPanel(props) {
       const t = props.t
-      const flows = props.flows ?? { gpp: 0, herbs: 0, carns: 0, respire: 0, plantStock: 0, animalStock: 0 }
+      const flows = props.flows ?? { gpp: 0, herbs: 0, carns: 0, respire: 0, plantRespire: 0, plantStock: 0, animalStock: 0 }
       const rows = props.rows ?? []
-      const peak = Math.max(flows.gpp, flows.herbs, flows.carns, 1)
+      const peak = Math.max(flows.gpp, flows.herbs, flows.carns, flows.respire, flows.plantRespire ?? 0, 1)
       const stage = (key, label, value, color) => h('div', {
         className: 'pe-flow-row',
         key,
@@ -10352,14 +10537,15 @@ window.__ModuleLoader__.load({
             stage('sun', t('flow.sun'), flows.gpp, FLOW_COLORS.sun),
             stage('plants', t('flow.plants'), flows.herbs, FLOW_COLORS.plants),
             stage('herbs', t('flow.herbivores'), flows.carns, FLOW_COLORS.herbs),
-            stage('carns', t('flow.respire'), flows.respire, FLOW_COLORS.respire))
+            stage('carns', t('flow.respire'), flows.respire, FLOW_COLORS.respire),
+            stage('plants', t('flow.plantRespire'), flows.plantRespire, FLOW_COLORS.respire))
         : h('div', { className: 'pe-blank' }, t('flow.waiting'))
       const budget = rows.filter(row => row.count > 0).map(row => h('div', { className: 'pe-srow', key: 'budget-' + row.id },
         h(PixelGlyph, { name: speciesGlyph(row.id), color: SPECIES[row.id]?.color, size: 12 }),
         h('span', { className: 'pe-srow-name' }, t('species.' + row.id)),
         h('span', { className: 'pe-srow-num' }, formatEnergy(row.intake)),
         h('span', { className: 'pe-srow-num' }, formatEnergy(row.respire)),
-        h('span', { className: 'pe-srow-num' }, formatEnergy(row.intake - row.respire))))
+        h('span', { className: 'pe-srow-num' }, formatEnergy(row.net ?? (row.intake - row.respire)))))
       return h('div', { className: 'pe-rows' },
         h('div', { className: 'pe-panel-title' }, t('flow.panelTitle')),
         cascade,
@@ -11242,7 +11428,8 @@ window.__ModuleLoader__.load({
       'flow.plants': '植物',
       'flow.herbivores': '草食动物',
       'flow.carnivores': '肉食动物',
-      'flow.respire': '呼吸消耗',
+      'flow.respire': '动物呼吸',
+      'flow.plantRespire': '植物呼吸',
       'flow.gpp': '净初级生产',
       'flow.stock': '现存',
       'flow.animals': '动物',
@@ -11376,7 +11563,8 @@ window.__ModuleLoader__.load({
       'flow.plants': 'Plants',
       'flow.herbivores': 'Herbivores',
       'flow.carnivores': 'Carnivores',
-      'flow.respire': 'Respiration',
+      'flow.respire': 'Animal respiration',
+      'flow.plantRespire': 'Plant respiration',
       'flow.gpp': 'Primary production',
       'flow.stock': 'Standing',
       'flow.animals': 'Animals',
@@ -11680,6 +11868,16 @@ window.__ModuleLoader__.load({
       worldFromPoint,
       cameraAfterZoom,
       frameFor,
+      // Visual contract: the pose table and the season/sun model are what the
+      // renderer and the tests share, so a headless test can pin "state X draws
+      // pose Y" without reading pixels back.
+      poseFor,
+      poseForId,
+      STATE_POSES,
+      seasonLook,
+      sunState,
+      drawDepthLayers,
+      ensureAtlas,
       countSpecies,
       handleImmigration,
       settleTerrain,

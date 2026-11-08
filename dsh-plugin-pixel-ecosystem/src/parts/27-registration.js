@@ -94,6 +94,16 @@
       worldFromPoint,
       cameraAfterZoom,
       frameFor,
+      // Visual contract: the pose table and the season/sun model are what the
+      // renderer and the tests share, so a headless test can pin "state X draws
+      // pose Y" without reading pixels back.
+      poseFor,
+      poseForId,
+      STATE_POSES,
+      seasonLook,
+      sunState,
+      drawDepthLayers,
+      ensureAtlas,
       countSpecies,
       handleImmigration,
       settleTerrain,

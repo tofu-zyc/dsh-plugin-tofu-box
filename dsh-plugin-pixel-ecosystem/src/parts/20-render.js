@@ -127,6 +127,10 @@
       return patchState
     }
 
+    /** Snow tints as channel triplets, for the fixed-point snow blend. */
+    const SNOW_TINT_LIGHT = [SNOW_COLORS.light & 0xFF, (SNOW_COLORS.light >>> 8) & 0xFF, (SNOW_COLORS.light >>> 16) & 0xFF]
+    const SNOW_TINT_MID = [SNOW_COLORS.mid & 0xFF, (SNOW_COLORS.mid >>> 8) & 0xFF, (SNOW_COLORS.mid >>> 16) & 0xFF]
+
     /** Water depth buckets: the depth ramp is sampled, not recomputed per cell. */
     const WATER_BUCKETS = 128
     /** Caustic brightness steps; 17 keeps the banding below one channel step. */
@@ -294,10 +298,13 @@
             // middle does, and that white edge is most of what says "frozen".
             if (snow > 0.4 && d < 0.22) color = blendColor(color, SNOW_COLORS.light, snow * (0.22 - d) * 2.2)
             const cover = weed[index]
-            if (cover > 0.05) {
+            // Submerged weed dies back under the ice, so the frozen water shows
+            // through in winter instead of staying a green soup.
+            const weedStrength = snow > 0.4 ? 1 - snow * 0.55 : 1
+            if (cover > 0.05 && weedStrength > 0.05) {
               const lush = cover > 0.55
               const sway = SWAY[(worldX + (world.tick >> 3)) & 15]
-              color = blendColor(color, weedColors[lush ? 1 : 0], Math.min(0.82, cover * 1.05))
+              color = blendColor(color, weedColors[lush ? 1 : 0], Math.min(0.82, cover * 1.05) * weedStrength)
               // A bright stalk every few cells turns a flat green wash into
               // something that reads as plants growing off the bottom.
               if (cover > 0.34 && noise > 168) color = blendColor(color, PALETTE.weedStalk, 0.5)
@@ -313,10 +320,10 @@
             if (damp > 0.3) color = blendColor(color, weedColors[1], Math.min(0.5, damp * 0.55))
             // Snow settles in patches, not per-pixel: the dither is sampled in
             // 2x2 blocks, which at 6x reads as banks of snow instead of static.
-            if (snow > 0.15 && ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3) < snow * 190) color = snowed(color, 0.55 + snow * 0.4)
+            if (snow > 0.15) color = snowCovered(color, snow, 1, ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3))
           } else if (surface === TERRAIN.STONE) {
             color = nudgeColor(PALETTE.stone[noise > 198 ? 2 : 1], noiseAt(noise))
-            if (snow > 0.15 && ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3) < snow * 150) color = snowed(color, 0.6 + snow * 0.35)
+            if (snow > 0.15) color = snowCovered(color, snow, 0.8, ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3))
           } else {
             const cover = grass[index]
             const step = cover <= 0 ? 0 : Math.min(7, (cover * 8) | 0)
@@ -337,15 +344,7 @@
             else if (cover < 0.08 && (noise & 63) === 5) color = blendColor(color, PALETTE.dirt[0], 0.5)
             // Snow settles on open ground first: tall cover still pokes through,
             // which is the difference between "winter" and "white paint".
-            if (snow > 0.15) {
-              const settle = snow * 205 - cover * 70
-              const flake = ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3)
-              // Two snow tones, chosen on a coarser (4x4) sample so the cover
-              // reads as banks with shading rather than a checkerboard.
-              if (flake < settle) {
-                color = ditherAt((worldX >> 2) + 11, (worldY >> 2) + 7) > 120 ? SNOW_COLORS.light : SNOW_COLORS.mid
-              }
-            }
+            if (snow > 0.15) color = snowCovered(color, snow, 0.75 + cover * 0.2, ditherAt((worldX >> 1) + 5, (worldY >> 1) + 3))
           }
           out[outBase + col] = color
         }
@@ -402,6 +401,34 @@
         drawSprite(out, view.width, view.height, sprite,
           baseX - (sprite.width >> 1) + swayX, baseY - sprite.height + 1, false, factor)
       }
+    }
+
+    /**
+     * Lay snow over one ground pixel.
+     *
+     * A binary "white or grass" test printed a checkerboard at 6x, which read as
+     * static rather than snow. Blending by a blocky noise value instead keeps the
+     * underlying terrain visible through the shallow cover and builds up to solid
+     * white where the noise is high, so the meadow turns into banks.
+     * @param {number} color - the ground colour.
+     * @param {number} snow - seasonal snow cover 0..1.
+     * @param {number} exposure - how much the surface pokes through (1 = open).
+     * @param {number} flake - 0..255 blocky noise sample.
+     * @returns {number} packed colour.
+     */
+    function snowCovered(color, snow, exposure, flake) {
+      const amount = snow * (0.35 + 0.8 * (flake / 255)) - (exposure - 1) * 0.35
+      if (amount < 0.06) return color
+      // Fixed-point blend instead of blendColor: this runs on every land pixel
+      // of a winter frame, and the float version measured 13 ms of the 32 ms
+      // winter ground pass on its own.
+      const q = amount > 1 ? 256 : (amount * 256) | 0
+      const inv = 256 - q
+      const tint = amount > 0.66 ? SNOW_TINT_LIGHT : SNOW_TINT_MID
+      return (0xFF000000
+        | (((((color >>> 16) & 0xFF) * inv + tint[2] * q) >> 8) << 16)
+        | (((((color >>> 8) & 0xFF) * inv + tint[1] * q) >> 8) << 8)
+        | ((((color & 0xFF) * inv + tint[0] * q) >> 8))) >>> 0
     }
 
     /**

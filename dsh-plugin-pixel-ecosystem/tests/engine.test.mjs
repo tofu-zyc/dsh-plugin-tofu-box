@@ -93,6 +93,13 @@ function fillRegion(world, terrain, x0, y0, x1, y1) {
 /** @param {object} world - the world. @param {number} x - column. @param {number} y - row. */
 const terrainAtCell = (world, x, y) => world.terrain[(y | 0) * world.width + (x | 0)]
 
+/**
+ * Reserve energy of an animal, from the body ledger when the build has one.
+ * @param {object} entity - the animal.
+ * @returns {number} kJ (or legacy units).
+ */
+const reserveOf = entity => entity.body !== undefined ? entity.body.E : entity.energy
+
 /** @param {object} world - the world. @param {string} species - species id. */
 const alive = (world, species) => countSpecies(world, species)
 
@@ -181,11 +188,14 @@ test('place(weed) only plants in water, and stepWorld keeps each field on its ow
   assert.ok(world.weed[water] > 0, 'the weed brush must fill weed in water, got ' + world.weed[water])
 
   // The other direction: a stale field value on the wrong terrain is cleared.
-  // Growth runs in interleaved slices (four ticks per full pass), so allow one
-  // complete cycle before asserting the field has been cleaned.
+  // Producers are refreshed in interleaved slices, so one full pass has to
+  // complete before the field is clean. The pass got longer with the 0.3
+  // producer rework (mass per cell, per-slice respiration), so the budget here
+  // is generous on purpose: this assertion is about the clearing happening, not
+  // about how many ticks it takes.
   world.grass[water] = 1
   world.weed[land] = 1
-  for (let tick = 0; tick < 8; tick++) stepWorld(world, TICK)
+  for (let tick = 0; tick < 40; tick++) stepWorld(world, TICK)
   assert.equal(world.grass[water], 0, 'grass must not survive on a water cell')
   assert.equal(world.weed[land], 0, 'weed must not survive on a land cell')
 })
@@ -441,13 +451,23 @@ test('a scavenger eats a carcass and gains its energy', () => {
   const world = blankWorld()
   const crow = spawnEntity(world, 'crow', 20, 15)
   const rabbit = spawnEntity(world, 'rabbit', 20.4, 15)
-  rabbit.energy = 0
+  engine.dieOf(world, rabbit, 'starved')
   stepWorld(world, TICK)
-  assert.equal(world.corpses.length, 1, 'starvation must leave one carcass')
-  const energyBefore = crow.energy
-  stepWorld(world, TICK)
-  assert.equal(world.corpses.length, 0, 'the crow must eat the carcass')
-  assert.ok(crow.energy > energyBefore, `the crow must gain energy from the carcass, ${energyBefore} -> ${crow.energy}`)
+  assert.equal(world.corpses.length, 1, 'a death must leave one carcass')
+  const energyBefore = reserveOf(crow)
+  const corpseEnergyBefore = world.corpses[0].energy
+  // A meal is a process now: a scavenger starts handling the carrion and pays it
+  // out over time (Holling handling time, 20-CORE-LOOP section 4), so this waits
+  // for the payout instead of assuming a one-tick bite.
+  let consumed = 0
+  for (let tick = 0; tick < 900 && world.corpses.length > 0; tick++) {
+    stepWorld(world, TICK)
+    if (world.corpses.length > 0) consumed = Math.max(consumed, corpseEnergyBefore - world.corpses[0].energy)
+  }
+  assert.ok(world.corpses.length === 0 || consumed > 0,
+    'the crow must actually take energy out of the carcass (corpse still at ' + (world.corpses[0]?.energy ?? 0).toFixed(0) + ')')
+  assert.ok(reserveOf(crow) > energyBefore,
+    `the crow must gain energy from the carcass, ${energyBefore} -> ${reserveOf(crow)}`)
 })
 
 // ---------------------------------------------------------------------------
@@ -455,26 +475,46 @@ test('a scavenger eats a carcass and gains its energy', () => {
 // ---------------------------------------------------------------------------
 
 test('death removes the animal and leaves exactly one carcass', () => {
-  // starvation: five animals run out of energy on barren ground
+  // Starvation is a process now, not a flag: the reserve runs out, health drains,
+  // and the animal dies when health reaches zero (20-CORE-LOOP section 4). So the
+  // test drives the engine's own death path instead of zeroing a scalar and
+  // expecting a corpse on the next tick. What is pinned is unchanged: one death
+  // means one carcass, and the carcass is worth a meat-derived amount of energy.
   {
     const world = blankWorld()
     const starving = []
     for (let index = 0; index < 5; index++) starving.push(spawnEntity(world, 'rabbit', 10 + index, 10))
-    for (const rabbit of starving) rabbit.energy = 0
+    for (const rabbit of starving) engine.dieOf(world, rabbit, 'starved')
     stepWorld(world, TICK)
     assert.equal(alive(world, 'rabbit'), 0, 'every starved animal must be removed')
     assert.equal(world.corpses.length, 5, 'each death must leave exactly one carcass')
-    const meat = SPECIES.rabbit.meat
     for (const corpse of world.corpses) {
       assert.equal(corpse.species, 'rabbit')
-      // The invariant is "a carcass is worth most of the animal but never more than
-      // the animal". The exact share is the engine's business and moved between
-      // revisions, so it is bounded rather than pinned to a literal.
+      assert.equal(corpse.cause, 'starved', 'a carcass must carry the cause that killed it')
+      // Carcass energy is derived from body mass since the energy ledger landed,
+      // so it is checked against the mass it actually has rather than a literal.
       assert.ok(corpse.energy > 0, 'a carcass must carry edible energy, got ' + corpse.energy)
-      assert.ok(corpse.energy <= meat, 'a carcass cannot be worth more than the meat it came from: ' + corpse.energy + ' > ' + meat)
-      assert.ok(Math.abs(corpse.energy - meat * 0.8) <= Math.max(1, meat * 0.15),
-        'a carcass must carry roughly 80% of the meat, got ' + corpse.energy + ' for meat ' + meat)
-      assert.equal(corpse.decay, 0, 'a fresh carcass starts undecayed')
+      assert.ok(corpse.mass > 0, 'a carcass must record the mass it came from, got ' + corpse.mass)
+      // Since the energy ledger landed, a carcass carries the animal's REAL
+      // remaining reserve on top of its meat (docs/10 section 5: a starving rabbit
+      // is a poor meal). So the floor is the meat and the ceiling is meat plus one
+      // full reserve - both derived, neither typed in.
+      // `mass` is the edible meat mass (body volume x MEAT_FRACTION), while the
+      // energy is charged on the whole body volume, so the ceiling is reached by
+      // converting the meat mass back to a body volume. Both bounds are derived
+      // from BIO, so a unit change in the ledger shows up as a clear failure.
+      const meatEnergy = corpse.mass * engine.BIO.MEAT_ENERGY
+      const bodyEnergy = (corpse.mass / engine.BIO.MEAT_FRACTION) * engine.BIO.MEAT_ENERGY
+      const reserveCeiling = SPECIES.rabbit.balance.maxEnergy
+      assert.ok(corpse.energy >= meatEnergy * 0.99,
+        'a carcass must carry at least the meat it is made of: ' + corpse.energy.toFixed(0) + ' < ' + meatEnergy.toFixed(0))
+      assert.ok(corpse.energy <= bodyEnergy + reserveCeiling,
+        'a carcass cannot carry more than one body volume at meat energy plus one reserve: '
+        + corpse.energy.toFixed(0) + ' > ' + (bodyEnergy + reserveCeiling).toFixed(0))
+      // Decay starts ticking during the same step the corpse was made, so the
+      // invariant is "still essentially fresh", not "exactly zero".
+      assert.ok(Number.isFinite(corpse.decay) && corpse.decay >= 0 && corpse.decay < 1,
+        'a fresh carcass must start essentially undecayed, got ' + corpse.decay)
     }
   }
   // old age
@@ -504,7 +544,14 @@ test('the same prey is never eaten twice in one tick', () => {
   spawnEntity(world, 'rabbit', 20.9, 15)
   runTicks(world, 5)
   assert.equal(alive(world, 'rabbit'), 0, 'the rabbit must be gone')
-  assert.equal(world.corpses.length, 0, 'two foxes must not produce two carcasses from one rabbit')
+  // A kill produces ONE carcass no matter how many predators are in reach. When
+  // the prey is eaten is a separate question now (Holling handling time), so the
+  // invariant under test is the count, not the same-tick consumption.
+  const rabbitCorpses = world.corpses.filter(corpse => corpse.species === 'rabbit')
+  assert.ok(rabbitCorpses.length <= 1,
+    `one rabbit cannot leave more than one carcass, got ${rabbitCorpses.length}`)
+  assert.ok(rabbitCorpses.every(corpse => corpse.cause === 'predation'),
+    'the carcass must record that it was a kill: ' + rabbitCorpses.map(corpse => corpse.cause).join(','))
 })
 
 test('DESIGN §5.2 — a prey marked eaten dies even when it can graze that same tick', () => {
@@ -687,11 +734,14 @@ test('serializeWorld -> deserializeWorld round-trips the world and keeps simulat
 test('deserializeWorld refuses data this build does not understand', () => {
   const world = createWorld({ seed: 5, width: 48, height: 32 })
   const saved = serializeWorld(world)
-  assert.throws(() => deserializeWorld({ ...saved, version: 99 }), /unsupported world save/,
+  // The wording of these refusals is the engine's to change; the contract is that
+  // each one is refused with a message that says what is wrong, instead of being
+  // silently loaded as a broken world (0.2.x dropped saves without a word).
+  assert.throws(() => deserializeWorld({ ...saved, version: 99 }), /save version/i,
     'a save from another format version must be rejected')
-  assert.throws(() => deserializeWorld(null), /unsupported world save/, 'null is not a save')
-  assert.throws(() => deserializeWorld({ ...saved, width: 0 }), /bad world size in save/, 'a zero-sized world must be rejected')
-  assert.throws(() => deserializeWorld({ ...saved, terrain: 'AAAA' }), /bad terrain in save/, 'a truncated terrain must be rejected')
+  assert.throws(() => deserializeWorld(null), /not an object|unsupported world save/i, 'null is not a save')
+  assert.throws(() => deserializeWorld({ ...saved, width: 0 }), /bad world size/i, 'a zero-sized world must be rejected')
+  assert.throws(() => deserializeWorld({ ...saved, terrain: 'AAAA' }), /bad terrain/i, 'a truncated terrain must be rejected')
 })
 
 // ---------------------------------------------------------------------------
@@ -843,8 +893,13 @@ test('a lily pad feeds the water under it, which is where fish graze', () => {
   for (let tick = 0; tick < 40; tick++) stepWorld(world, TICK)
   const under = world.waterFertility[15 * world.width + 8]
   const far = world.waterFertility[5 * world.width + 3]
-  assert.ok(under > 0.06, 'the lily must enrich the water beneath it, got ' + under)
-  assert.ok(Math.abs(far - 0.05) < 1e-6, 'water out of the lily footprint must be untouched, got ' + far)
+  // Fertility diffuses, so "untouched" is no longer true of a far cell. What must
+  // hold is that the lily's own cell got a real boost and a distant cell did not
+  // pick up a comparable one - the gradient is the feature.
+  assert.ok(under > 0.05 + 0.005, 'the lily must enrich the water beneath it, got ' + under)
+  assert.ok(under - far > 0.005,
+    'the water under the lily must be richer than open water: under ' + under + ' far ' + far)
+  assert.ok(far - 0.05 < 0.01, 'water far from the lily must barely move, got ' + far)
 })
 
 test('the food web reaches across the water line', () => {

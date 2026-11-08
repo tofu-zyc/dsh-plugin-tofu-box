@@ -23,6 +23,9 @@
     /** Seconds between re-aim checks inside a state. */
     const AIM_INTERVAL = 0.5
 
+    /** Patch quality below which the animal has cropped the ground bare. */
+    const CROPPED_SWARD = 0.12
+
     /** Seconds of no progress before a state gives up and re-decides. */
     const PROGRESS_WINDOW = 1.3
     /** Consecutive stalled windows before the animal abandons its target. */
@@ -232,6 +235,11 @@
           if (local === null) done = true
         }
         if (hunger < 0.12) done = true
+        // A cropped cell pays almost nothing under Holling II, so standing on it
+        // is pointless: move on to a better patch. Without this an animal keeps
+        // its head down on a bare cell and its whole life's path is spent
+        // shuffling inside one metre.
+        if (local !== null && local.value < CROPPED_SWARD && hunger > 0.2) done = true
       } else if (state.id === 'hunt' || state.id === 'scavenge') {
         reaim(world, entity, species, state)
         const distance = Math.hypot(state.x - entity.x, state.y - entity.y)
@@ -286,7 +294,8 @@
           // the direction the animal is already facing. A walk that re-rolls
           // its angle on every arrival is a random walk however fast it moves;
           // three legs of the same heading is a trip.
-          const reach = entity.genes.vision * (0.8 + (drives === undefined ? 0.2 : drives.curiosity) * 1.2)
+          const reach = Math.min(40, entity.genes.vision * (1.2 + (drives === undefined ? 0.2 : drives.curiosity) * 2.4))
+            * (entity.stage === 'juvenile' ? 1.4 : 1)
           const ahead = wanderTarget(world, entity, species, reach)
           state.x = ahead.x
           state.y = ahead.y

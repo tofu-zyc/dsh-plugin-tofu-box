@@ -146,14 +146,17 @@
       const ownGrid = species.role === 'hunter' ? grids.hunter : grids.prey
       const crowded = territory !== undefined && countNearby(ownGrid, entity.x, entity.y, territory.radius,
         candidate => candidate !== entity && candidate.fate === '' && candidate.species === entity.species) >= territory.max
-      // Juveniles are still growing: only adults reproduce. The gate is the
-      // reserve relative to the animal's OWN capacity, so a body that is still
-      // growing cannot be asked for an adult's absolute reserve.
+      // Juveniles are still growing and do not reproduce; elders do, because
+      // real animals breed until senescence and forbidding it turned every
+      // species sterile for the back half of its life. Old age shows up as a
+      // longer recovery instead. The reserve gate is relative to the animal's
+      // OWN capacity, so a growing body is not asked for an adult's reserve.
       const breedTarget = balance.maxEnergy > 0
         ? balance.breedEnergy * clamp((hasBody ? body.Emax : balance.maxEnergy) / balance.maxEnergy, 0, 1.2)
         : balance.breedEnergy
       const breedReserve = hasBody ? body.E : entity.energy
-      if (!crowded && entity.stage === 'adult' && breedReserve >= breedTarget && entity.cooldown <= 0) {
+      const mature = entity.stage === 'adult' || entity.stage === 'elder'
+      if (!crowded && mature && breedReserve >= breedTarget && entity.cooldown <= 0) {
         // A litter, not a single pup: rabbits drop 4-7 kits at once, wolves 3-5.
         const range = balance.litter ?? [1, 1]
         const litterSize = range[0] + Math.floor(nextRandom(world) * (range[1] - range[0] + 1))
@@ -172,7 +175,9 @@
           for (let heart = 0; heart < 3; heart++) spawnEffect(world, entity.x, entity.y - 0.5, PALETTE.effect.birth, 0.8, 0.5)
           if (hasBody) body.E = Math.max(0, body.E - balance.breedCost)
           else entity.energy -= balance.breedCost
-          entity.cooldown = genes.fertility
+          // An elder is slower to recover, which is what "reduced fertility"
+          // means without banning it outright.
+          entity.cooldown = genes.fertility * (entity.stage === 'elder' ? 1.6 : 1)
           entity.children += born
         }
       }

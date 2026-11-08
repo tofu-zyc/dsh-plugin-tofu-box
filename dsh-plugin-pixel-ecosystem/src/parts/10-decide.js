@@ -200,7 +200,7 @@
           offer('forage', weights.hunger * drives.hunger * quality, food.x, food.y, 'hunger')
         } else if (drives.hunger > 0.25) {
           // Nothing edible is in sight and the reserve is draining: go look.
-          const spot = wanderTarget(world, entity, species, genes.vision * (1.1 + drives.hunger))
+          const spot = wanderTarget(world, entity, species, Math.min(40, genes.vision * (1.6 + drives.hunger * 1.6)))
           offer('explore', weights.hunger * drives.hunger * 0.6, spot.x, spot.y, 'search')
         }
       } else if (species.role === 'hunter') {
@@ -213,7 +213,7 @@
         if (carrion !== null && carrion !== undefined) {
           offer('scavenge', weights.hunger * drives.hunger * 0.85, carrion.x, carrion.y, 'hunger')
         } else if (drives.hunger > 0.45 && (prey === null || prey === undefined)) {
-          const spot = wanderTarget(world, entity, species, genes.vision * 1.3)
+          const spot = wanderTarget(world, entity, species, Math.min(40, genes.vision * 2.1))
           offer('explore', weights.hunger * drives.hunger * 0.55, spot.x, spot.y, 'search')
         }
       } else {
@@ -222,7 +222,7 @@
           offer('scavenge', weights.hunger * clamp(drives.hunger + 0.1, 0, 1) * (0.6 + carrion.value * 0.5),
             carrion.x, carrion.y, 'hunger')
         } else if (drives.hunger > 0.3) {
-          const spot = wanderTarget(world, entity, species, genes.vision * 1.4)
+          const spot = wanderTarget(world, entity, species, Math.min(40, genes.vision * 2.2))
           offer('explore', weights.hunger * drives.hunger * 0.5, spot.x, spot.y, 'search')
         }
       }
@@ -253,7 +253,7 @@
 
       // --- curiosity --------------------------------------------------------
       if (drives.curiosity > 0.06) {
-        const reach = genes.vision * (0.7 + drives.curiosity * 1.2)
+        const reach = Math.min(40, genes.vision * (1.2 + drives.curiosity * 2.4))
         const spot = wanderTarget(world, entity, species, reach)
         offer('explore', weights.curiosity * drives.curiosity, spot.x, spot.y, 'curiosity')
       }

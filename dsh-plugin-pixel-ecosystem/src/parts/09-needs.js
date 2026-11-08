@@ -49,6 +49,16 @@
       },
     }
 
+    /**
+     * Structural maturity at which an animal counts as grown up, 0..1.
+     * 0.98 rather than 1 because growth asymptotes: a body a fraction under its
+     * adult size is an adult, not a juvenile that will never breed.
+     */
+    const ADULT_MATURITY_SHARE = 0.98
+
+    /** Share of its own lifespan after which an animal counts as an elder. */
+    const ELDER_LIFESPAN_SHARE = 0.75
+
     /** Size, speed and appetite multipliers per life stage. */
     const STAGE_SCALE = { juvenile: 0.6, adult: 1, elder: 1.03 }
     const STAGE_SPEED = { juvenile: 0.78, adult: 1, elder: 0.82 }
@@ -65,7 +75,7 @@
     const SATIETY_DEADBAND = 0.12
 
     /** Seconds of normal activity that fill the thirst ledger. */
-    const THIRST_SECONDS = 150
+    const THIRST_SECONDS = 220
 
     /** Seconds a bout of company keeps the social channel satisfied. */
     const SOCIAL_SATIATION_SECONDS = 35
@@ -137,17 +147,51 @@
     }
 
     /**
-     * Life stage from age: juveniles are smaller, slower and cannot breed.
+     * Lifespan of one animal in seconds (gene first, species ceiling second).
+     * @param {object} entity - the animal.
+     * @param {object} species - species row.
+     * @returns {number} seconds, or Infinity when unknown.
+     */
+    function lifespanOf(entity, species) {
+      const gene = entity.genes === undefined ? undefined : entity.genes.lifespan
+      if (Number.isFinite(gene)) return gene
+      if (Array.isArray(gene)) return gene[1]
+      const ranges = species.genes === undefined ? undefined : species.genes.lifespan
+      return Array.isArray(ranges) ? ranges[1] : Infinity
+    }
+
+    /**
+     * Life stage.
+     *
+     * Maturity is a fact about the BODY, not about the clock: an animal is an
+     * adult when its structure has actually grown (body.M), and a stunted
+     * animal that never grew up stays a juvenile however old it is. The old
+     * age-based rule marked a 174 s rabbit as an elder while its body was 9%
+     * adult — and since only adults may breed, it banned reproduction for more
+     * than half of every species' life.
+     *
+     * Age only decides the other end: an elder is an animal past three quarters
+     * of its own lifespan. Elders still breed (see stepEntity); being old is a
+     * handicap, not a prohibition.
      * @param {object} entity - the animal.
      * @param {object} species - species row.
      * @returns {'juvenile'|'adult'|'elder'} stage.
      */
     function stageOf(entity, species) {
-      const maturity = species.balance.maturity
-      const elder = species.balance.elderAt ?? maturity * 2.6
-      if (entity.age < maturity) return 'juvenile'
-      if (entity.age > elder) return 'elder'
-      return 'adult'
+      const lifespan = lifespanOf(entity, species)
+      const aged = Number.isFinite(lifespan) && entity.age > lifespan * ELDER_LIFESPAN_SHARE
+      const body = entity.body
+      const grown = body === undefined || !Number.isFinite(body.M)
+        ? entity.age >= species.balance.maturity
+        : body.M >= ADULT_MATURITY_SHARE
+      // Still growing AND still inside its species' maturation window: juvenile.
+      // The second half matters: structural growth is capped by what the animal
+      // can afford to eat, so a poorly fed rabbit can reach the end of its life
+      // with a 13% body. Calling that a baby for life would ban it from breeding
+      // for ever (measured on seed 12345: 279 of 282 rabbits, median maturity
+      // 0.13) which empties the food web. A stunted animal is a stunted ADULT.
+      if (!grown && entity.age < species.balance.maturity) return 'juvenile'
+      return aged && grown ? 'elder' : 'adult'
     }
 
     /**
@@ -257,15 +301,21 @@
       }
 
       // Curiosity: only when fed, calm and not just back from a look around.
+      // Juveniles get extra: dispersal away from the natal range is one of the
+      // most universal patterns in nature, and it is also what stops a booming
+      // cohort from grazing its own birth metre to dust.
       const habituation = clamp(entity.habituation ?? 0, 0, 1)
+      const dispersal = entity.stage === 'juvenile' ? 1.5 : 1
       const curiosity = clamp(traits.curious, 0, 1)
         * clamp(1 - hunger * 0.85, 0, 1)
         * clamp(1 - fear, 0, 1)
         * clamp(fatness * 4, 0, 1)
         * (1 - habituation)
+        * dispersal
 
-      // Libido: mature and fat enough to spare the energy, and not on cooldown.
-      const libido = clamp(body.maturity, 0, 1)
+      // Libido: grown (by life stage, not by body size alone) and fat enough to
+      // spare the energy, and not on cooldown.
+      const libido = (entity.stage === 'juvenile' ? 0 : 1)
         * clamp((fatness - 0.5) / 0.35, 0, 1)
         * (entity.cooldown > 0 ? 0 : 1)
 

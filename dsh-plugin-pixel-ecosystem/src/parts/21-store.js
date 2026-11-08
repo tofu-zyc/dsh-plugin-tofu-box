@@ -94,7 +94,7 @@
           maturity: Number.isFinite(body.M) ? body.M : null,
           health: Number.isFinite(body.health) ? body.health : null,
           fatigue: Number.isFinite(body.fatigue) ? body.fatigue : null,
-          cause: typeof body.cause === 'string' ? body.cause : null,
+          cause: typeof body.cause === 'string' && body.cause !== '' ? body.cause : null,
           derived: false,
         }
       }
@@ -553,7 +553,7 @@
       const placedIds = new Set()
       const corpseSeen = new Set()
       const rateIntake = {}
-      const rates = { gpp: 0, herbs: 0, carns: 0, respire: 0 }
+      const rates = { gpp: 0, herbs: 0, carns: 0, respire: 0, plantRespire: 0 }
 
       /**
        * Drop the observation state and start watching a new world.
@@ -575,6 +575,7 @@
         rates.herbs = 0
         rates.carns = 0
         rates.respire = 0
+        rates.plantRespire = 0
       }
 
       /**
@@ -777,14 +778,10 @@
               else row.count += 1
             }
           }
-          // A corpse whose animal vanished in an earlier sweep still explains a
-          // death: tally its cause, but never add to the death count twice.
-          for (const [speciesId, pool] of explained) {
-            for (const hit of pool) {
-              const causes = causeBucket(speciesId)
-              causes[hit.cause] = (causes[hit.cause] ?? 0) + 1
-            }
-          }
+          // Deaths are counted exactly once, by the population diff above. A
+          // corpse that no vanished animal claimed is a death from an earlier
+          // sweep whose cause was already attributed (or inferred) then, so it
+          // is dropped rather than tallied twice.
         }
 
         // One ticker line per species per kind: a litter of seven is one piece of
@@ -846,9 +843,15 @@
           const before = previous.budget
           let gpp = 0
           let plantRespired = 0
+          let animalRespired = respire
           if (budget !== undefined && budget !== null && before !== null && before !== undefined) {
             gpp = Math.max(0, (budget.gpp - before.gpp) * perDay)
             plantRespired = Math.max(0, (budget.plantRespired - before.plantRespired) * perDay)
+            // The engine's own animal-respiration counter, when it exists, beats
+            // summing pMetabolism here: it is what actually left the reserves.
+            if (Number.isFinite(budget.animalRespired) && Number.isFinite(before.animalRespired)) {
+              animalRespired = Math.max(0, (budget.animalRespired - before.animalRespired) * perDay)
+            }
           } else {
             // No budget in this world: fall back to the net stock rise, which
             // understates growth by whatever the grazers took.
@@ -857,7 +860,8 @@
           rates.gpp += (gpp - rates.gpp) * 0.35
           rates.herbs += (herbs - rates.herbs) * 0.35
           rates.carns += (carns - rates.carns) * 0.35
-          rates.respire += (respire + plantRespired - rates.respire) * 0.35
+          rates.respire += (animalRespired - rates.respire) * 0.35
+          rates.plantRespire += (plantRespired - rates.plantRespire) * 0.35
         }
 
         const caches = new Map()
@@ -881,7 +885,12 @@
           caches,
           budget: budget === undefined || budget === null
             ? null
-            : { gpp: budget.gpp, plantRespired: budget.plantRespired, mineralised: budget.mineralised },
+            : {
+                gpp: budget.gpp,
+                plantRespired: budget.plantRespired,
+                animalRespired: Number.isFinite(budget.animalRespired) ? budget.animalRespired : 0,
+                mineralised: budget.mineralised,
+              },
         }
         return observation
       }
@@ -927,7 +936,13 @@
             ? { count: 0, sumE: 0, sumMax: 0, sumAge: 0, respire: 0, hungry: 0 }
             : observation.species[id]
           const causes = causeTally[id] ?? {}
-          const dead = deathCount[id] ?? 0
+          let tally = 0
+          for (const key of CAUSE_KEYS) tally += causes[key] ?? 0
+          // A corpse can arrive one sweep after its animal vanished, so the cause
+          // tally and the population diff can differ by one; report the larger of
+          // the two so the number next to the bar never contradicts the bar.
+          const dead = Math.max(deathCount[id] ?? 0, tally)
+          const smoothed = rateIntake[id] ?? 0
           rows.push({
             id,
             count: bucket.count,
@@ -936,7 +951,8 @@
             meanAge: bucket.count === 0 ? 0 : bucket.sumAge / bucket.count,
             hungry: bucket.hungry,
             respire: bucket.respire,
-            intake: rateIntake[id] ?? 0,
+            net: smoothed,
+            intake: Math.max(0, smoothed),
             deaths: causes,
             dead,
             extinct: bucket.count === 0 && dead > 0,
@@ -962,6 +978,7 @@
           herbs: Math.max(0, rates.herbs),
           carns: Math.max(0, rates.carns),
           respire: Math.max(0, rates.respire),
+          plantRespire: Math.max(0, rates.plantRespire),
           plantStock: observation === null ? 0 : observation.plants.energy,
           animalStock,
         }
@@ -1104,7 +1121,7 @@
             events: [],
             pulse: { births: 0, deaths: 0, predations: 0 },
             species: [],
-            flows: { gpp: 0, herbs: 0, carns: 0, respire: 0, plantStock: 0, animalStock: 0 },
+            flows: { gpp: 0, herbs: 0, carns: 0, respire: 0, plantRespire: 0, plantStock: 0, animalStock: 0 },
             plants: { grass: 0, weed: 0, energy: 0 },
             climate: { temperature: null, sunlight: 1, dayPhase: 0.26, yearPhase: null, season: null },
             onboarding: onboardingSeen(),

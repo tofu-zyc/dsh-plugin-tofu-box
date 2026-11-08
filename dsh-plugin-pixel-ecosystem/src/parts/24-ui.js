@@ -102,6 +102,21 @@
     }
 
     /**
+     * Translation for the phase of a timed state. Behaviour may add a phase, and
+     * an unknown one must fall back to its raw id instead of leaking the key.
+     * @param {Function} t - translator.
+     * @param {string} phase - phase id.
+     * @returns {string} label.
+     */
+    function phaseLabel(t, phase) {
+      if (typeof phase !== 'string' || phase === '') return ''
+      if (phase === 'approach' || phase === 'execute' || phase === 'done') return t('phase.' + phase)
+      if (phase === 'do') return t('phase.execute')
+      if (phase === 'adopted') return t('phase.approach')
+      return phase
+    }
+
+    /**
      * Translation for the drive code a decision says it acted on.
      * @param {Function} t - translator.
      * @param {string} code - why code from the decision record.
@@ -371,7 +386,7 @@
           h(KeyValue, { label: t('inspect.state') }),
           h('span', { className: 'pe-kv-value' },
             intentLabel(t, state === null ? selected.intent : state.id) +
-            (state === null || state.phase === null ? '' : ' · ' + t('phase.' + state.phase))),
+            (state === null || state.phase === null ? '' : ' · ' + phaseLabel(t, state.phase))),
           h(KeyValue, { label: t('inspect.remaining') }),
           h('span', { className: 'pe-kv-value' },
             state === null || state.remaining === null || state.remaining === undefined
@@ -478,9 +493,9 @@
      */
     function EnergyFlowPanel(props) {
       const t = props.t
-      const flows = props.flows ?? { gpp: 0, herbs: 0, carns: 0, respire: 0, plantStock: 0, animalStock: 0 }
+      const flows = props.flows ?? { gpp: 0, herbs: 0, carns: 0, respire: 0, plantRespire: 0, plantStock: 0, animalStock: 0 }
       const rows = props.rows ?? []
-      const peak = Math.max(flows.gpp, flows.herbs, flows.carns, 1)
+      const peak = Math.max(flows.gpp, flows.herbs, flows.carns, flows.respire, flows.plantRespire ?? 0, 1)
       const stage = (key, label, value, color) => h('div', {
         className: 'pe-flow-row',
         key,
@@ -498,14 +513,15 @@
             stage('sun', t('flow.sun'), flows.gpp, FLOW_COLORS.sun),
             stage('plants', t('flow.plants'), flows.herbs, FLOW_COLORS.plants),
             stage('herbs', t('flow.herbivores'), flows.carns, FLOW_COLORS.herbs),
-            stage('carns', t('flow.respire'), flows.respire, FLOW_COLORS.respire))
+            stage('carns', t('flow.respire'), flows.respire, FLOW_COLORS.respire),
+            stage('plants', t('flow.plantRespire'), flows.plantRespire, FLOW_COLORS.respire))
         : h('div', { className: 'pe-blank' }, t('flow.waiting'))
       const budget = rows.filter(row => row.count > 0).map(row => h('div', { className: 'pe-srow', key: 'budget-' + row.id },
         h(PixelGlyph, { name: speciesGlyph(row.id), color: SPECIES[row.id]?.color, size: 12 }),
         h('span', { className: 'pe-srow-name' }, t('species.' + row.id)),
         h('span', { className: 'pe-srow-num' }, formatEnergy(row.intake)),
         h('span', { className: 'pe-srow-num' }, formatEnergy(row.respire)),
-        h('span', { className: 'pe-srow-num' }, formatEnergy(row.intake - row.respire))))
+        h('span', { className: 'pe-srow-num' }, formatEnergy(row.net ?? (row.intake - row.respire)))))
       return h('div', { className: 'pe-rows' },
         h('div', { className: 'pe-panel-title' }, t('flow.panelTitle')),
         cascade,

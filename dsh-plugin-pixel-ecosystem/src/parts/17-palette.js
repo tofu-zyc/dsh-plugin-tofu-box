@@ -331,16 +331,6 @@
     }
 
     /**
-     * Blend a packed colour toward the snow palette.
-     * @param {number} color - packed colour.
-     * @param {number} amount - 0..1.
-     * @returns {number} packed colour.
-     */
-    function snowed(color, amount) {
-      return blendColor(color, SNOW_COLORS.light, amount)
-    }
-
-    /**
      * Compile a character-grid sprite into a pixel buffer.
      * `0` is transparent; every other character must name a palette colour.
      * @param {string[]} rows - equal-length rows of characters.

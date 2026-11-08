@@ -158,7 +158,30 @@ reserve  (row = body reserve 0..1, column = hunger 0..1)
   - 质量贴最左一列 = `hunger` 通道长期贴 0（0.2.x 症状：`needs.hunger` 被每次啃草重置）。
 - **阈值**：无硬门禁，但有形状要求：**主质量应落在对角带上**。
 
-### 3.8 生产者
+### 3.8 能量收支表（每物种，kJ / 游戏日 / 头）
+
+```
+species   alive  assimilated   respire    growth     repro       net
+rabbit    400      6375.1       693.1     549.6    5458.4    -326.0
+deer       37     10524.6     10814.3       0.0       0.0    -289.6
+```
+
+- **含义**：每物种的同化能量收支，单位 kJ/游戏日/个体。四个分项都是**直接测量**的：
+  - `respire`：`body.pMetabolism` 的时间平均（引擎自己的维持功率）；
+  - `growth`：`Δbody.V × BIO.STRUCTURE_COST`（长身体锁进结构的能量）；
+  - `repro`：新生个体的结构能量（`V × BIO.MEAT_ENERGY`，与引擎 `world.budget.reproduction` 同口径）；
+  - `net`：`Δbody.E`，储备净变化；
+  - `assimilated`：唯一需要反解的一项，`= net + respire + growth + repro`。
+- **怎么读**：
+  - `net < 0` 且 `assimilated > 0` = 在吃但入不敷出（收支表里最常见的不健康形态）；
+  - `respire` 远大于 `assimilated` = 维持成本压死它（捕食者在 9.6× 超支密度下的样子）；
+  - `repro` 巨大 = 爆发式繁殖，此时 `assimilated` 会被繁殖项主导，不要把它当成“吃进去的量”来读。
+- **换总摄入**：除以同化率（草食 0.4 / 肉食 0.8，见 `BIO.ASSIMILATION_*`）得到**总摄入**；再除以 `BIO.GRASS_ENERGY`（17 500 kJ/kg）就是**干物质 g/日**，可与 P1 的 **182 g/日 ±20%** 自校验直接对照。
+- **下方的 world 行**：`gross grazed` / `carnivory` / `animal respiration` / `reproduction` 是引擎 `world.budget` 的整世界流量（kJ/日），给桑基图核对用。
+- **守恒残差**：同一节最后一行打印 `world conservation residual`（相对值）。P1 门禁要求 **< 1e-6**；实测 v2 在 6e-10 ~ 2e-8 量级，**通过**。
+- **不可用时**：legacy 引擎没有 `body.V` / `pMetabolism`，这一节打印 `unavailable`。
+
+### 3.9 生产者
 
 `grass mean biomass 0.213   bare-cell share 20.6%`
 
@@ -203,6 +226,20 @@ reserve  (row = body reserve 0..1, column = hunger 0..1)
 为什么：300 s 那次跑捕食者只死了 4 只，其中 3 只饿死，占比 75%——听起来很吓人，实际是 4 个样本。把这种数字当门禁，会让门禁在两次运行之间随机翻面，最后所有人都不信门禁。
 
 `--json` 里这类门禁的 `pass` 是 `null`、`kind` 是 `info`，脚本可以据此跳过。
+
+### 4.3 两档测试门禁（日常 / 发版）
+
+`tests/balance.test.mjs` 有两档，因为**跑不起的门禁等于没有门禁**：
+
+| 档位 | 触发 | 规模 | 耗时 | 证明什么 |
+|---|---|---|---|---|
+| 日常 | 默认 | 2 seed × 900 tick | ~12 s | 没有物种灭绝、没有爆量过 cap、生产者没被啃穿、吞吐达标 |
+| 发版 | `PE_SOAK=1` | 3 seed × 9 000 tick（一整个游戏年） | ~4 min | 上面全部，**加上**每个物种都要在自己的移民线之上繁殖成功 |
+
+- 日常档**不能**证明慢物种会繁殖：一个物种要 ~3 个成熟期才能完成繁殖并让子代被看见，900 tick 只有 90 秒。所以日常档把这项降级成存活，并在输出里明确打印对哪些物种用了哪档判据。
+- 发版档把所有物种放到强门禁上。
+- 另有 `PE_SOAK_TICKS` / `PE_SOAK_SAMPLE` 可直接覆盖规模（调曲线用）。
+- 日常档自身有守卫断言：`seed 数 × tick <= 2000`，防止有人为了让它变绿把档位悄悄调小。
 
 ## 5. 读数陷阱（按顺序看）
 

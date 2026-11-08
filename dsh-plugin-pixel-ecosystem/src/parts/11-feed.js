@@ -10,9 +10,13 @@
     //   intake(B) = I_max * B / (K + B)          Holling type II
     //
     // with the two constants fixed by the physics instead of chosen:
-    //   I_max = INTAKE_CEILING * requirement     (an animal can eat ~3x upkeep)
-    //   K     = (INTAKE_CEILING - 1) * reference (it reaches 2/3 of I_max on a
-    //                                            sward of GRAZE_REFERENCE)
+    //   I_max = INTAKE_CEILING * requirement     (peak intake, x upkeep)
+    //   K     = (INTAKE_CEILING - 1) * GRAZE_REFERENCE
+    //
+    // The reference is the sward density at which intake equals upkeep, i.e. the
+    // height a grazed lawn settles to. Everything above it is surplus, and
+    // surplus is what pays for growth and for filling a breeding reserve: an
+    // animal that only ever breaks even never matures.
     //
     // Consequences that matter to the player: a grazer on a bare cell starves
     // even with grass in sight, a depleted patch pays less than a lush one (so
@@ -23,7 +27,7 @@
     /** Reference sward density, kg dry matter/m^2, where intake is 2/3 of max. */
     const GRAZE_REFERENCE = 0.12
     /** Peak intake as a multiple of the animal's own maintenance requirement. */
-    const INTAKE_CEILING = 3
+    const INTAKE_CEILING = 5
 
     /**
      * Gross dry matter intake rate at a given local biomass, kg per day.

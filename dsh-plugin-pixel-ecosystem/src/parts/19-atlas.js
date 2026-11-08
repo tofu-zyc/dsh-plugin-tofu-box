@@ -370,24 +370,9 @@
       context.restore()
     }
 
-    /** Eight-step water ripple ramp, indexed by a moving pattern. */
-    const WATER_RAMP = [0, 1, 2, 1, 3, 2, 1, 0].map(index => PALETTE.water[index])
-
-    /**
-     * Eight-step vegetation ramp: bare olive ground → mid green → lush cover.
-     */
-    const GRASS_RAMP = Array.from({ length: 8 }, (_, step) => {
-      const t = step / 7
-      const anchor = [78, 122, 58]
-      const from = t < 0.5 ? PALETTE.grassDry : anchor
-      const to = t < 0.5 ? anchor : PALETTE.grassLush
-      const local = t < 0.5 ? t * 2 : (t - 0.5) * 2
-      return rgb(
-        Math.round(mix(from[0], to[0], local)),
-        Math.round(mix(from[1], to[1], local)),
-        Math.round(mix(from[2], to[2], local)),
-      )
-    })
+    // The grass and water ramps used to live here as fixed tables. Both are now
+    // seasonal and are built by `seasonLook` (17-palette) into the ground tables
+    // in 20-render, so nothing is left to keep in sync at this level.
 
     /**
      * 16x16 cell hash, used as the texture noise everywhere.

@@ -26,7 +26,7 @@
     /** Reserve an adult is spawned with, as a share of capacity. */
     const SPAWN_RESERVE_SHARE = 0.7
     /** Peak tissue growth, as a multiple of the body's own maintenance power. */
-    const GROWTH_RATE_CEILING = 1.5
+    const GROWTH_RATE_CEILING = 4
     /** Reserve share below which a juvenile stops growing (it is starving). */
     const GROWTH_RESERVE_FLOOR = 0.3
     /** How fast a predator strips a carcass, as a multiple of its own upkeep. */
@@ -258,8 +258,17 @@
       // Assimilation lands in the reserve one step after the meal was taken: the
       // gut is a one-tick buffer, never a second ledger.
       if (body.gut !== 0) {
-        body.E += body.gut
+        // A big meal can overflow the reserve. The excess has to be booked here,
+        // because the reserve accessor clamps and a silent clamp is exactly how a
+        // joule goes missing.
+        const total = body.E + body.gut
         body.gut = 0
+        if (total > body.Emax) {
+          world.budget.overflow += total - body.Emax
+          body.E = body.Emax
+        } else {
+          body.E = total
+        }
       }
 
       growBody(world, entity, species, body, days)
@@ -281,7 +290,7 @@
       // through the same reserve so the ledger stays single-entry.
       if (body.handling !== null) {
         const corpse = body.handling.corpse
-        if (corpse === undefined || !(corpse.energy > 0)) {
+        if (corpse === undefined || corpse.removed === true || !(corpse.energy > 0)) {
           body.handling = null
         } else {
           // A predator strips a carcass at a few times its upkeep. Everything it
@@ -420,6 +429,9 @@
       // tissue. That is exactly the animal's entry in the world energy book, so
       // the transfer is neutral and a fat animal really does feed more.
       const structure = Math.max(0, body.V) * BIO.MEAT_ENERGY
+      // Read the gut BEFORE clearing it: food that was in the animal when it died
+      // is part of the carcass, not something the world may forget.
+      const carried = body.E + (body.gut ?? 0)
       body.gut = 0
       const corpse = {
         id: world.nextId++,
@@ -427,12 +439,22 @@
         y: entity.y,
         species: entity.species,
         decay: 0,
-        energy: body.E + (body.gut ?? 0) + structure,
+        energy: carried + structure,
         mass: Math.max(0, body.V) * BIO.MEAT_FRACTION,
         cause: body.cause,
       }
       world.corpses.push(corpse)
-      if (world.corpses.length > MAX_CORPSES) world.corpses.shift()
+      if (world.corpses.length > MAX_CORPSES) {
+        // The carcass table has a hard ceiling (the renderer and the UI both walk
+        // it). A corpse evicted by that ceiling is energy leaving the world, so it
+        // is booked as overflow instead of quietly disappearing.
+        const evicted = world.corpses.shift()
+        // A carcass the table has forgotten must not keep feeding the predator
+        // that was still holding it, or its energy would be spent twice: once as
+        // the overflow the eviction booked, and once as a meal.
+        evicted.removed = true
+        if (world.budget !== undefined) world.budget.overflow += evicted.energy
+      }
       if (world.deaths === undefined) world.deaths = {}
       world.deaths[body.cause] = (world.deaths[body.cause] ?? 0) + 1
       world.lastDeath = { species: entity.species, cause: body.cause, at: world.time, x: entity.x, y: entity.y }
@@ -566,4 +588,5 @@
      * the allometry declared above; the species table itself only carries the
      * design choices (docs/00-VISION.md: numbers come from physics, not balance).
      */
+    deriveLifeHistory()
     deriveSpeciesEnergy()

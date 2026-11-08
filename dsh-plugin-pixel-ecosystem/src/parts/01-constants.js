@@ -23,6 +23,12 @@
     const TICKS_PER_DAY = Math.round(DAY_SECONDS / TICK)
     /** In-world days per ecological year (the season cycle). */
     const YEAR_DAYS = 8
+    /**
+     * One ecological year in seconds. Every life-history number in the species
+     * table is authored in YEARS and divided by this, so a change to the day
+     * length cannot silently turn a rabbit into a mayfly again.
+     */
+    const YEAR_SECONDS = YEAR_DAYS * DAY_SECONDS
     /** Global ceiling on animals; per-species caps do the real limiting. */
     const MAX_ENTITIES = 3600
     const MAX_TREES = 2900
@@ -48,7 +54,7 @@
       FMR_BIRD_A: 10.5,
       FMR_BIRD_B: 0.681,
       /** Ectotherms (fish, amphibians) run far below the endotherm line. */
-      FMR_ECTO_A: 1.2,
+      FMR_ECTO_A: 0.6,
       FMR_ECTO_B: 0.75,
       // --- digestion -------------------------------------------------------
       /** Assimilated fraction of gross intake: herbage vs animal tissue. */
@@ -73,8 +79,16 @@
       // --- animals ---------------------------------------------------------
       /** DEB fraction of surplus power that becomes structure (not reserve). */
       KAPPA_DEB: 0.8,
-      /** Reserve buffer, in days of field metabolic rate. */
-      RESERVE_DAYS: 5,
+      /**
+       * Reserve buffer, in days of field metabolic rate.
+       *
+       * Real animals carry 5-10 days of fat, but a fat animal is a slow animal
+       * to reproduce: at 5 days it takes five game-days of surplus to fill the
+       * tank, and the player watches an empty world for ten minutes. Three days
+       * is still a real body-fat figure for a small mammal and it keeps the
+       * first generation inside one watching session.
+       */
+      RESERVE_DAYS: 2,
       /** Energy cost of one kg of new wet tissue (structure growth), kJ. */
       STRUCTURE_COST: 7000,
       /** Edible share of a body's wet mass when something eats it. */
