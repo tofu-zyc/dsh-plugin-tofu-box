@@ -43,8 +43,6 @@ window.__ModuleLoader__.load({
     const GAME_URL = ROUTE + '/game/'
     /** The Host status endpoint. */
     const STATUS_URL = ROUTE + '/status'
-    /** `shell.overlay` seat id (plugin-private, never replaces a shipped entry). */
-    const SEAT_OVERLAY = 'pvz-perf.game-overlay'
     /** `sidebar.footer.action` seat id. */
     const SEAT_FOOTER = 'pvz-perf.launch'
 
@@ -84,18 +82,17 @@ window.__ModuleLoader__.load({
       'hub.help.version': '需要 pvz_perf 网页版 v3.3.x（含 web-build-manifest.json；WebGPU 或 WebGL2 都能跑）。',
       'hub.help.saves': '存档在浏览器本地（同一个 GUI origin 的 IndexedDB），换浏览器/换端口不共享；游戏里正常退出才会把当前关卡写回去。',
       'hub.missing.hint': '没有在默认位置找到网页版游戏文件。',
-      'overlay.title': '植物大战僵尸 · 摸鱼中',
-      'overlay.hide': '隐藏',
-      'overlay.fullscreen': '全屏',
-      'overlay.reload': '重新载入',
-      'overlay.close': '结束',
-      'overlay.closeHint': '结束会卸载游戏页面；只有游戏内正常退出才会保存当前关卡。',
-      'overlay.back': '回到对话',
-      'overlay.frameTitle': '植物大战僵尸（pvz_perf 网页版）',
-      'overlay.hiddenHint': '游戏在后台继续运行，点侧栏底部的手柄图标可以继续。',
+      'game.title': '植物大战僵尸 · 摸鱼中',
+      'game.fullscreen': '全屏',
+      'game.reload': '重新载入',
+      'game.end': '结束',
+      'game.endHint': '结束并卸载游戏页面；只有游戏内正常退出才会保存当前关卡。',
+      'game.back': '返回对话',
+      'game.backHint': '回到对话会卸载游戏页面；只有游戏内正常退出才会保存当前关卡。',
+      'game.frameTitle': '植物大战僵尸（pvz_perf 网页版）',
+      'game.unloadNote': '游戏只在当前面板里运行；离开这个面板会卸载游戏页面（游戏内正常退出才存档）。',
       'footer.toggle': '打开植物大战僵尸',
-      'footer.hide': '隐藏植物大战僵尸',
-      'footer.resume': '继续植物大战僵尸',
+      'footer.resume': '回到植物大战僵尸',
       'error.boundary': '面板渲染出错',
       'common.na': '—',
     }
@@ -122,18 +119,17 @@ window.__ModuleLoader__.load({
       'hub.help.version': 'Requires the pvz_perf web build v3.3.x (it ships web-build-manifest.json; WebGPU and WebGL2 both work).',
       'hub.help.saves': 'Saves live in this browser (IndexedDB on the GUI origin), so another browser or port does not share them, and a level is written back only on a normal in-game quit.',
       'hub.missing.hint': 'No web build was found at the default locations.',
-      'overlay.title': 'Plants vs. Zombies · break',
-      'overlay.hide': 'Hide',
-      'overlay.fullscreen': 'Fullscreen',
-      'overlay.reload': 'Reload',
-      'overlay.close': 'End',
-      'overlay.closeHint': 'End unloads the game page; in-game progress is only saved on a normal in-game quit.',
-      'overlay.back': 'Back to chat',
-      'overlay.frameTitle': 'Plants vs. Zombies (pvz_perf web build)',
-      'overlay.hiddenHint': 'The game keeps running in the background; use the gamepad icon at the sidebar foot to resume.',
+      'game.title': 'Plants vs. Zombies · break',
+      'game.fullscreen': 'Fullscreen',
+      'game.reload': 'Reload',
+      'game.end': 'End',
+      'game.endHint': 'End unloads the game page; in-game progress is only saved on a normal in-game quit.',
+      'game.back': 'Back to chat',
+      'game.backHint': 'Going back unloads the game page; in-game progress is only saved on a normal in-game quit.',
+      'game.frameTitle': 'Plants vs. Zombies (pvz_perf web build)',
+      'game.unloadNote': 'The game runs inside this panel only; leaving the panel unloads the game page (progress is saved only on a normal in-game quit).',
       'footer.toggle': 'Open Plants vs. Zombies',
-      'footer.hide': 'Hide Plants vs. Zombies',
-      'footer.resume': 'Resume Plants vs. Zombies',
+      'footer.resume': 'Back to Plants vs. Zombies',
       'error.boundary': 'Panel failed to render',
       'common.na': '—',
     }
@@ -167,9 +163,9 @@ window.__ModuleLoader__.load({
      * The single observable source of truth for both halves' UI.
      *
      * The snapshot object is replaced (never mutated) on every change, which is
-     * what makes `useSyncExternalStore` render only on real transitions. The
-     * iframe's lifetime is driven by `opened`, not `visible`, so hiding the
-     * layer keeps the game running.
+     * what makes `useSyncExternalStore` render only on real transitions.
+     * `opened` owns the iframe's lifetime: the game page lives inside the
+     * plugin's central panel, and closing returns the panel to its hub.
      * @param {{ fetchStatus?: () => Promise<object> }} [options] - test seam.
      * @returns {object} store with subscribe/getSnapshot and actions.
      */
@@ -181,7 +177,6 @@ window.__ModuleLoader__.load({
         info: null,
         error: null,
         opened: false,
-        visible: false,
         reloadKey: 0,
       })
       /** @type {Set<() => void>} React subscribers. */
@@ -248,26 +243,17 @@ window.__ModuleLoader__.load({
         return undefined
       }
 
-      /** Open the game layer and make sure the status is being checked. */
+      /** Open the game in the central panel and check the Host status. */
       const open = () => {
-        commit({ opened: true, visible: true })
+        commit({ opened: true })
         return ensureStatus()
       }
 
-      /** Hide the layer but keep the game page mounted and running. */
-      const hide = () => { commit({ visible: false }) }
+      /** Remount the iframe (a page reload inside the game panel, essentially). */
+      const reload = () => { commit({ reloadKey: snapshot.reloadKey + 1, opened: true }) }
 
-      /** Show the layer again. */
-      const show = () => { commit({ opened: true, visible: true }) }
-
-      /** Footer behaviour: open when closed, otherwise flip visible. */
-      const toggle = () => (snapshot.opened && snapshot.visible ? hide() : (snapshot.opened ? show() : open()))
-
-      /** Remount the iframe (a page reload inside the game tab, essentially). */
-      const reload = () => { commit({ reloadKey: snapshot.reloadKey + 1, visible: true, opened: true }) }
-
-      /** Close the layer and unmount the game page. */
-      const close = () => { commit({ opened: false, visible: false }) }
+      /** Close the game and go back to the hub inside the same panel. */
+      const close = () => { commit({ opened: false }) }
 
       /** Stop accepting updates; called from the owning effect's disposer. */
       const dispose = () => {
@@ -275,7 +261,7 @@ window.__ModuleLoader__.load({
         listeners.clear()
       }
 
-      return { getSnapshot, subscribe, refresh, ensureStatus, open, hide, show, toggle, reload, close, dispose }
+      return { getSnapshot, subscribe, refresh, ensureStatus, open, reload, close, dispose }
     }
 
     /**
@@ -422,7 +408,7 @@ window.__ModuleLoader__.load({
       const info = snapshot.info
       const busy = phase === 'loading'
       const blocked = phase === 'missing' || phase === 'error'
-      const label = snapshot.opened && snapshot.visible ? t('hub.resume') : (snapshot.opened ? t('hub.resume') : t('hub.start'))
+      const label = snapshot.opened ? t('hub.resume') : t('hub.start')
 
       React.useEffect(() => { store.ensureStatus() }, [])
 
@@ -482,7 +468,7 @@ window.__ModuleLoader__.load({
     }
 
     // ---------------------------------------------------------------------
-    // Game overlay
+    // In-panel game view
     // ---------------------------------------------------------------------
 
     /**
@@ -504,89 +490,123 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * The full-frame game layer. Mounted once `opened` is true and never
-     * unmounted by hiding: `display: none` parks it while the game keeps running.
-     * @param {object} props - slot props plus `{ store, locale, layout }`.
-     * @returns {object|null} React element or null before first open.
+     * The game itself, rendered INSIDE the plugin's central panel.
+     *
+     * Layout is the whole point: the panel is the content column the shell
+     * already allocated to this plugin, so the sidebar, the app titlebar and the
+     * rest of the window stay visible and clickable. The first version rendered
+     * into `shell.overlay` instead, which covered the sidebar and put its
+     * right-most controls underneath the desktop window buttons — that is what
+     * made the first real-machine round impossible to leave.
+     * @param {object} props - panel props plus `{ store, locale, layout }`.
+     * @returns {object|null} React element, or null before the first open.
      */
-    function GameOverlay(props) {
+    function GameEmbed(props) {
       const store = props.store
       const layout = props.layout
       const t = props.locale.bind(NS)
       const snapshot = useStore(store)
-      const layerRef = React.useRef(null)
+      const panelRef = React.useRef(null)
+
+      /** Leave the panel (the game page unmounts with it). */
+      const back = () => {
+        if (layout !== undefined && typeof layout.selectPanel === 'function') layout.selectPanel('conversation')
+      }
+
+      // Escape returns to the conversation while the page (not the game
+      // iframe) has focus. Key events inside the iframe never reach this
+      // document, so the game's own Esc menu still works.
+      React.useEffect(() => {
+        if (typeof document === 'undefined' || snapshot.opened !== true) return undefined
+        /** @param {KeyboardEvent} event - the key press. */
+        const onKeyDown = (event) => {
+          if (event.key !== 'Escape' || event.defaultPrevented === true) return
+          back()
+        }
+        document.addEventListener('keydown', onKeyDown, true)
+        return () => { document.removeEventListener('keydown', onKeyDown, true) }
+      }, [snapshot.opened])
 
       if (snapshot.opened !== true) return null
 
       const phase = snapshot.phase
       const fullscreen = () => {
-        const layer = layerRef.current
-        if (layer !== null && layer !== undefined && typeof layer.requestFullscreen === 'function') {
-          const result = layer.requestFullscreen()
+        const panel = panelRef.current
+        if (panel !== null && panel !== undefined && typeof panel.requestFullscreen === 'function') {
+          const result = panel.requestFullscreen()
           if (result !== undefined && typeof result.catch === 'function') result.catch(() => { /* user or policy refused */ })
         }
       }
-      const back = () => {
-        store.hide()
-        if (layout !== undefined && typeof layout.selectPanel === 'function') layout.selectPanel('conversation')
-      }
+      return h('div', { className: 'pvz-game', ref: panelRef },
+        h('div', { className: 'pvz-game-bar' },
+          h('div', { className: 'pvz-game-brand' },
+            h(SproutMark, { size: 16 }),
+            h('span', { className: 'pvz-game-title' }, t('game.title')),
+            h(StateDot, { phase }),
+            h('span', { className: 'pvz-game-state' }, t('hub.state.' + phase))),
+          h('div', { className: 'pvz-game-actions' },
+            h(BarButton, { text: t('game.back'), onClick: back, title: t('game.backHint') }),
+            h(BarButton, { text: t('game.fullscreen'), onClick: fullscreen }),
+            h(BarButton, { text: t('game.reload'), onClick: () => store.reload() }),
+            h(BarButton, { text: t('game.end'), onClick: () => store.close(), title: t('game.endHint'), danger: true }))),
+        h('div', { className: 'pvz-game-frame' },
+          h('iframe', {
+            key: 'pvz-frame-' + snapshot.reloadKey,
+            className: 'pvz-frame',
+            src: GAME_URL,
+            title: t('game.frameTitle'),
+            allow: 'fullscreen; autoplay; gamepad; clipboard-write',
+            allowFullScreen: true,
+            referrerPolicy: 'no-referrer',
+          })))
+    }
 
-      return h('div', {
-        className: 'pvz-overlay',
-        ref: layerRef,
-        style: { display: snapshot.visible === true ? 'flex' : 'none' },
-        'data-pvz-visible': snapshot.visible === true ? 'true' : 'false',
-      },
-      h('div', { className: 'pvz-overlay-bar' },
-        h('div', { className: 'pvz-overlay-brand' },
-          h(SproutMark, { size: 16 }),
-          h('span', { className: 'pvz-overlay-title' }, t('overlay.title')),
-          h(StateDot, { phase }),
-          h('span', { className: 'pvz-overlay-state' }, t('hub.state.' + phase))),
-        h('div', { className: 'pvz-overlay-actions' },
-          h(BarButton, { text: t('overlay.hide'), onClick: () => store.hide(), title: t('overlay.hiddenHint') }),
-          h(BarButton, { text: t('overlay.fullscreen'), onClick: fullscreen }),
-          h(BarButton, { text: t('overlay.reload'), onClick: () => store.reload() }),
-          h(BarButton, { text: t('overlay.back'), onClick: back }),
-          h(BarButton, { text: t('overlay.close'), onClick: () => store.close(), title: t('overlay.closeHint'), danger: true }))),
-      h('div', { className: 'pvz-overlay-frame' },
-        h('iframe', {
-          key: 'pvz-frame-' + snapshot.reloadKey,
-          className: 'pvz-frame',
-          src: GAME_URL,
-          title: t('overlay.frameTitle'),
-          allow: 'fullscreen; autoplay; gamepad; clipboard-write',
-          allowFullScreen: true,
-          referrerPolicy: 'no-referrer',
-        })))
+    /**
+     * The plugin's central panel: the hub until the game is opened, the game
+     * itself afterwards. Both use the column the shell already gave this panel,
+     * so the sidebar is never covered.
+     * @param {object} props - slot props plus `{ store, locale, layout }`.
+     * @returns {object} React element.
+     */
+    function PvzPanel(props) {
+      const snapshot = useStore(props.store)
+      return snapshot.opened === true
+        ? h(GameEmbed, props)
+        : h(HubPanel, props)
     }
 
     // ---------------------------------------------------------------------
-    // Sidebar footer toggle
+    // Sidebar footer shortcut
     // ---------------------------------------------------------------------
 
     /**
-     * The one-click toggle beside Settings.
-     * @param {object} props - owner props (`wide`) plus `{ store, locale }`.
+     * The shortcut beside Settings: selects the plugin panel and, when the game
+     * is not running yet, starts it in one click. It never covers the app — the
+     * game is the shell's own central column.
+     * @param {object} props - owner props (`wide`) plus `{ store, locale, layout }`.
      * @returns {object} React element.
      */
     function FooterLaunch(props) {
       const store = props.store
+      const layout = props.layout
       const t = props.locale.bind(NS)
       const snapshot = useStore(store)
       const wide = props.wide === true
-      const open = snapshot.opened === true
-      const visible = snapshot.visible === true
-      const label = open ? (visible ? t('footer.hide') : t('footer.resume')) : t('footer.toggle')
+      const opened = snapshot.opened === true
+      const label = opened ? t('footer.resume') : t('footer.toggle')
+      const activate = () => {
+        if (layout !== undefined && typeof layout.selectPanel === 'function') layout.selectPanel(PANEL_ID)
+        if (opened !== true) store.open()
+      }
       return h('button', {
         type: 'button',
         className: wide ? 'pvz-footer pvz-footer-wide' : 'pvz-footer',
         title: label,
         'aria-label': label,
-        'aria-pressed': visible ? 'true' : 'false',
-        onClick: () => store.toggle(),
+        'aria-pressed': opened ? 'true' : 'false',
+        onClick: activate,
       },
-      h('span', { className: 'pvz-footer-icon' }, h(SproutMark, { size: 16, active: visible })),
+      h('span', { className: 'pvz-footer-icon' }, h(SproutMark, { size: 16, active: opened })),
       wide ? h('span', { className: 'pvz-footer-label' }, label) : null)
     }
 
@@ -636,13 +656,17 @@ window.__ModuleLoader__.load({
 .pvz-boundary{padding:16px;display:flex;flex-direction:column;gap:6px;color:var(--dsw-alias-label-primary)}
 .pvz-boundary-title{font-weight:700;color:var(--dsw-alias-state-error-primary);font-size:12px}
 .pvz-boundary-body{margin:0;white-space:pre-wrap;font-family:ui-monospace,Consolas,Menlo,monospace;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary)}
-.pvz-overlay{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;background:#05070a;pointer-events:auto}
-.pvz-overlay-bar{display:flex;align-items:center;gap:10px;flex:none;height:34px;padding:0 8px 0 12px;background:var(--dsw-alias-bg-layer-1);border-bottom:1px solid var(--dsw-alias-border-l1)}
-.pvz-overlay-brand{display:flex;align-items:center;gap:8px;min-width:0}
-.pvz-overlay-title{font-size:12px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pvz-overlay-state{color:var(--dsw-alias-label-secondary);font-size:11px;white-space:nowrap}
-.pvz-overlay-actions{display:flex;align-items:center;gap:6px;margin-left:auto;flex-wrap:nowrap;overflow:hidden}
-.pvz-overlay-frame{position:relative;flex:1;min-height:0;background:#000}
+/* The game view fills the shell's central column only. No fixed-position layer,
+   no z-index war: the sidebar, the titlebar and the window buttons stay usable
+   while a round runs. */
+.pvz-game{display:flex;flex-direction:column;height:100%;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);box-sizing:border-box}
+.pvz-game-bar{display:flex;align-items:center;gap:10px;flex:none;flex-wrap:wrap;min-height:34px;padding:4px 10px 4px 12px;background:var(--dsw-alias-bg-layer-1);border-bottom:1px solid var(--dsw-alias-border-l1)}
+.pvz-game-brand{display:flex;align-items:center;gap:8px;min-width:0;flex:0 1 auto;overflow:hidden}
+.pvz-game-title{font-size:12px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.pvz-game-state{color:var(--dsw-alias-label-secondary);font-size:11px;white-space:nowrap}
+.pvz-game-actions{display:flex;align-items:center;gap:6px;margin-left:auto;flex-wrap:wrap;min-width:0}
+.pvz-game-frame{position:relative;flex:1;min-height:0;background:#000}
+.pvz-game-unload{margin:0;padding:6px 12px;border-top:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:10.5px;line-height:15px}
 .pvz-frame{position:absolute;inset:0;display:block;width:100%;height:100%;border:0;background:#000}
 .pvz-footer{appearance:none;display:inline-flex;align-items:center;justify-content:center;gap:8px;height:32px;padding:0 10px;border-radius:9px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer;max-width:100%}
 .pvz-footer:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
@@ -693,41 +717,32 @@ window.__ModuleLoader__.load({
           name: 'main',
           key: PANEL_ID,
         }, (props) => h(BOUNDARY, { title: ctx.locale.bind(NS)('error.boundary') },
-          h(HubPanel, { ...props, store, locale: ctx.locale, layout }))))
-
-        ctx.slots.inject('shell.overlay', () => ctx.slots.register({
-          name: 'shell.overlay',
-          id: SEAT_OVERLAY,
-          order: 900,
-          label: () => ctx.locale.bind(NS)('panel.title'),
-        }, (props) => h(BOUNDARY, { title: ctx.locale.bind(NS)('error.boundary') },
-          h(GameOverlay, { ...props, store, locale: ctx.locale, layout }))))
+          h(PvzPanel, { ...props, store, locale: ctx.locale, layout }))))
 
         ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
           name: 'sidebar.footer.action',
           id: SEAT_FOOTER,
           order: 42,
           label: () => ctx.locale.bind(NS)('footer.toggle'),
-        }, (props) => h(FooterLaunch, { ...props, store, locale: ctx.locale })))
+        }, (props) => h(FooterLaunch, { ...props, store, locale: ctx.locale, layout })))
       },
     }
 
     module.exports = plugin
-    /** Test seam: the store, the URL literals and the four seat descriptors. */
+    /** Test seam: the store, the URL literals and the seat graph. */
     module.exports.__test = {
       NS,
       ROUTE,
       GAME_URL,
       STATUS_URL,
       PANEL_ID,
-      SEAT_OVERLAY,
       SEAT_FOOTER,
       DEFAULT_DIR_HINT,
       ENV_OVERRIDE,
       createGameStore,
       registerDictionaries,
       LOCALES: { zh: ZH, en: EN },
-      COMPONENTS: { SproutMark, StateDot, HubPanel, GameOverlay, FooterLaunch },
+      COMPONENTS: { SproutMark, StateDot, HubPanel, GameEmbed, PvzPanel, FooterLaunch },
     }
 
     return module.exports

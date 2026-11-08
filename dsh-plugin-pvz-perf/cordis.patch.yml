@@ -3,10 +3,12 @@
 # 一行、两半：
 #   - Host half（index.js）在回环上注册只读路由，把本机的 pvz_perf 网页版
 #     （index.html / wasm / data / audio）原样喂给浏览器；
-#   - Browser half（client.js，dsh.client 声明）在 Web UI 里放四个 additive 座位：
-#     sidebar.panellist（入口图标）、main（hub 面板）、shell.overlay（整屏游戏浮层）、
-#     sidebar.footer.action（侧栏底部的快速开关）。
+#   - Browser half（client.js，dsh.client 声明）在 Web UI 里放三个 additive 座位：
+#     sidebar.panellist（入口图标）、main（hub ↔ 游戏面板，key = pvz-perf）、
+#     sidebar.footer.action（侧栏底部的快捷入口）。
 #
+# 游戏只渲染在 shell 已经分配给 main 面板的中央列里：不铺全窗口、不遮挡侧栏和
+# 窗口控件（0.1.0 的 shell.overlay 方案在真机上踩过这个坑，已移除）。
 # 不 override、不 disable 任何现存行；游戏本体不进 npm 包，插件只负责“找到并转播”。
 - insert:
     - id: pvz-perf

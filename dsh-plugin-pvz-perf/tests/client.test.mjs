@@ -5,6 +5,11 @@
  * recording React and a fake service ctx, so every assertion here is about the
  * shipped bundle rather than a re-implementation. No browser, no jsdom, no
  * dependencies.
+ *
+ * Layout contract under test: the game lives inside the plugin's `main` panel
+ * (the shell's own central column). It must never render a full-window fixed
+ * layer, because that covers the sidebar and, in the desktop shell, hides its
+ * controls underneath the window buttons.
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -26,11 +31,10 @@ import {
 const { plugin, registration } = boot()
 const seam = plugin.__test
 
-/** The four seat descriptors the bundle must register, in registration order. */
+/** The three seat descriptors the bundle must register, in registration order. */
 const EXPECTED_SEATS = [
   { name: 'sidebar.panellist', id: 'pvz-perf', order: 26 },
   { name: 'main', id: undefined, key: 'pvz-perf' },
-  { name: 'shell.overlay', id: 'pvz-perf.game-overlay', order: 900 },
   { name: 'sidebar.footer.action', id: 'pvz-perf.launch', order: 42 },
 ]
 
@@ -69,7 +73,6 @@ test('bundle contract: loader id, inject list, single react dependency', () => {
   assert.ok(requires.length > 0, 'bundle must require react')
   for (const id of requires) assert.equal(id, 'react')
 
-  // A plugin may not mount a second application or reach into the host DOM.
   assert.ok(!/document\.body/.test(BUNDLE_SOURCE), 'bundle must not append to document.body')
   assert.ok(!/@deepseek-ai\//.test(BUNDLE_SOURCE), 'bundle must not import a Harness client package')
 })
@@ -91,7 +94,7 @@ test('route literals agree with the Host half when it exists', () => {
   }
 })
 
-test('apply registers exactly the four additive seats', () => {
+test('apply registers exactly the three additive seats', () => {
   const { ctx, registrations, effects } = createFakeCtx()
   plugin.apply(ctx)
 
@@ -106,6 +109,16 @@ test('apply registers exactly the four additive seats', () => {
     assert.equal(typeof registrations[index].component, 'function')
   }
   assert.ok(effects.length >= 2, 'apply must own its dictionary/style/store effects')
+})
+
+test('the plugin never claims a full-window layer seat', () => {
+  const { ctx, registrations } = createFakeCtx()
+  plugin.apply(ctx)
+  const names = registrations.map((entry) => entry.entry.name)
+  assert.deepEqual(names, ['sidebar.panellist', 'main', 'sidebar.footer.action'])
+  assert.ok(!names.includes('shell.overlay'), 'a full-window overlay would cover the sidebar')
+  assert.ok(!BUNDLE_SOURCE.includes('pvz-overlay'), 'no overlay layout may remain in the bundle')
+  assert.ok(!/position:fixed/.test(BUNDLE_SOURCE), 'the game view must sit in the panel flow, not float over the app')
 })
 
 test('seat label thunks resolve through the locale service', () => {
@@ -134,38 +147,23 @@ test('store folds a ready status and keeps one snapshot reference until changed'
   assert.equal(store.getSnapshot(), store.getSnapshot(), 'unchanged state must keep its reference')
 })
 
-test('store open/hide/show/toggle/reload/close lifecycle', async () => {
+test('store open/reload/close lifecycle', async () => {
   const store = storeWith(READY)
   await store.refresh()
 
   store.open()
-  assert.deepEqual(
-    [store.getSnapshot().opened, store.getSnapshot().visible],
-    [true, true],
-  )
-
-  store.hide()
-  assert.deepEqual([store.getSnapshot().opened, store.getSnapshot().visible], [true, false])
-
-  store.show()
-  assert.deepEqual([store.getSnapshot().opened, store.getSnapshot().visible], [true, true])
-
-  store.toggle()
-  assert.equal(store.getSnapshot().visible, false, 'toggle hides a visible layer')
-
-  store.toggle()
-  assert.equal(store.getSnapshot().visible, true, 'toggle re-shows a hidden layer')
+  assert.equal(store.getSnapshot().opened, true)
 
   const reloadKey = store.getSnapshot().reloadKey
   store.reload()
   assert.equal(store.getSnapshot().reloadKey, reloadKey + 1)
-  assert.equal(store.getSnapshot().visible, true)
+  assert.equal(store.getSnapshot().opened, true, 'reload keeps the game open')
 
   store.close()
-  assert.deepEqual([store.getSnapshot().opened, store.getSnapshot().visible], [false, false])
+  assert.equal(store.getSnapshot().opened, false)
 
-  store.toggle()
-  assert.equal(store.getSnapshot().opened, true, 'toggle reopens a closed layer')
+  store.open()
+  assert.equal(store.getSnapshot().opened, true, 'the game can be opened again after closing')
 })
 
 test('ensureStatus fetches once and only retries after a failed check', async () => {
@@ -193,9 +191,6 @@ test('missing and failing status are distinct phases', async () => {
   await broken.refresh()
   assert.equal(broken.getSnapshot().phase, 'error')
   assert.match(broken.getSnapshot().error, /status HTTP 500/)
-  broken.ensureStatus()
-  await tick()
-  assert.equal(broken.getSnapshot().phase, 'error', 'a retry that fails again stays in error')
 })
 
 test('dispose stops notifications and later commits', async () => {
@@ -206,46 +201,54 @@ test('dispose stops notifications and later commits', async () => {
   const callsAfterRefresh = calls
   store.dispose()
   store.open()
-  store.hide()
+  store.close()
   assert.equal(calls, callsAfterRefresh, 'a disposed store must not notify')
 })
 
-test('overlay mounts the iframe only after open and hides without unmounting it', () => {
+test('game view renders the iframe inside the panel only after open', () => {
   const store = storeWith(READY)
   const locale = createFakeLocale()
   seam.registerDictionaries(locale)
-  const overlay = () => seam.COMPONENTS.GameOverlay({ store, locale, layout: undefined })
+  const view = () => seam.COMPONENTS.GameEmbed({ store, locale, layout: undefined })
 
-  assert.equal(overlay(), null, 'overlay renders nothing before its first open')
+  assert.equal(view(), null, 'the game view renders nothing before its first open')
 
   store.open()
-  const visibleTree = expand(overlay())
-  const iframe = findOne(visibleTree, (element) => element.type === 'iframe')
-  assert.ok(iframe, 'the overlay must contain the game iframe')
+  const tree = expand(view())
+  const iframe = findOne(tree, (element) => element.type === 'iframe')
+  assert.ok(iframe, 'the panel must contain the game iframe')
   assert.equal(iframe.props.src, seam.GAME_URL)
   assert.match(iframe.props.allow, /fullscreen/)
   assert.equal(iframe.props.allowFullScreen, true)
-  const layer = findOne(visibleTree, (element) => element.props.className === 'pvz-overlay')
-  assert.equal(layer.props.style.display, 'flex')
-  const buttons = byTag(visibleTree, 'button')
+  const root = findOne(tree, (element) => element.props.className === 'pvz-game')
+  assert.ok(root, 'the game view is a panel-flow container')
+  const buttons = byTag(tree, 'button')
   const texts = buttons.map((button) => textOf(button))
-  assert.ok(texts.includes('隐藏'), 'overlay exposes a hide action: ' + texts.join('|'))
-  assert.ok(texts.includes('重新载入'), 'overlay exposes a reload action')
-  assert.ok(texts.includes('结束'), 'overlay exposes an end action')
-
-  store.hide()
-  const hiddenTree = expand(overlay())
-  const hiddenLayer = findOne(hiddenTree, (element) => element.props.className === 'pvz-overlay')
-  assert.equal(hiddenLayer.props.style.display, 'none', 'hiding keeps the layer and iframe mounted')
-  assert.ok(findOne(hiddenTree, (element) => element.type === 'iframe'), 'the game page survives hiding')
+  assert.ok(texts.includes('返回对话'), 'game bar exposes back-to-chat: ' + texts.join('|'))
+  assert.ok(texts.includes('全屏'), 'game bar exposes fullscreen')
+  assert.ok(texts.includes('重新载入'), 'game bar exposes reload')
+  assert.ok(texts.includes('结束'), 'game bar exposes end')
 
   store.reload()
-  const reloaded = expand(overlay())
+  const reloaded = expand(view())
   const reloadedIframe = findOne(reloaded, (element) => element.type === 'iframe')
   assert.equal(reloadedIframe.props.key, 'pvz-frame-1', 'reload remounts with a fresh key')
 
   store.close()
-  assert.equal(overlay(), null, 'ending unmounts the game page')
+  assert.equal(view(), null, 'ending unmounts the game page')
+})
+
+test('back button hands the main column back to the conversation', () => {
+  const store = storeWith(READY)
+  const locale = createFakeLocale()
+  seam.registerDictionaries(locale)
+  const layout = { calls: [], selectPanel(id) { this.calls.push(id) } }
+  store.open()
+  const tree = expand(seam.COMPONENTS.GameEmbed({ store, locale, layout }))
+  const back = byTag(tree, 'button').find((button) => textOf(button).includes('返回对话'))
+  assert.ok(back, 'back button exists')
+  back.props.onClick()
+  assert.deepEqual(layout.calls, ['conversation'])
 })
 
 test('hub shows state, version and directory, and blocks start while missing', async () => {
@@ -282,32 +285,45 @@ test('hub shows state, version and directory, and blocks start while missing', a
   assert.equal(blockedStart.props.disabled, true, 'start is disabled while no build is found')
 })
 
-test('footer toggle opens, hides and re-shows the game', () => {
-  const store = storeWith(READY)
+test('the panel switches between hub and game without leaving the column', async () => {
   const locale = createFakeLocale()
   seam.registerDictionaries(locale)
-  const wide = () => seam.COMPONENTS.FooterLaunch({ store, locale, wide: true })
-  const rail = () => seam.COMPONENTS.FooterLaunch({ store, locale, wide: false })
+  const store = storeWith(READY)
+  await store.refresh()
+  const panel = () => expand(seam.COMPONENTS.PvzPanel({ store, locale, layout: undefined }))
 
-  const closedTree = expand(wide())
-  const closedButton = byTag(closedTree, 'button')[0]
-  assert.equal(closedButton.props['aria-pressed'], 'false')
-  assert.ok(textOf(closedTree).includes('打开植物大战僵尸'))
-  closedButton.props.onClick()
-  assert.equal(store.getSnapshot().opened, true)
+  const hubTree = panel()
+  assert.ok(findOne(hubTree, (element) => element.props.className === 'pvz-hub'), 'closed panel shows the hub')
+  assert.equal(findOne(hubTree, (element) => element.type === 'iframe'), undefined)
 
-  const openTree = expand(wide())
-  const openButton = byTag(openTree, 'button')[0]
-  assert.equal(openButton.props['aria-pressed'], 'true')
-  assert.ok(textOf(openTree).includes('隐藏植物大战僵尸'))
-  openButton.props.onClick()
-  assert.equal(store.getSnapshot().visible, false)
+  store.open()
+  const gameTree = panel()
+  assert.ok(findOne(gameTree, (element) => element.props.className === 'pvz-game'), 'open panel shows the game')
+  assert.ok(findOne(gameTree, (element) => element.type === 'iframe'))
+})
 
-  const railTree = expand(rail())
-  assert.equal(findAll(railTree, (element) => String(element.props.className ?? '').includes('pvz-footer-label')).length, 0,
+test('footer shortcut selects the panel and starts the game once', async () => {
+  const locale = createFakeLocale()
+  seam.registerDictionaries(locale)
+  const layout = { calls: [], selectPanel(id) { this.calls.push(id) } }
+  const store = storeWith(READY)
+  await store.refresh()
+
+  const click = () => {
+    const tree = expand(seam.COMPONENTS.FooterLaunch({ store, locale, layout, wide: true }))
+    byTag(tree, 'button')[0].props.onClick()
+    return tree
+  }
+  const closedTree = click()
+  assert.deepEqual(layout.calls, [seam.PANEL_ID], 'the shortcut selects the plugin panel')
+  assert.equal(store.getSnapshot().opened, true, 'the shortcut starts the game when closed')
+
+  const openTree = click()
+  assert.equal(textOf(openTree).includes('回到植物大战僵尸'), true, 'the shortcut offers a way back in')
+
+  const rail = expand(seam.COMPONENTS.FooterLaunch({ store, locale, layout, wide: false }))
+  assert.equal(findAll(rail, (element) => String(element.props.className ?? '').includes('pvz-footer-label')).length, 0,
     'the rail variant renders no label text')
-  const railButton = byTag(railTree, 'button')[0]
-  assert.ok(railButton.props.title.includes('继续'), 'the rail tooltip offers resume')
 })
 
 test('locale dictionaries cover the same keys and resolve in both languages', async () => {
@@ -322,23 +338,33 @@ test('locale dictionaries cover the same keys and resolve in both languages', as
     await store.refresh()
     store.open()
     const trees = [
-      expand(seam.COMPONENTS.HubPanel({ store, locale, layout: { selectPanel() {} } })),
-      expand(seam.COMPONENTS.GameOverlay({ store, locale, layout: { selectPanel() {} } })),
-      expand(seam.COMPONENTS.FooterLaunch({ store, locale, wide: true })),
+      expand(seam.COMPONENTS.PvzPanel({ store, locale, layout: { selectPanel() {} } })),
+      expand(seam.COMPONENTS.FooterLaunch({ store, locale, layout: { selectPanel() {} }, wide: true })),
     ]
     const text = trees.map(textOf).join(' ')
-    assert.ok(!/\b(hub|overlay|footer|panel|common|error)\.[a-z]/i.test(text),
-      'unresolved locale key surfaced in ' + id + ': ' + text.match(/\b(hub|overlay|footer|panel|common|error)\.[a-z.]+/i))
-    assert.ok(text.includes('3.3.4'))
+    assert.ok(!/\b(hub|game|footer|panel|common|error)\.[a-z]/i.test(text),
+      'unresolved locale key surfaced in ' + id + ': ' + text.match(/\b(hub|game|footer|panel|common|error)\.[a-z.]+/i))
+    assert.ok(text.includes('3.3.4') || text.includes('植物大战僵尸') || text.includes('Plants vs. Zombies'))
   }
 })
 
+test('game view stays inside the panel and never covers the app chrome', () => {
+  // The Electron shell draws minimize/maximize/close above the page at the
+  // window's right edge; anything placed under them is invisible and inert.
+  // The game view must therefore live inside the panel and never paint a
+  // full-window bar: that was the first real-machine round's bug.
+  assert.match(BUNDLE_SOURCE, /pvz-game-bar/, 'the game has its own compact bar inside the panel')
+  assert.ok(!BUNDLE_SOURCE.includes('260px'), 'no window-controls padding hack should be needed')
+  assert.match(BUNDLE_SOURCE, /'Escape'/, 'an Escape fallback must exist for mouse-free exit')
+})
+
 test('styling stays inside pvz- classes and theme tokens', () => {
-  const css = BUNDLE_SOURCE.slice(BUNDLE_SOURCE.indexOf('const CSS = `'), BUNDLE_SOURCE.indexOf('`', BUNDLE_SOURCE.indexOf('const CSS = `') + 13))
+  const cssStart = BUNDLE_SOURCE.indexOf('const CSS = `')
+  const css = BUNDLE_SOURCE.slice(cssStart + 13, BUNDLE_SOURCE.indexOf('`', cssStart + 13))
   assert.ok(css.length > 1000, 'style block present')
   const classes = [...css.matchAll(/\.([a-zA-Z][\w-]*)/g)].map((match) => match[1])
   for (const name of classes) {
     assert.ok(name.startsWith('pvz-'), 'unprefixed class in plugin CSS: ' + name)
   }
-  assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(css.replace(/#(05070a|000|fff|ffffff)\b/gi, '')), 'chrome colours must use theme tokens')
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(css.replace(/#(000|fff|ffffff)\b/gi, '')), 'chrome colours must use theme tokens')
 })

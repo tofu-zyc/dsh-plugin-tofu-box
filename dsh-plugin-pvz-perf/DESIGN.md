@@ -221,3 +221,34 @@ in both (fail on missing key), only `require('react')` is requested.
 - Report back: files written, test command + result, assumptions/risks, and any
   contract deviation. The Lead integrates and verifies; do not claim the plugin
   works end to end.
+
+## 6. Layout revision after the first real-machine round (0.1.1)
+
+The 0.1.0 design put the game into `shell.overlay`, a root-scoped full-window
+layer. On the real desktop shell that was wrong twice over:
+
+- it covered the whole window, sidebar included, which is not the surface the
+  user expects a plugin panel to use;
+- the overlay bar ran to the right window edge, so its last two actions
+  (`回到对话`, `结束`) were painted underneath the desktop window buttons and
+  could neither be seen nor clicked — the round became impossible to leave.
+
+0.1.1 therefore moves the game inside the `main` panel the shell already
+allocates to this plugin. Seats are now:
+
+| Seat | Id / key | Content |
+| --- | --- | --- |
+| `sidebar.panellist` | id `pvz-perf`, order 26 | potted-sprout icon, opens the panel |
+| `main` | key `pvz-perf` | hub when closed; game + compact tool bar when open |
+| `sidebar.footer.action` | id `pvz-perf.launch`, order 42 | selects the panel and starts the game |
+
+There is no `shell.overlay` registration, no `position: fixed`, and no z-index
+above the app chrome. The game tool bar is `返回对话 / 全屏 / 重新载入 / 结束`;
+"back" hands the central column back to the conversation (the game page unmounts
+with the panel, and the game only writes a level back on a normal in-game quit).
+Fullscreen is an explicit user action on the panel element only.
+
+Verification for this revision: rc-dev web instance, real headless Chrome —
+game rect starts at x=280 (sidebar occupies 0..280), computed position `static`,
+zero fixed full-window layers, all four tool-bar buttons present, the iframe
+loads the pvz_perf launcher and "返回对话" returns to the conversation.
