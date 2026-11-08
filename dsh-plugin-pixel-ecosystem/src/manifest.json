@@ -1,0 +1,117 @@
+{
+  "note": "Concatenated in array order by tools/build-client.mjs; all parts share one closure scope.",
+  "parts": [
+    {
+      "file": "00-preamble.js",
+      "description": "Loader wrapper, module docs, storage keys"
+    },
+    {
+      "file": "01-constants.js",
+      "description": "World constants and global tuning"
+    },
+    {
+      "file": "02-species.js",
+      "description": "Species table and food web"
+    },
+    {
+      "file": "03-helpers.js",
+      "description": "Small math/terrain helpers and RNG"
+    },
+    {
+      "file": "04-terrain.js",
+      "description": "Noise, hydrology, terrain generation"
+    },
+    {
+      "file": "05-world-create.js",
+      "description": "Flora seeding and createWorld"
+    },
+    {
+      "file": "06-genes-spawn.js",
+      "description": "Genes, mutation, spawnEntity"
+    },
+    {
+      "file": "07-spatial.js",
+      "description": "Spatial grid queries, alarm, herds"
+    },
+    {
+      "file": "08-sim-constants.js",
+      "description": "killEntity, moveToward, food/prey search"
+    },
+    {
+      "file": "09-needs.js",
+      "description": "Need channels, traits, life stages, decay"
+    },
+    {
+      "file": "10-decide.js",
+      "description": "Utility scoring: decide()"
+    },
+    {
+      "file": "11-feed.js",
+      "description": "Feeding, hunting, scavenging"
+    },
+    {
+      "file": "12-step-entity.js",
+      "description": "Per-entity tick and entity list step"
+    },
+    {
+      "file": "13-fields.js",
+      "description": "Producers, plants, corpses, immigration, stepWorld"
+    },
+    {
+      "file": "14-player-tools.js",
+      "description": "Brush tools"
+    },
+    {
+      "file": "15-stats.js",
+      "description": "Stats snapshot and history"
+    },
+    {
+      "file": "16-persistence.js",
+      "description": "Save / load"
+    },
+    {
+      "file": "17-palette.js",
+      "description": "Palette and colour helpers"
+    },
+    {
+      "file": "18-sprites.js",
+      "description": "Sprite grids and compiled sprites"
+    },
+    {
+      "file": "19-atlas.js",
+      "description": "Embedded PNG atlas and atlas drawing"
+    },
+    {
+      "file": "20-render.js",
+      "description": "Viewport renderer"
+    },
+    {
+      "file": "21-store.js",
+      "description": "World store, loop, camera"
+    },
+    {
+      "file": "22-locale.js",
+      "description": "Locale dictionaries"
+    },
+    {
+      "file": "23-glyphs.js",
+      "description": "Inline SVG pixel glyphs"
+    },
+    {
+      "file": "24-ui.js",
+      "description": "Panel UI components"
+    },
+    {
+      "file": "25-ui-locale.js",
+      "description": "Extra palette entries and locale keys"
+    },
+    {
+      "file": "26-css.js",
+      "description": "Panel stylesheet"
+    },
+    {
+      "file": "27-registration.js",
+      "description": "Panel/plugin registration and test seams"
+    }
+  ]
+}
