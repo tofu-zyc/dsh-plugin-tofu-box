@@ -756,8 +756,12 @@ test('serializeWorld -> deserializeWorld round-trips the world and keeps simulat
   // Through JSON, exactly like localStorage would.
   const restored = deserializeWorld(JSON.parse(JSON.stringify(saved)))
   assert.equal(diffCells(world.terrain, restored.terrain), 0, 'terrain must survive the round-trip byte for byte')
-  const tolerance = 1 / 255 + 1e-6
+  // A field is packed against its own maximum (the payload carries the scale),
+  // so the absolute error grows with that maximum: the tolerance has to be the
+  // quantisation step of THIS save, not the step of a 0..1 field.
   for (const field of ['grass', 'weed', 'fertility']) {
+    const scale = Number(saved.scales?.[field]) > 0 ? Number(saved.scales[field]) : 1
+    const tolerance = scale / 255 + 1e-6
     let worst = 0
     for (let i = 0; i < world[field].length; i++) worst = Math.max(worst, Math.abs(world[field][i] - restored[field][i]))
     assert.ok(worst <= tolerance, `${field} drifted by ${worst} (quantized saves allow ${tolerance})`)
@@ -849,8 +853,12 @@ test('handleImmigration refills a species that was wiped out and leaves the othe
   handleImmigration(world, TICK)
   const wolves = alive(world, 'wolf')
   const fish = alive(world, 'fish')
-  assert.ok(wolves >= 4 && wolves <= 8, `immigration drops a group of 4..8 wolves, got ${wolves}`)
-  assert.ok(fish >= 4 && fish <= 8, `immigration drops a group of 4..8 fish, got ${fish}`)
+  // The group is sized off the species' own floor (half of it, plus jitter, capped
+  // at 8): a flat 4-8 group would flood a species whose floor is 1 and would be a
+  // fifth of a rabbit-sized floor. See handleImmigration.
+  const groupOf = (id) => Math.min(8, Math.max(1, Math.round((SPECIES[id].minimum ?? 2) * 0.5)))
+  assert.ok(wolves >= groupOf('wolf') && wolves <= Math.min(8, groupOf('wolf') + 2), `immigration drops a floor-sized group of wolves, got ${wolves}`)
+  assert.ok(fish >= groupOf('fish') && fish <= Math.min(8, groupOf('fish') + 2), `immigration drops a floor-sized group of fish, got ${fish}`)
   for (const species of world.entities) {
     if (species.species !== 'wolf' && species.species !== 'fish') continue
     const row = SPECIES[species.species]

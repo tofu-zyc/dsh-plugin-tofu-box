@@ -127,9 +127,17 @@
     const PRODUCERS = {
       grass: {
         /** Dry mass at which the cell is treated as "full", kg/m^2. */
-        bmax: 1.2,
-        /** Potential relative growth, per in-world day. */
-        mu: 26.0,
+        bmax: 1.4,
+        /**
+         * Potential relative growth, per in-world day.
+         *
+         * This is the world's productivity dial: a grazed sward regrows at a
+         * rate that sets how many herbivores the map can carry, and therefore
+         * how many predators the food web can carry one step up. Raised from 26
+         * so a realistic predator tier fits inside the measured prey production
+         * (tools/calibrate.mjs); the standing crop still EMERGES, it is not set.
+         */
+        mu: 40.0,
         /** Seed bank / basal meristem floor, kg/m^2: what regrows from bare soil. */
         seed: 0.04,
         /** Respiration loss, per in-world day, fraction of standing crop. */

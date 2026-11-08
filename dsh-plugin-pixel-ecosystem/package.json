@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-pixel-ecosystem",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "engines": {
     "dsh": ">=0.2.0-rc.2 <0.3.0-0"
   },

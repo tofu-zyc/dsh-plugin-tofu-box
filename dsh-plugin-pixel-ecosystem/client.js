@@ -185,9 +185,17 @@ window.__ModuleLoader__.load({
     const PRODUCERS = {
       grass: {
         /** Dry mass at which the cell is treated as "full", kg/m^2. */
-        bmax: 1.2,
-        /** Potential relative growth, per in-world day. */
-        mu: 26.0,
+        bmax: 1.4,
+        /**
+         * Potential relative growth, per in-world day.
+         *
+         * This is the world's productivity dial: a grazed sward regrows at a
+         * rate that sets how many herbivores the map can carry, and therefore
+         * how many predators the food web can carry one step up. Raised from 26
+         * so a realistic predator tier fits inside the measured prey production
+         * (tools/calibrate.mjs); the standing crop still EMERGES, it is not set.
+         */
+        mu: 40.0,
         /** Seed bank / basal meristem floor, kg/m^2: what regrows from bare soil. */
         seed: 0.04,
         /** Respiration loss, per in-world day, fraction of standing crop. */
@@ -297,7 +305,7 @@ window.__ModuleLoader__.load({
     const SPECIES = {
       rabbit: {
         habitat: 'land', role: 'grazer', flora: 'grass', prey: [], mass: 2, taxon: 'mammal',
-        cap: 400, minimum: 40, color: '#c9a97b',
+        cap: 700, minimum: 80, color: '#c9a97b',
         territory: { radius: 3, max: 7 },
         herd: { radius: 18, separation: 5, alarmRadius: 15 },
         // Crepuscular: busiest at dawn and dusk, skips the midday heat.
@@ -313,7 +321,7 @@ window.__ModuleLoader__.load({
       },
       deer: {
         habitat: 'land', role: 'grazer', flora: 'grass', prey: [], browse: true, mass: 60, taxon: 'mammal',
-        cap: 260, minimum: 22, color: '#b98a5e',
+        cap: 200, minimum: 12, color: '#b98a5e',
         territory: { radius: 7, max: 6 },
         herd: { radius: 26, separation: 6, alarmRadius: 20 },
         activity: { dawn: 1, day: 0.6, dusk: 1, night: 0.5 },
@@ -327,7 +335,7 @@ window.__ModuleLoader__.load({
       },
       fox: {
         habitat: 'land', role: 'hunter', prey: ['rabbit'], mass: 6, taxon: 'mammal',
-        cap: 170, minimum: 12, color: '#d2733c',
+        cap: 40, minimum: 2, color: '#d2733c',
         territory: { radius: 12, max: 2 },
         activity: { dawn: 1, day: 0.6, dusk: 1, night: 0.9 },
         genes: {
@@ -339,7 +347,7 @@ window.__ModuleLoader__.load({
       },
       wolf: {
         habitat: 'land', role: 'hunter', prey: ['deer', 'rabbit'], mass: 40, taxon: 'mammal',
-        cap: 90, minimum: 6, color: '#8a8f99',
+        cap: 20, minimum: 1, color: '#8a8f99',
         territory: { radius: 19, max: 1 },
         herd: { radius: 20, separation: 3, alarmRadius: 0 },
         activity: { dawn: 1, day: 0.75, dusk: 1, night: 0.85 },
@@ -352,7 +360,7 @@ window.__ModuleLoader__.load({
       },
       crow: {
         habitat: 'air', role: 'scavenger', prey: [], mass: 0.45, taxon: 'bird',
-        cap: 220, minimum: 16, color: '#3b3b46',
+        cap: 60, minimum: 4, color: '#3b3b46',
         herd: { radius: 22, separation: 3.5, alarmRadius: 20 },
         activity: { dawn: 1, day: 1, dusk: 0.9, night: 0.15 },
         genes: {
@@ -378,7 +386,7 @@ window.__ModuleLoader__.load({
       },
       pike: {
         habitat: 'water', role: 'hunter', prey: ['fish', 'frog'], mass: 4.5, taxon: 'ectotherm',
-        cap: 70, minimum: 6, color: '#4a6b4a',
+        cap: 20, minimum: 2, color: '#4a6b4a',
         // Ambush: it does not chase across the lake, it waits and then strikes.
         ambush: { approach: 0.45, strikeDistance: 7, strikeSpeed: 1.9, cooldown: 2.5 },
         activity: { dawn: 1, day: 0.8, dusk: 1, night: 0.7 },
@@ -397,7 +405,7 @@ window.__ModuleLoader__.load({
       heron: {
         // Wades: can stand in shallow water, which is how it reaches the fish.
         habitat: 'land', role: 'hunter', prey: ['fish', 'frog'], mass: 1.6, taxon: 'bird',
-        cap: 60, minimum: 6, color: '#9aa4b2',
+        cap: 20, minimum: 2, color: '#9aa4b2',
         wade: true,
         territory: { radius: 14, max: 3 },
         activity: { dawn: 1, day: 0.95, dusk: 1, night: 0.25 },
@@ -410,7 +418,7 @@ window.__ModuleLoader__.load({
       },
       otter: {
         habitat: 'water', role: 'hunter', prey: ['fish', 'frog'], mass: 8, taxon: 'mammal',
-        cap: 70, minimum: 7, color: '#7a5238',
+        cap: 20, minimum: 2, color: '#7a5238',
         amphibious: true,
         territory: { radius: 12, max: 3 },
         activity: { dawn: 1, day: 0.85, dusk: 1, night: 0.6 },
@@ -423,7 +431,7 @@ window.__ModuleLoader__.load({
       },
       bear: {
         habitat: 'land', role: 'hunter', prey: ['deer', 'fish', 'rabbit'], mass: 200, taxon: 'mammal',
-        cap: 40, minimum: 3, color: '#6b4a34',
+        cap: 8, minimum: 1, color: '#6b4a34',
         wade: true,
         territory: { radius: 26, max: 1 },
         activity: { dawn: 0.9, day: 0.8, dusk: 1, night: 0.7 },
@@ -562,10 +570,21 @@ window.__ModuleLoader__.load({
       for (const preyId of PREY_OF[hunterId]) PREDATORS_OF[preyId].add(hunterId)
     }
 
-    /** Starting population of a fresh world: fuller meadow, fewer predators. */
+    /**
+     * Starting population of a fresh world, sized by the energy budget rather
+     * than by what looked good in 0.2.x.
+     *
+     * A predator can only eat what its prey PRODUCE in a year, and terrestrial
+     * production is roughly 1-5% of prey biomass per year, so the predator tier
+     * has to be a small fraction of the prey tier. The old cast (12 foxes, 5
+     * wolves, 4 bears on the same meadow) put predator biomass at ~45% of prey
+     * biomass and demanded ~8x the prey's annual production: every predator
+     * starved (measured: 98.9% of predator deaths were starvation). This cast
+     * sits near the measured carrying capacity (tools/calibrate.mjs).
+     */
     const DEFAULT_STOCKS = {
-      rabbit: 160, deer: 40, fox: 12, wolf: 5, crow: 20, fish: 120, pike: 12,
-      heron: 10, otter: 10, bear: 4, frog: 90,
+      rabbit: 320, deer: 40, fox: 4, wolf: 2, crow: 10, fish: 120, pike: 4,
+      heron: 4, otter: 4, bear: 1, frog: 90,
     }
 
     // ---------------------------------------------------------------------
@@ -4968,7 +4987,11 @@ window.__ModuleLoader__.load({
         // replaces world.entities wholesale would leave the cache stale, and
         // immigration must never skip a species that is actually gone.
         if (countSpecies(world, id) >= minimum) continue
-        const group = 4 + ((nextRandom(world) * 5) | 0)
+        // The group has to be sized off the species' own floor, not a flat
+        // 4-8: a flat group is meaningless for a species whose minimum is 1
+        // (every death triggers a flood that multiplies the population) and it
+        // is below a fifth of a rabbit-sized floor. Half the floor, at least 1.
+        const group = clamp(Math.round(minimum * 0.5) + ((nextRandom(world) * 3) | 0), 1, 8)
         let placed = 0
         for (let attempt = 0; attempt < group * 60 && placed < group; attempt++) {
           const x = randomBetween(world, 1, world.width - 2)

@@ -384,7 +384,11 @@
         // replaces world.entities wholesale would leave the cache stale, and
         // immigration must never skip a species that is actually gone.
         if (countSpecies(world, id) >= minimum) continue
-        const group = 4 + ((nextRandom(world) * 5) | 0)
+        // The group has to be sized off the species' own floor, not a flat
+        // 4-8: a flat group is meaningless for a species whose minimum is 1
+        // (every death triggers a flood that multiplies the population) and it
+        // is below a fifth of a rabbit-sized floor. Half the floor, at least 1.
+        const group = clamp(Math.round(minimum * 0.5) + ((nextRandom(world) * 3) | 0), 1, 8)
         let placed = 0
         for (let attempt = 0; attempt < group * 60 && placed < group; attempt++) {
           const x = randomBetween(world, 1, world.width - 2)
