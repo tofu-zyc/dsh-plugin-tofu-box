@@ -84,6 +84,8 @@ window.__ModuleLoader__.load({
       'hub.missing.hint': '没有在默认位置找到网页版游戏文件。',
       'game.title': '植物大战僵尸 · 摸鱼中',
       'game.fullscreen': '全屏',
+      'game.exitFullscreen': '退出全屏',
+      'game.fullscreenHint': '铺满屏幕；按 Esc 或点右上角「退出全屏」回来',
       'game.reload': '重新载入',
       'game.end': '结束',
       'game.endHint': '结束并卸载游戏页面；只有游戏内正常退出才会保存当前关卡。',
@@ -121,6 +123,8 @@ window.__ModuleLoader__.load({
       'hub.missing.hint': 'No web build was found at the default locations.',
       'game.title': 'Plants vs. Zombies · break',
       'game.fullscreen': 'Fullscreen',
+      'game.exitFullscreen': 'Exit fullscreen',
+      'game.fullscreenHint': 'Fills the screen; press Esc or click Exit fullscreen in the corner to come back',
       'game.reload': 'Reload',
       'game.end': 'End',
       'game.endHint': 'End unloads the game page; in-game progress is only saved on a normal in-game quit.',
@@ -507,20 +511,59 @@ window.__ModuleLoader__.load({
       const t = props.locale.bind(NS)
       const snapshot = useStore(store)
       const panelRef = React.useRef(null)
+      const [isFullscreen, setIsFullscreen] = React.useState(false)
 
       /** Leave the panel (the game page unmounts with it). */
       const back = () => {
         if (layout !== undefined && typeof layout.selectPanel === 'function') layout.selectPanel('conversation')
       }
 
-      // Escape returns to the conversation while the page (not the game
-      // iframe) has focus. Key events inside the iframe never reach this
-      // document, so the game's own Esc menu still works.
+      /** Ask the browser to leave element fullscreen, if it is active. */
+      const exitFullscreen = () => {
+        if (typeof document === 'undefined' || typeof document.exitFullscreen !== 'function') return
+        const result = document.exitFullscreen()
+        if (result !== undefined && typeof result.catch === 'function') result.catch(() => { /* already gone */ })
+      }
+
+      /** Enter fullscreen on the panel, or leave it when already there. */
+      const toggleFullscreen = () => {
+        const panel = panelRef.current
+        if (panel === null || panel === undefined) return
+        if (typeof document !== 'undefined' && document.fullscreenElement === panel) {
+          exitFullscreen()
+          return
+        }
+        if (typeof panel.requestFullscreen === 'function') {
+          const result = panel.requestFullscreen()
+          if (result !== undefined && typeof result.catch === 'function') result.catch(() => { /* user or policy refused */ })
+        }
+      }
+
+      // The button label, the hidden in-fullscreen bar and the floating exit
+      // affordance all follow the browser's own fullscreen state.
+      React.useEffect(() => {
+        if (typeof document === 'undefined') return undefined
+        /** @param {Event} event - the fullscreenchange event. */
+        const onChange = () => {
+          const panel = panelRef.current
+          setIsFullscreen(panel !== null && panel !== undefined && document.fullscreenElement === panel)
+        }
+        document.addEventListener('fullscreenchange', onChange)
+        return () => { document.removeEventListener('fullscreenchange', onChange) }
+      }, [])
+
+      // Escape leaves fullscreen first, otherwise it returns to the chat.
+      // Key events inside the game iframe never reach this document, so the
+      // game's own Esc menu still works while playing.
       React.useEffect(() => {
         if (typeof document === 'undefined' || snapshot.opened !== true) return undefined
         /** @param {KeyboardEvent} event - the key press. */
         const onKeyDown = (event) => {
           if (event.key !== 'Escape' || event.defaultPrevented === true) return
+          if (document.fullscreenElement !== null) {
+            exitFullscreen()
+            return
+          }
           back()
         }
         document.addEventListener('keydown', onKeyDown, true)
@@ -530,35 +573,44 @@ window.__ModuleLoader__.load({
       if (snapshot.opened !== true) return null
 
       const phase = snapshot.phase
-      const fullscreen = () => {
-        const panel = panelRef.current
-        if (panel !== null && panel !== undefined && typeof panel.requestFullscreen === 'function') {
-          const result = panel.requestFullscreen()
-          if (result !== undefined && typeof result.catch === 'function') result.catch(() => { /* user or policy refused */ })
-        }
-      }
-      return h('div', { className: 'pvz-game', ref: panelRef },
-        h('div', { className: 'pvz-game-bar' },
-          h('div', { className: 'pvz-game-brand' },
-            h(SproutMark, { size: 16 }),
-            h('span', { className: 'pvz-game-title' }, t('game.title')),
-            h(StateDot, { phase }),
-            h('span', { className: 'pvz-game-state' }, t('hub.state.' + phase))),
-          h('div', { className: 'pvz-game-actions' },
-            h(BarButton, { text: t('game.back'), onClick: back, title: t('game.backHint') }),
-            h(BarButton, { text: t('game.fullscreen'), onClick: fullscreen }),
-            h(BarButton, { text: t('game.reload'), onClick: () => store.reload() }),
-            h(BarButton, { text: t('game.end'), onClick: () => store.close(), title: t('game.endHint'), danger: true }))),
-        h('div', { className: 'pvz-game-frame' },
-          h('iframe', {
-            key: 'pvz-frame-' + snapshot.reloadKey,
-            className: 'pvz-frame',
-            src: GAME_URL,
-            title: t('game.frameTitle'),
-            allow: 'fullscreen; autoplay; gamepad; clipboard-write',
-            allowFullScreen: true,
-            referrerPolicy: 'no-referrer',
-          })))
+      return h('div', {
+        className: 'pvz-game',
+        ref: panelRef,
+        'data-fullscreen': isFullscreen === true ? 'true' : 'false',
+      },
+      h('div', { className: 'pvz-game-bar' },
+        h('div', { className: 'pvz-game-brand' },
+          h(SproutMark, { size: 16 }),
+          h('span', { className: 'pvz-game-title' }, t('game.title')),
+          h(StateDot, { phase }),
+          h('span', { className: 'pvz-game-state' }, t('hub.state.' + phase))),
+        h('div', { className: 'pvz-game-actions' },
+          h(BarButton, { text: t('game.back'), onClick: back, title: t('game.backHint') }),
+          h(BarButton, {
+            text: isFullscreen === true ? t('game.exitFullscreen') : t('game.fullscreen'),
+            onClick: toggleFullscreen,
+            title: t('game.fullscreenHint'),
+          }),
+          h(BarButton, { text: t('game.reload'), onClick: () => store.reload() }),
+          h(BarButton, { text: t('game.end'), onClick: () => store.close(), title: t('game.endHint'), danger: true }))),
+      h('div', { className: 'pvz-game-frame' },
+        h('iframe', {
+          key: 'pvz-frame-' + snapshot.reloadKey,
+          className: 'pvz-frame',
+          src: GAME_URL,
+          title: t('game.frameTitle'),
+          allow: 'fullscreen; autoplay; gamepad; clipboard-write',
+          allowFullScreen: true,
+          referrerPolicy: 'no-referrer',
+        })),
+      isFullscreen === true
+        ? h('button', {
+            type: 'button',
+            className: 'pvz-game-exit',
+            onClick: exitFullscreen,
+            title: t('game.fullscreenHint'),
+          }, t('game.exitFullscreen'))
+        : null)
     }
 
     /**
@@ -659,7 +711,12 @@ window.__ModuleLoader__.load({
 /* The game view fills the shell's central column only. No fixed-position layer,
    no z-index war: the sidebar, the titlebar and the window buttons stay usable
    while a round runs. */
-.pvz-game{display:flex;flex-direction:column;height:100%;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);box-sizing:border-box}
+.pvz-game{position:relative;display:flex;flex-direction:column;height:100%;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);box-sizing:border-box}
+.pvz-game[data-fullscreen="true"]{background:#000}
+.pvz-game[data-fullscreen="true"] .pvz-game-bar{display:none}
+.pvz-game-exit{position:absolute;top:12px;right:12px;z-index:6;appearance:none;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:999px;border:1px solid rgba(255,255,255,.42);background:rgba(10,12,16,.62);color:#fff;font:inherit;font-size:11.5px;font-weight:650;cursor:pointer;opacity:.72;transition:opacity .12s ease,background .12s ease}
+.pvz-game-exit:hover{opacity:1;background:rgba(10,12,16,.82)}
+.pvz-game-exit:focus-visible{outline:2px solid #fff;outline-offset:2px;opacity:1}
 .pvz-game-bar{display:flex;align-items:center;gap:10px;flex:none;flex-wrap:wrap;min-height:34px;padding:4px 10px 4px 12px;background:var(--dsw-alias-bg-layer-1);border-bottom:1px solid var(--dsw-alias-border-l1)}
 .pvz-game-brand{display:flex;align-items:center;gap:8px;min-width:0;flex:0 1 auto;overflow:hidden}
 .pvz-game-title{font-size:12px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}

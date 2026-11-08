@@ -358,6 +358,17 @@ test('game view stays inside the panel and never covers the app chrome', () => {
   assert.match(BUNDLE_SOURCE, /'Escape'/, 'an Escape fallback must exist for mouse-free exit')
 })
 
+test('fullscreen is a real toggle with a visible way back', () => {
+  // Real-machine round two: fullscreen kept the tool bar as a "notch" and the
+  // same button only re-entered it, so the browser had no exit affordance.
+  assert.match(BUNDLE_SOURCE, /document\.exitFullscreen/, 'fullscreen must be exited explicitly')
+  assert.match(BUNDLE_SOURCE, /fullscreenchange/, 'the label and overlay must follow browser fullscreen state')
+  assert.match(BUNDLE_SOURCE, /pvz-game-exit/, 'a floating exit control must exist while fullscreen')
+  assert.match(BUNDLE_SOURCE, /data-fullscreen/, 'fullscreen styling must be state-driven')
+  assert.match(BUNDLE_SOURCE, /game\.exitFullscreen/, 'the toggle label must switch to exit fullscreen')
+  assert.ok(/data-fullscreen="true"\][^}]*display:none/.test(BUNDLE_SOURCE), 'the tool bar is hidden in fullscreen')
+})
+
 test('styling stays inside pvz- classes and theme tokens', () => {
   const cssStart = BUNDLE_SOURCE.indexOf('const CSS = `')
   const css = BUNDLE_SOURCE.slice(cssStart + 13, BUNDLE_SOURCE.indexOf('`', cssStart + 13))
