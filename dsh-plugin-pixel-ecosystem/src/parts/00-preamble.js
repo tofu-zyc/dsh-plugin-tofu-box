@@ -31,6 +31,16 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const h = React.createElement
 
+    /**
+     * Build stamp shown in the panel header.
+     *
+     * Kept in sync with package.json by tests/build.test.mjs. It exists because
+     * "the fix did not work" turned out twice to mean "the browser is running a
+     * cached older module": without a visible stamp there is no way to tell a
+     * stale bundle from a broken fix.
+     */
+    const BUILD_VERSION = '0.3.9'
+
     /** Locale namespace; equals the package name. */
     const NS = 'dsh-plugin-pixel-ecosystem'
     /** Sidebar entry id and `main` panel key. The two must be the same string. */

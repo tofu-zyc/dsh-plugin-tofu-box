@@ -392,6 +392,9 @@
       let hover = null
       let disposed = false
       let snapshot = null
+      /** Called by draw() when the painted size and the box size disagree. */
+      let viewportListener = null
+      let viewportAskedAt = 0
       let pendingSnapshot = false
       let view = { x: 0, y: 0, width: 0, height: 0 }
       const brush = { tool: 'grass', radius: 1 }
@@ -1399,23 +1402,78 @@
         if (view.width <= 0 || view.height <= 0) return
         const selected = selectedEntity()
         const scale = view.scale ?? 1
+        // The offscreen buffer is created lazily: on a warm start the world
+        // arrives asynchronously, so attach() ran while world was still null and
+        // skipped it. Without this the first paint fell back to one pixel per
+        // cell and sized the canvas to the cell count instead of the pixel count
+        // (194x148 instead of 970x740), which is the 'tiny map in the corner'
+        // bug. Buffers are a precondition of drawing, not of attaching.
+        ensureDrawBuffers()
         const useAtlas = atlas.ready === true && scale >= 3 && offscreenContext !== null
         paintView(world, view, frameBuffer, alpha, {
           hover,
           radius: brush.radius,
           selected: selected === undefined ? null : selected,
         }, { sprites: !useAtlas, plants: !useAtlas })
-        const canvasWidth = view.width * (offscreenContext === null ? 1 : scale)
-        const canvasHeight = view.height * (offscreenContext === null ? 1 : scale)
-        if (offscreenContext !== null) {
+        // Two sizes, on purpose:
+        //  - backingWidth/Height: what gets painted, one device pixel per
+        //    rendered pixel (upscaled by the integer zoom when the offscreen
+        //    canvas exists). This is the size putImageData/drawImage write into.
+        //  - canvasWidth/Height: the CSS box, which is the stage rectangle the
+        //    panel asked for. It is what the player sees and what the HUD counts.
+        // Keeping them separate means a missing upscaler can no longer shrink the
+        // visible map to 1/scale of the stage: CSS scales the 1:1 frame instead.
+        const useOffscreen = offscreenContext !== null
+        // Invariant: the backing store is always view.width x scale, whatever the
+        // CSS box ends up being. Only the host that cannot create any canvas at
+        // all (no document, no OffscreenCanvas) has to paint 1:1 instead.
+        const backingScale = useOffscreen ? scale : 1
+        const backingWidth = Math.max(1, Math.round(view.width * backingScale))
+        const backingHeight = Math.max(1, Math.round(view.height * backingScale))
+        const canvasWidth = Number.isFinite(view.cssWidth) && view.cssWidth > 0 ? view.cssWidth : backingWidth
+        const canvasHeight = Number.isFinite(view.cssHeight) && view.cssHeight > 0 ? view.cssHeight : backingHeight
+        // The canvas size has exactly ONE owner: this function. React used to set
+        // width/height from its own copy of the view while the paint used the
+        // store's copy, so whenever the two disagreed the frame was painted into
+        // a corner of a larger canvas and the rest stayed black. Assigning here
+        // makes the visible size and the painted size the same by construction.
+        const element = context.canvas
+        // Closed loop: if the canvas we are about to paint is not the size of the
+        // box it sits in, the panel's saved viewport is stale (a panel that
+        // mounted before layout settled, a hidden tab, a zoom change racing a
+        // resize). Observers can miss those; the paint path cannot, because it
+        // runs every frame. Ask for a re-measure instead of drawing into a corner.
+        if (element !== null && element !== undefined && element.parentElement !== null
+          && typeof element.parentElement.getBoundingClientRect === 'function') {
+          const box = element.parentElement.getBoundingClientRect()
+          const offBy = Math.abs(box.width - canvasWidth) > 2 || Math.abs(box.height - canvasHeight) > 2
+          if (offBy && viewportListener !== null && clock() - viewportAskedAt > 200) {
+            viewportAskedAt = clock()
+            viewportListener(Math.max(200, Math.round(box.width)), Math.max(160, Math.round(box.height)))
+          }
+        }
+        if (element !== null && element !== undefined) {
+          if (element.width !== backingWidth) element.width = backingWidth
+          if (element.height !== backingHeight) element.height = backingHeight
+          const style = element.style
+          const cssWidth = canvasWidth + 'px'
+          const cssHeight = canvasHeight + 'px'
+          if (style !== undefined && style.width !== cssWidth) style.width = cssWidth
+          if (style !== undefined && style.height !== cssHeight) style.height = cssHeight
+        }
+        if (useOffscreen) {
           // Ground: 1 px per cell, upscaled with nearest neighbour.
           offscreenContext.putImageData(imageData, 0, 0)
           context.imageSmoothingEnabled = false
-          context.drawImage(offscreen, 0, 0, view.width, view.height, 0, 0, canvasWidth, canvasHeight)
+          context.drawImage(offscreen, 0, 0, view.width, view.height, 0, 0, backingWidth, backingHeight)
           // Plants and animals share one depth-sorted pass so a tree in front of
           // an animal actually covers it.
           if (useAtlas) drawDepthLayers(context, world, view, alpha)
         } else {
+          // No upscaler at all: this host cannot create a canvas, so the frame is
+          // painted one device pixel per cell and the CSS box scales it. In a
+          // browser ensureDrawBuffers() has already created the offscreen, so this
+          // branch is unreachable there.
           context.putImageData(imageData, 0, 0)
         }
         // Day/night wash and dawn/dusk warmth, over the whole frame.
@@ -1423,7 +1481,7 @@
         if (light < 0.98) {
           const darkness = Math.min(0.5, (1 - light) * 0.55)
           context.fillStyle = `rgba(12, 18, 44, ${darkness.toFixed(3)})`
-          context.fillRect(0, 0, canvasWidth, canvasHeight)
+          context.fillRect(0, 0, backingWidth, backingHeight)
         }
         const phase = (world.time % DAY_SECONDS) / DAY_SECONDS
         const warmth = phase > 0.17 && phase < 0.3
@@ -1433,7 +1491,7 @@
             : 0
         if (warmth > 0.01) {
           context.fillStyle = `rgba(240, 150, 70, ${warmth.toFixed(3)})`
-          context.fillRect(0, 0, canvasWidth, canvasHeight)
+          context.fillRect(0, 0, backingWidth, backingHeight)
         }
       }
 
@@ -1457,6 +1515,18 @@
        * sized to `width × height` cells.
        * @param {object} next - `{ x, y, width, height }` in cells.
        */
+      /**
+       * Let the owner of the layout tell the store how big the viewport should be.
+       *
+       * The panel passes a callback that re-measures and pushes a new view; the
+       * store calls it when a paint proves the two disagree. Asking is the only
+       * direction the store is allowed to go.
+       * @param {Function|null} listener - called with (width, height) in CSS px.
+       */
+      function setViewportListener(listener) {
+        viewportListener = typeof listener === 'function' ? listener : null
+      }
+
       function setView(next) {
         const scale = typeof next.scale === 'number' && next.scale > 0 ? next.scale : (view.scale ?? 1)
         if (world === null) {
@@ -1476,16 +1546,16 @@
         const height = Math.max(1, Math.min(world.height, next.height | 0))
         const x = clamp(next.x | 0, 0, Math.max(0, world.width - width))
         const y = clamp(next.y | 0, 0, Math.max(0, world.height - height))
-        const resized = width !== view.width || height !== view.height || imageData === null
-        view = { x, y, width, height, scale }
-        if (resized && context !== null) {
-          imageData = context.createImageData(width, height)
-          frameBuffer = new Uint32Array(imageData.data.buffer)
+        view = {
+          x, y, width, height, scale,
+          // The canvas box the panel measured for this view. draw() is the only
+          // writer of the element size, and this is where it gets the box from.
+          cssWidth: Number.isFinite(next.cssWidth) && next.cssWidth > 0 ? Math.round(next.cssWidth) : width * scale,
+          cssHeight: Number.isFinite(next.cssHeight) && next.cssHeight > 0 ? Math.round(next.cssHeight) : height * scale,
         }
-        if (resized && offscreen !== null) {
-          offscreen.width = width
-          offscreen.height = height
-        }
+        // One owner for buffer creation and resizing. It must run even when the
+        // world is absent: the buffers are a window onto the map, not the map.
+        ensureBuffers()
       }
 
       /**
@@ -1528,23 +1598,73 @@
        * canvas arrives: the load continuation calls this again once it knows the
        * real world size.
        */
+      /**
+       * Create whatever the paint path is missing, right before it paints.
+       *
+       * ensureBuffers() bails out when the world is not unpacked yet, so the
+       * warm-start path could reach draw() with no offscreen canvas at all.
+       * This is the cheap idempotent version: it only fills the gaps.
+       * @returns {boolean} true when the store is able to paint.
+       */
+      function ensureDrawBuffers() {
+        if (context === null || world === null) return false
+        if (imageData === null) {
+          imageData = context.createImageData(view.width, view.height)
+          frameBuffer = new Uint32Array(imageData.data.buffer)
+        }
+        if (offscreen === null && typeof document !== 'undefined' && typeof document.createElement === 'function') {
+          offscreen = document.createElement('canvas')
+          offscreen.width = view.width
+          offscreen.height = view.height
+          offscreenContext = offscreen.getContext('2d', { alpha: false })
+        }
+        if (offscreen !== null && (offscreen.width !== view.width || offscreen.height !== view.height)) {
+          offscreen.width = view.width
+          offscreen.height = view.height
+        }
+        return true
+      }
+
       function ensureBuffers() {
-        if (context === null || world === null) return
+        if (context === null) {
+          return
+        }
         if (view.width <= 0 || view.height <= 0) {
+          // No size requested yet. Only a real world can supply the default, but
+          // a world that is still unpacking still gets buffers: the panel has a
+          // view request in hand by the time attach() runs.
+          if (world === null) {
+            return
+          }
           view = {
             x: 0, y: 0,
             width: Math.min(world.width, 160),
             height: Math.min(world.height, 100),
             scale: view.scale ?? 1,
+            cssWidth: Math.min(world.width, 160) * (view.scale ?? 1),
+            cssHeight: Math.min(world.height, 100) * (view.scale ?? 1),
           }
         }
-        imageData = context.createImageData(view.width, view.height)
-        frameBuffer = new Uint32Array(imageData.data.buffer)
-        if (typeof document !== 'undefined' && typeof document.createElement === 'function' && offscreen === null) {
-          offscreen = document.createElement('canvas')
+        if (imageData === null || imageData.width !== view.width || imageData.height !== view.height) {
+          imageData = context.createImageData(view.width, view.height)
+          frameBuffer = new Uint32Array(imageData.data.buffer)
+        }
+        // The offscreen canvas is the upscaler. Without it a frame can only be
+        // painted 1:1, which is exactly how the map ended up drawn at 1/scale in
+        // the corner of the stage. It needs a context and a size, never a world.
+        if (offscreen === null) {
+          if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+            offscreen = document.createElement('canvas')
+          } else if (typeof OffscreenCanvas === 'function') {
+            offscreen = new OffscreenCanvas(view.width, view.height)
+          }
+          if (offscreen !== null) {
+            offscreenContext = typeof offscreen.getContext === 'function' ? offscreen.getContext('2d') : null
+          }
+        }
+        if (offscreen !== null && (offscreen.width !== view.width || offscreen.height !== view.height)) {
           offscreen.width = view.width
           offscreen.height = view.height
-          offscreenContext = offscreen.getContext('2d', { alpha: false })
         }
       }
 
@@ -1612,6 +1732,29 @@
         accumulator = 0
         save()
         publish()
+      }
+
+      /**
+       * Read-only diagnostic seam for the browser verifiers.
+       *
+       * tools/ui-smoke.mjs and tests/panel-layout.mjs read the live view, the
+       * buffer sizes and whether the upscaler exists to prove the canvas sizing
+       * invariant from outside the bundle. It exposes numbers only: no handles,
+       * no setters, nothing an app could use to change behaviour.
+       */
+      if (typeof window !== 'undefined') {
+        window.__peDebug = () => ({
+          view: { x: view.x, y: view.y, width: view.width, height: view.height, scale: view.scale },
+          world: world === null ? null : { width: world.width, height: world.height },
+          attached: canvas !== null,
+          hasContext: context !== null,
+          hasImageData: imageData !== null,
+          hasOffscreen: offscreenContext !== null,
+          imageData: imageData === null ? null : [imageData.width, imageData.height],
+          canvasAttr: canvas === null ? null : [canvas.width, canvas.height],
+          canvasStyle: canvas === null ? null : [canvas.style.width, canvas.style.height],
+          loading: world === null,
+        })
       }
 
       return {
@@ -1730,6 +1873,7 @@
         newWorld,
         restock,
         whenReady,
+        setViewportListener,
         markOnboardingSeen,
         resetOnboarding,
         dismissNotice,

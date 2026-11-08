@@ -112,3 +112,14 @@ light[i] = sunlight * exp(-k * LAI[i])             # k ≈ 0.4–0.6
 
 `SAVE_VERSION = 2`。新增 `body.*`、`drives`、`state`、`plan`、`belief`、`climate`、`nutrient`、`detritus`、`caches`。
 旧档不迁移（直接重开世界），但读档失败必须**告诉玩家**，不能静默丢弃（0.2.x 是静默丢弃）。
+
+### 量化步长（写进测试的判据）
+
+每个浮点场按**自己这次存档的量程**量化，量程写进存档头（`scales[field]`）。所以
+
+> **量化步长 = 该场量程 / 255**，不是 1/255。
+
+草原长到 1.2 kg/m² 时，允许的绝对误差是 1.2/255 ≈ 0.0047，而不是 0.0039。
+任何"读档后场值漂了多少"的断言都必须用 `scales[field]/255` 作为容差
+（`tests/review.test.mjs`、`tests/engine.test.mjs` 已改成这个判据）。
+8 位是字段位数的上限，不是"世界永远在 0..1 之间"的承诺。

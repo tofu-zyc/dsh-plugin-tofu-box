@@ -220,7 +220,10 @@ test('every key the panels render exists in both dictionaries, and no key is dea
     'unsupportedVersion', 'corrupt', 'noDecompressor',
   ]) required.add('notice.' + key)
   for (const key of ['preview', 'cell']) required.add('brush.' + key)
-  for (const key of ['erased']) required.add('toast.' + key)
+  // Toast keys rendered with parameters, so the literal t('...') scan cannot see
+  // them; the species row now reports what it armed.
+  for (const key of ['erased', 'placed', 'blocked', 'picked', 'pickedEmpty']) required.add('toast.' + key)
+  required.add('events.locate')
   // Every literal t('...') the bundle calls, plus the DESIGN 7 key table.
   for (const match of BUNDLE_SOURCE.matchAll(/\bt\('([\w.]+)'\)/g)) required.add(match[1])
   for (const key of [

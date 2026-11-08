@@ -259,6 +259,25 @@ deer       37     10524.6     10814.3       0.0       0.0    -289.6
 - 另有 `PE_SOAK_TICKS` / `PE_SOAK_SAMPLE` 可直接覆盖规模（调曲线用）。
 - 日常档自身有守卫断言：`seed 数 × tick <= 2000`，防止有人为了让它变绿把档位悄悄调小。
 
+### 4.5 面板尺寸不变式（P0 回归）
+
+`node tests/panel-layout.mjs --url <带 token 的 dsh web 地址> --profile <复用的 profile 目录>`
+
+驱动真浏览器（CDP）测四个挂载路径，每格采 5 次（0/100/300/800/2000 ms）：
+
+| 格 | 路径 | 期望 |
+|---|---|---|
+| A | 冷启动（无存档）/ **热启动（有存档，异步 load）** | canvas 与 stage 同大 |
+| B | 离开面板再回来 | 同上 |
+| C | 视口 resize（`Emulation.setDeviceMetricsOverride`） | 同上 |
+| D | 页面 hidden → visible | 同上 |
+
+**判据两条**：
+1. `|stage.w - canvas.w| <= 4`（不是 2：`.pe-stage` 有 2px 边框，健康态实测差值恒为 4）；
+2. `paint >= 0.5`——在 canvas 背板上按网格采样，统计非黑像素占比。第二条才是抓“只在左上角画一小块”真正的指标：尺寸断言看不见它。
+
+**已知必坏格（2026-11-08 实测）**：**A 的热启动分支**。带存档启动时 `canvas.width/height` 与 CSS 尺寸都是 `view.width × view.height`（未乘 `scale`），实测 **stage 974×742 / canvas 194×148 / attr [194,148] / view 194,148,5**，切走再回来（格 B）即恢复成 970×740。所以这条不是偶发竞态，是**异步读档路径上少乘了缩放**，冷启动（新建世界）不受影响。
+
 ## 5. 读数陷阱（按顺序看）
 
 1. **bundle 是 stale 的**：报告头带 `STALE` 就先 `node tools/build-client.mjs`。

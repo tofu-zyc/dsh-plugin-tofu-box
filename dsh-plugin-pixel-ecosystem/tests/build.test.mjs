@@ -66,3 +66,10 @@ test('no identifier is declared by two parts', () => {
 test('the bundle parses (a SyntaxError takes the whole panel down)', () => {
   assert.doesNotThrow(() => new Function(shipped), 'client.js does not parse')
 })
+test('the build stamp matches package.json', () => {
+  const pkg = JSON.parse(readFileSync(new URL('package.json', root), 'utf8'))
+  const preamble = readFileSync(new URL('src/parts/00-preamble.js', root), 'utf8')
+  const match = preamble.match(/const BUILD_VERSION = '([^']+)'/)
+  assert.ok(match, 'BUILD_VERSION must exist in 00-preamble.js')
+  assert.equal(match[1], pkg.version, 'BUILD_VERSION drifted from package.json: bump both together')
+})

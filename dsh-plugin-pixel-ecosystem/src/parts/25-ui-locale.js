@@ -32,7 +32,9 @@
      */
     Object.assign(CHINESE, {
       // --- tabs and panel titles -------------------------------------------
-      'action.step': '单步',
+      'action.zoomIn': '放大',
+  'action.zoomOut': '缩小',
+  'action.step': '单步',
       'action.deselect': '取消选择',
       'inspect.title': '详情',
       'inspect.emptyHint': '左键放置，右键擦除；点一只生物看它的基因',
@@ -184,6 +186,8 @@
       'brush.preview': '放置 {tool}',
       'brush.cell': '格子 {x}, {y}',
       'toast.erased': '擦除了这一片',
+      'toast.picked': '已选中 {species} · 现在点地图放置',
+      'toast.pickedEmpty': '已选中 {species} · 地图上暂无个体',
       'toast.placed': '放出了 {n} 只',
       'toast.blocked': '这里放不下，附近也没有合适的地方',
 
@@ -191,7 +195,9 @@
       'chart.title': '种群变化',
     })
     Object.assign(ENGLISH, {
-      'action.step': 'Step',
+      'action.zoomIn': 'Zoom in',
+  'action.zoomOut': 'Zoom out',
+  'action.step': 'Step',
       'action.deselect': 'Deselect',
       'inspect.title': 'Details',
       'inspect.emptyHint': 'Left-click places, right-click erases; click a creature for its genes',
@@ -321,6 +327,8 @@
       'brush.preview': 'Place {tool}',
       'brush.cell': 'cell {x}, {y}',
       'toast.erased': 'Cleared that patch',
+      'toast.picked': 'Selected {species} · click the map to place',
+      'toast.pickedEmpty': 'Selected {species} · none on the map yet',
       'toast.placed': 'Released {n}',
       'toast.blocked': 'Nothing fits here, and no room nearby',
       'chart.title': 'Populations',

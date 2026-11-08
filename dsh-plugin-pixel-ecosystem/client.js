@@ -31,6 +31,16 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const h = React.createElement
 
+    /**
+     * Build stamp shown in the panel header.
+     *
+     * Kept in sync with package.json by tests/build.test.mjs. It exists because
+     * "the fix did not work" turned out twice to mean "the browser is running a
+     * cached older module": without a visible stamp there is no way to tell a
+     * stale bundle from a broken fix.
+     */
+    const BUILD_VERSION = '0.3.9'
+
     /** Locale namespace; equals the package name. */
     const NS = 'dsh-plugin-pixel-ecosystem'
     /** Sidebar entry id and `main` panel key. The two must be the same string. */
@@ -9198,6 +9208,9 @@ window.__ModuleLoader__.load({
       let hover = null
       let disposed = false
       let snapshot = null
+      /** Called by draw() when the painted size and the box size disagree. */
+      let viewportListener = null
+      let viewportAskedAt = 0
       let pendingSnapshot = false
       let view = { x: 0, y: 0, width: 0, height: 0 }
       const brush = { tool: 'grass', radius: 1 }
@@ -10205,23 +10218,78 @@ window.__ModuleLoader__.load({
         if (view.width <= 0 || view.height <= 0) return
         const selected = selectedEntity()
         const scale = view.scale ?? 1
+        // The offscreen buffer is created lazily: on a warm start the world
+        // arrives asynchronously, so attach() ran while world was still null and
+        // skipped it. Without this the first paint fell back to one pixel per
+        // cell and sized the canvas to the cell count instead of the pixel count
+        // (194x148 instead of 970x740), which is the 'tiny map in the corner'
+        // bug. Buffers are a precondition of drawing, not of attaching.
+        ensureDrawBuffers()
         const useAtlas = atlas.ready === true && scale >= 3 && offscreenContext !== null
         paintView(world, view, frameBuffer, alpha, {
           hover,
           radius: brush.radius,
           selected: selected === undefined ? null : selected,
         }, { sprites: !useAtlas, plants: !useAtlas })
-        const canvasWidth = view.width * (offscreenContext === null ? 1 : scale)
-        const canvasHeight = view.height * (offscreenContext === null ? 1 : scale)
-        if (offscreenContext !== null) {
+        // Two sizes, on purpose:
+        //  - backingWidth/Height: what gets painted, one device pixel per
+        //    rendered pixel (upscaled by the integer zoom when the offscreen
+        //    canvas exists). This is the size putImageData/drawImage write into.
+        //  - canvasWidth/Height: the CSS box, which is the stage rectangle the
+        //    panel asked for. It is what the player sees and what the HUD counts.
+        // Keeping them separate means a missing upscaler can no longer shrink the
+        // visible map to 1/scale of the stage: CSS scales the 1:1 frame instead.
+        const useOffscreen = offscreenContext !== null
+        // Invariant: the backing store is always view.width x scale, whatever the
+        // CSS box ends up being. Only the host that cannot create any canvas at
+        // all (no document, no OffscreenCanvas) has to paint 1:1 instead.
+        const backingScale = useOffscreen ? scale : 1
+        const backingWidth = Math.max(1, Math.round(view.width * backingScale))
+        const backingHeight = Math.max(1, Math.round(view.height * backingScale))
+        const canvasWidth = Number.isFinite(view.cssWidth) && view.cssWidth > 0 ? view.cssWidth : backingWidth
+        const canvasHeight = Number.isFinite(view.cssHeight) && view.cssHeight > 0 ? view.cssHeight : backingHeight
+        // The canvas size has exactly ONE owner: this function. React used to set
+        // width/height from its own copy of the view while the paint used the
+        // store's copy, so whenever the two disagreed the frame was painted into
+        // a corner of a larger canvas and the rest stayed black. Assigning here
+        // makes the visible size and the painted size the same by construction.
+        const element = context.canvas
+        // Closed loop: if the canvas we are about to paint is not the size of the
+        // box it sits in, the panel's saved viewport is stale (a panel that
+        // mounted before layout settled, a hidden tab, a zoom change racing a
+        // resize). Observers can miss those; the paint path cannot, because it
+        // runs every frame. Ask for a re-measure instead of drawing into a corner.
+        if (element !== null && element !== undefined && element.parentElement !== null
+          && typeof element.parentElement.getBoundingClientRect === 'function') {
+          const box = element.parentElement.getBoundingClientRect()
+          const offBy = Math.abs(box.width - canvasWidth) > 2 || Math.abs(box.height - canvasHeight) > 2
+          if (offBy && viewportListener !== null && clock() - viewportAskedAt > 200) {
+            viewportAskedAt = clock()
+            viewportListener(Math.max(200, Math.round(box.width)), Math.max(160, Math.round(box.height)))
+          }
+        }
+        if (element !== null && element !== undefined) {
+          if (element.width !== backingWidth) element.width = backingWidth
+          if (element.height !== backingHeight) element.height = backingHeight
+          const style = element.style
+          const cssWidth = canvasWidth + 'px'
+          const cssHeight = canvasHeight + 'px'
+          if (style !== undefined && style.width !== cssWidth) style.width = cssWidth
+          if (style !== undefined && style.height !== cssHeight) style.height = cssHeight
+        }
+        if (useOffscreen) {
           // Ground: 1 px per cell, upscaled with nearest neighbour.
           offscreenContext.putImageData(imageData, 0, 0)
           context.imageSmoothingEnabled = false
-          context.drawImage(offscreen, 0, 0, view.width, view.height, 0, 0, canvasWidth, canvasHeight)
+          context.drawImage(offscreen, 0, 0, view.width, view.height, 0, 0, backingWidth, backingHeight)
           // Plants and animals share one depth-sorted pass so a tree in front of
           // an animal actually covers it.
           if (useAtlas) drawDepthLayers(context, world, view, alpha)
         } else {
+          // No upscaler at all: this host cannot create a canvas, so the frame is
+          // painted one device pixel per cell and the CSS box scales it. In a
+          // browser ensureDrawBuffers() has already created the offscreen, so this
+          // branch is unreachable there.
           context.putImageData(imageData, 0, 0)
         }
         // Day/night wash and dawn/dusk warmth, over the whole frame.
@@ -10229,7 +10297,7 @@ window.__ModuleLoader__.load({
         if (light < 0.98) {
           const darkness = Math.min(0.5, (1 - light) * 0.55)
           context.fillStyle = `rgba(12, 18, 44, ${darkness.toFixed(3)})`
-          context.fillRect(0, 0, canvasWidth, canvasHeight)
+          context.fillRect(0, 0, backingWidth, backingHeight)
         }
         const phase = (world.time % DAY_SECONDS) / DAY_SECONDS
         const warmth = phase > 0.17 && phase < 0.3
@@ -10239,7 +10307,7 @@ window.__ModuleLoader__.load({
             : 0
         if (warmth > 0.01) {
           context.fillStyle = `rgba(240, 150, 70, ${warmth.toFixed(3)})`
-          context.fillRect(0, 0, canvasWidth, canvasHeight)
+          context.fillRect(0, 0, backingWidth, backingHeight)
         }
       }
 
@@ -10263,6 +10331,18 @@ window.__ModuleLoader__.load({
        * sized to `width × height` cells.
        * @param {object} next - `{ x, y, width, height }` in cells.
        */
+      /**
+       * Let the owner of the layout tell the store how big the viewport should be.
+       *
+       * The panel passes a callback that re-measures and pushes a new view; the
+       * store calls it when a paint proves the two disagree. Asking is the only
+       * direction the store is allowed to go.
+       * @param {Function|null} listener - called with (width, height) in CSS px.
+       */
+      function setViewportListener(listener) {
+        viewportListener = typeof listener === 'function' ? listener : null
+      }
+
       function setView(next) {
         const scale = typeof next.scale === 'number' && next.scale > 0 ? next.scale : (view.scale ?? 1)
         if (world === null) {
@@ -10282,16 +10362,16 @@ window.__ModuleLoader__.load({
         const height = Math.max(1, Math.min(world.height, next.height | 0))
         const x = clamp(next.x | 0, 0, Math.max(0, world.width - width))
         const y = clamp(next.y | 0, 0, Math.max(0, world.height - height))
-        const resized = width !== view.width || height !== view.height || imageData === null
-        view = { x, y, width, height, scale }
-        if (resized && context !== null) {
-          imageData = context.createImageData(width, height)
-          frameBuffer = new Uint32Array(imageData.data.buffer)
+        view = {
+          x, y, width, height, scale,
+          // The canvas box the panel measured for this view. draw() is the only
+          // writer of the element size, and this is where it gets the box from.
+          cssWidth: Number.isFinite(next.cssWidth) && next.cssWidth > 0 ? Math.round(next.cssWidth) : width * scale,
+          cssHeight: Number.isFinite(next.cssHeight) && next.cssHeight > 0 ? Math.round(next.cssHeight) : height * scale,
         }
-        if (resized && offscreen !== null) {
-          offscreen.width = width
-          offscreen.height = height
-        }
+        // One owner for buffer creation and resizing. It must run even when the
+        // world is absent: the buffers are a window onto the map, not the map.
+        ensureBuffers()
       }
 
       /**
@@ -10334,23 +10414,73 @@ window.__ModuleLoader__.load({
        * canvas arrives: the load continuation calls this again once it knows the
        * real world size.
        */
+      /**
+       * Create whatever the paint path is missing, right before it paints.
+       *
+       * ensureBuffers() bails out when the world is not unpacked yet, so the
+       * warm-start path could reach draw() with no offscreen canvas at all.
+       * This is the cheap idempotent version: it only fills the gaps.
+       * @returns {boolean} true when the store is able to paint.
+       */
+      function ensureDrawBuffers() {
+        if (context === null || world === null) return false
+        if (imageData === null) {
+          imageData = context.createImageData(view.width, view.height)
+          frameBuffer = new Uint32Array(imageData.data.buffer)
+        }
+        if (offscreen === null && typeof document !== 'undefined' && typeof document.createElement === 'function') {
+          offscreen = document.createElement('canvas')
+          offscreen.width = view.width
+          offscreen.height = view.height
+          offscreenContext = offscreen.getContext('2d', { alpha: false })
+        }
+        if (offscreen !== null && (offscreen.width !== view.width || offscreen.height !== view.height)) {
+          offscreen.width = view.width
+          offscreen.height = view.height
+        }
+        return true
+      }
+
       function ensureBuffers() {
-        if (context === null || world === null) return
+        if (context === null) {
+          return
+        }
         if (view.width <= 0 || view.height <= 0) {
+          // No size requested yet. Only a real world can supply the default, but
+          // a world that is still unpacking still gets buffers: the panel has a
+          // view request in hand by the time attach() runs.
+          if (world === null) {
+            return
+          }
           view = {
             x: 0, y: 0,
             width: Math.min(world.width, 160),
             height: Math.min(world.height, 100),
             scale: view.scale ?? 1,
+            cssWidth: Math.min(world.width, 160) * (view.scale ?? 1),
+            cssHeight: Math.min(world.height, 100) * (view.scale ?? 1),
           }
         }
-        imageData = context.createImageData(view.width, view.height)
-        frameBuffer = new Uint32Array(imageData.data.buffer)
-        if (typeof document !== 'undefined' && typeof document.createElement === 'function' && offscreen === null) {
-          offscreen = document.createElement('canvas')
+        if (imageData === null || imageData.width !== view.width || imageData.height !== view.height) {
+          imageData = context.createImageData(view.width, view.height)
+          frameBuffer = new Uint32Array(imageData.data.buffer)
+        }
+        // The offscreen canvas is the upscaler. Without it a frame can only be
+        // painted 1:1, which is exactly how the map ended up drawn at 1/scale in
+        // the corner of the stage. It needs a context and a size, never a world.
+        if (offscreen === null) {
+          if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+            offscreen = document.createElement('canvas')
+          } else if (typeof OffscreenCanvas === 'function') {
+            offscreen = new OffscreenCanvas(view.width, view.height)
+          }
+          if (offscreen !== null) {
+            offscreenContext = typeof offscreen.getContext === 'function' ? offscreen.getContext('2d') : null
+          }
+        }
+        if (offscreen !== null && (offscreen.width !== view.width || offscreen.height !== view.height)) {
           offscreen.width = view.width
           offscreen.height = view.height
-          offscreenContext = offscreen.getContext('2d', { alpha: false })
         }
       }
 
@@ -10418,6 +10548,29 @@ window.__ModuleLoader__.load({
         accumulator = 0
         save()
         publish()
+      }
+
+      /**
+       * Read-only diagnostic seam for the browser verifiers.
+       *
+       * tools/ui-smoke.mjs and tests/panel-layout.mjs read the live view, the
+       * buffer sizes and whether the upscaler exists to prove the canvas sizing
+       * invariant from outside the bundle. It exposes numbers only: no handles,
+       * no setters, nothing an app could use to change behaviour.
+       */
+      if (typeof window !== 'undefined') {
+        window.__peDebug = () => ({
+          view: { x: view.x, y: view.y, width: view.width, height: view.height, scale: view.scale },
+          world: world === null ? null : { width: world.width, height: world.height },
+          attached: canvas !== null,
+          hasContext: context !== null,
+          hasImageData: imageData !== null,
+          hasOffscreen: offscreenContext !== null,
+          imageData: imageData === null ? null : [imageData.width, imageData.height],
+          canvasAttr: canvas === null ? null : [canvas.width, canvas.height],
+          canvasStyle: canvas === null ? null : [canvas.style.width, canvas.style.height],
+          loading: world === null,
+        })
       }
 
       return {
@@ -10536,6 +10689,7 @@ window.__ModuleLoader__.load({
         newWorld,
         restock,
         whenReady,
+        setViewportListener,
         markOnboardingSeen,
         resetOnboarding,
         dismissNotice,
@@ -10948,6 +11102,8 @@ window.__ModuleLoader__.load({
     const TERRAIN_TOOL_IDS = ['water', 'sand', 'dirt', 'stone', 'erase', 'pointer']
     const BRUSHES = [0, 1, 2]
     const BRUSH_RADIUS = [0, 1, 2]
+    // 1x = one pixel per cell = the whole map at a glance. That is a real,
+    // wanted view, not an error state: the player uses it to find their animals.
     const MIN_SCALE = 1
     const MAX_SCALE = 16
 
@@ -11100,10 +11256,25 @@ window.__ModuleLoader__.load({
       const height = Math.max(18, Math.min(world.height, Math.floor(stage.height / scale)))
       const x = clamp(Math.round(camera.cx - width / 2), 0, Math.max(0, world.width - width))
       const y = clamp(Math.round(camera.cy - height / 2), 0, Math.max(0, world.height - height))
-      // The canvas is centred in the stage, so the leftover margin is a letterbox.
-      const offsetX = Math.max(0, (stage.width - width * scale) / 2)
-      const offsetY = Math.max(0, (stage.height - height * scale) / 2)
-      return { x, y, width, height, scale, offsetX, offsetY }
+      // The canvas covers the stage exactly.
+      //
+      // A floored cell count always leaves a few pixels over (74px of stage at
+      // scale 5 is 14.8 cells), and those used to become a black gutter around
+      // the map. They are absorbed here as a sub-pixel stretch instead, so the
+      // canvas box, the stage box and the HUD all describe the same rectangle.
+      // The real pixels-per-cell is reported per axis, so hit testing still maps
+      // the cursor onto the cell the player actually sees.
+      const cssWidth = Math.max(1, Math.round(stage.width))
+      const cssHeight = Math.max(1, Math.round(stage.height))
+      return {
+        x, y, width, height, scale,
+        cssWidth,
+        cssHeight,
+        offsetX: 0,
+        offsetY: 0,
+        pxPerCellX: cssWidth / width,
+        pxPerCellY: cssHeight / height,
+      }
     }
 
     /**
@@ -11115,9 +11286,15 @@ window.__ModuleLoader__.load({
      * @returns {{x: number, y: number}} world cell (fractional).
      */
     function worldFromPoint(view, stageRect, clientX, clientY) {
+      // The canvas stretches a floored cell count over the whole stage, so the
+      // honest mapping is "stage pixels per cell", not the integer zoom.
+      const ppcX = Number.isFinite(view.pxPerCellX) && view.pxPerCellX > 0 ? view.pxPerCellX : view.scale
+      const ppcY = Number.isFinite(view.pxPerCellY) && view.pxPerCellY > 0 ? view.pxPerCellY : view.scale
+      const offsetX = Number.isFinite(view.offsetX) ? view.offsetX : 0
+      const offsetY = Number.isFinite(view.offsetY) ? view.offsetY : 0
       return {
-        x: view.x + (clientX - stageRect.left - view.offsetX) / view.scale,
-        y: view.y + (clientY - stageRect.top - view.offsetY) / view.scale,
+        x: view.x + (clientX - stageRect.left - offsetX) / ppcX,
+        y: view.y + (clientY - stageRect.top - offsetY) / ppcY,
       }
     }
 
@@ -11368,20 +11545,44 @@ window.__ModuleLoader__.load({
       const body = rows.map((row) => {
         const species = SPECIES[row.id]
         const color = species === undefined ? '#999' : species.color
+        const name = t('species.' + row.id)
         return h('div', {
           key: row.id,
           className: 'pe-srow' + (row.count === 0 ? ' is-gone' : ''),
-          onClick: () => props.onLocate(row.id),
-          title: row.count === 0 ? t('species.extinct') : t('species.deadTotal', { n: row.dead }),
+          // Clicking the row means "I want to place this one": it arms the same
+          // brush the palette card arms, and flies to a living member so the
+          // player can see what they are about to add more of.
+          role: 'button',
+          tabIndex: 0,
+          onClick: () => props.onPick(row.id),
+          onKeyDown: (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return
+            event.preventDefault()
+            props.onPick(row.id)
+          },
+          title: row.count === 0 ? t('species.extinct') : t('species.deadTotal', { n: row.dead }) + ' · ' + name,
         },
           h(PixelGlyph, { name: speciesGlyph(row.id), color, size: 12 }),
-          h('span', { className: 'pe-srow-name' }, t('species.' + row.id)),
+          h('span', { className: 'pe-srow-name' }, name),
           h('span', { className: 'pe-srow-num' }, String(row.count)),
           h('span', { className: 'pe-sbar' }, h('span', {
             className: 'pe-sbar-fill',
             style: { width: percentOf(row.meanRatio) + '%', background: color },
           })),
-          h('span', { className: 'pe-srow-num' }, row.count === 0 ? '—' : shortTime(row.meanAge)))
+          h('span', { className: 'pe-srow-num' }, row.count === 0 ? '—' : shortTime(row.meanAge)),
+          // Locating is still here, one icon away: picking must not cost the
+          // player the ability to just go and watch a species.
+          h('button', {
+            type: 'button',
+            className: 'pe-icon-btn pe-locate',
+            title: t('events.locate') + ' · ' + name,
+            'aria-label': t('events.locate') + ' · ' + name,
+            onClick: (event) => {
+              event.stopPropagation()
+              props.onLocate(row.id)
+            },
+            onKeyDown: event => event.stopPropagation(),
+          }, h(PixelGlyph, { name: 'target', size: 10 })))
       })
       const deadRows = rows.filter(row => row.dead > 0).map((row) => {
         const species = SPECIES[row.id]
@@ -11675,7 +11876,7 @@ window.__ModuleLoader__.load({
      */
     const STAGE_CONTROLS = [
       '.pe-onboard', '.pe-notice', '.pe-emptyworld', '.pe-modal',
-      '.pe-inspector', '.pe-eventbar', '.pe-hud', '.pe-tabs', '.pe-tools',
+      '.pe-inspector', '.pe-eventbar', '.pe-hud', '.pe-tabs', '.pe-tools', '.pe-zoom',
     ].join(',')
 
     /**
@@ -11729,7 +11930,13 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => {
         store.ensureWorld()
-        store.setView({ x: view.x, y: view.y, width: view.width, height: view.height, scale: view.scale })
+        store.setView({
+        x: view.x, y: view.y, width: view.width, height: view.height, scale: view.scale,
+        // The canvas box is the stage box: draw() sizes the element from this and
+        // paints the view into its backing store, so the visible map can never be
+        // smaller than the panel.
+        cssWidth: view.cssWidth, cssHeight: view.cssHeight,
+      })
         store.attach(canvasRef.current)
         return () => store.detach()
         // Attach once: the viewport effect below re-points the renderer, so a
@@ -11738,12 +11945,30 @@ window.__ModuleLoader__.load({
       }, [store])
 
       React.useEffect(() => {
-        store.setView({ x: view.x, y: view.y, width: view.width, height: view.height, scale: view.scale })
+        store.setView({
+        x: view.x, y: view.y, width: view.width, height: view.height, scale: view.scale,
+        // The canvas box is the stage box: draw() sizes the element from this and
+        // paints the view into its backing store, so the visible map can never be
+        // smaller than the panel.
+        cssWidth: view.cssWidth, cssHeight: view.cssHeight,
+      })
       }, [store, view.x, view.y, view.width, view.height, view.scale])
 
       React.useEffect(() => {
         store.setBrush(tool, BRUSH_RADIUS[brushIndex])
       }, [store, tool, brushIndex])
+
+      // The paint loop asks for a re-measure whenever the canvas and its box
+      // disagree, which is the only check that cannot be missed by an observer.
+      React.useEffect(() => {
+        if (typeof store.setViewportListener !== 'function') return undefined
+        store.setViewportListener((width, height) => {
+          setStageSize(previous => (previous.width === width && previous.height === height
+            ? previous
+            : { width, height }))
+        })
+        return () => store.setViewportListener(null)
+      }, [store])
 
       React.useEffect(() => {
         const stage = stageRef.current
@@ -11821,12 +12046,26 @@ window.__ModuleLoader__.load({
       /** Fit the whole map at an integer zoom. */
       const fitAll = React.useCallback(() => {
         const fit = Math.min(stageSize.width / worldSize.width, stageSize.height / worldSize.height)
-        cameraRef.current.scale = clamp(Math.max(1, Math.floor(fit)), 1, MAX_SCALE)
+        cameraRef.current.scale = clamp(Math.max(1, Math.floor(fit)), MIN_SCALE, MAX_SCALE)
         cameraRef.current.cx = worldSize.width / 2
         cameraRef.current.cy = worldSize.height / 2
         cameraRef.current.fitted = true
         bumpCamera()
       }, [stageSize, worldSize, bumpCamera])
+
+      /**
+       * Zoom one step around the middle of the map.
+       *
+       * The wheel does the same thing around the cursor; this exists so the
+       * direction is also reachable from the keyboard (+ / -) and so a test can
+       * pin it without synthesising wheel events.
+       * @param {number} steps - +1 zooms in, -1 zooms out.
+       */
+      const zoomBy = React.useCallback((steps) => {
+        const current = cameraRef.current
+        cameraRef.current.scale = clamp(current.scale + steps, MIN_SCALE, MAX_SCALE)
+        bumpCamera()
+      }, [bumpCamera])
 
       /**
        * Fly to the place an event happened, and open the animal when it is still
@@ -11837,7 +12076,7 @@ window.__ModuleLoader__.load({
         if (event.id > 0) store.select(event.id)
       }, [store, lookAt])
 
-      /** Fly to the first living member of a species (species table row). */
+      /** Fly to the first living member of a species, and select it. */
       const locateSpecies = React.useCallback((id) => {
         const world = store.getWorld()
         if (world === null || world === undefined) return
@@ -11846,6 +12085,29 @@ window.__ModuleLoader__.load({
         lookAt(entity.x, entity.y)
         store.select(entity.id)
       }, [store, lookAt])
+
+      /**
+       * Arm this species' brush from the species table.
+       *
+       * The palette card and this row must end up in exactly the same state, so
+       * they call the same setTool. When the species is extinct there is nothing
+       * to fly to, and the toast says so instead of moving the camera nowhere.
+       */
+      const pickSpecies = React.useCallback((id) => {
+        setTool(id)
+        const name = t('species.' + id)
+        const world = store.getWorld()
+        const entity = world === null || world === undefined
+          ? undefined
+          : world.entities.find(candidate => candidate.species === id)
+        if (entity === undefined) {
+          showToast(t('toast.pickedEmpty', { species: name }))
+          return
+        }
+        lookAt(entity.x, entity.y)
+        store.select(entity.id)
+        showToast(t('toast.picked', { species: name }))
+      }, [store, lookAt, showToast, t])
 
       /** Put a starter population back into an empty world. */
       const restockWorld = React.useCallback(() => {
@@ -11983,6 +12245,9 @@ window.__ModuleLoader__.load({
           if (isStageControl(event.target)) return
           event.preventDefault()
           const current = viewRef.current
+          // Wheel up = zoom in, wheel down = zoom out: the map convention, and the
+          // direction the person playing actually expects. Do not "fix" this again
+          // without asking them.
           const nextScale = clamp(current.scale + (event.deltaY < 0 ? 1 : -1), MIN_SCALE, MAX_SCALE)
           if (nextScale === current.scale) return
           const world = store.getWorld() ?? { width: current.width, height: current.height }
@@ -12049,7 +12314,9 @@ window.__ModuleLoader__.load({
           if (event.code === 'Space') { event.preventDefault(); store.togglePause() }
           else if (event.key === '1' || event.key === '2' || event.key === '3' || event.key === '4') {
             store.setSpeed([1, 2, 4, 8][Number(event.key) - 1])
-          } else if (event.key === 'f' || event.key === 'F') fitAll()
+          } else if (event.key === '+' || event.key === '=' ) zoomBy(1)
+          else if (event.key === '-' || event.key === '_') zoomBy(-1)
+          else if (event.key === 'f' || event.key === 'F') fitAll()
           else if (event.key === 'h' || event.key === 'H') setHelpOpen(open => !open)
         }
         if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
@@ -12131,7 +12398,7 @@ window.__ModuleLoader__.load({
               h('div', { className: 'pe-title' }, t('panel.title')),
               h('div', { className: 'pe-sub' },
                 t('stat.day', { day: snapshot.stats?.day ?? 1 }) + ' · ' + (snapshot.stats?.clock ?? '06:00') +
-                ' · ' + t('status.temperature', { n: Math.round(climate.temperature ?? 0) })))),
+                ' · ' + t('status.temperature', { n: Math.round(climate.temperature ?? 0) }) + ' · v' + BUILD_VERSION))),
           h('div', { className: 'pe-statusbar' },
             h('span', { className: 'pe-pill' + (snapshot.paused ? '' : ' pe-pill-live') },
               snapshot.paused ? t('speed.paused') : t('status.pulse', { births: pulse.births, deaths: pulse.deaths })),
@@ -12177,22 +12444,24 @@ window.__ModuleLoader__.load({
               ref: stageRef,
               style: { cursor: tool === 'pointer' ? 'grab' : 'crosshair' },
             },
-              h('canvas', {
-                ref: canvasRef,
-                className: 'pe-canvas',
-                width: view.width * view.scale,
-                height: view.height * view.scale,
-                style: {
-                  width: (view.width * view.scale) + 'px',
-                  height: (view.height * view.scale) + 'px',
-                },
-              }),
+              // No width/height/style here on purpose: the store owns the canvas
+              // size so the painted frame and the visible box can never disagree.
+              h('canvas', { ref: canvasRef, className: 'pe-canvas' }),
               brushPreview,
               h('div', { className: 'pe-hud pe-hud-bl' },
                 h('span', { className: 'pe-hud-item' },
                   hover === null ? '—' : t('brush.cell', { x: Math.round(hover.x), y: Math.round(hover.y) })),
                 h('span', { className: 'pe-hud-item' }, t('brush.preview', { tool: labelFor(tool) })),
-                h('span', { className: 'pe-hud-item' }, view.scale + '×')),
+                h('span', { className: 'pe-hud-item' },
+                  h('button', {
+                    type: 'button', className: 'pe-zoom', title: t('action.zoomOut'),
+                    onClick: () => zoomBy(-1),
+                  }, '−'),
+                  h('span', { className: 'pe-zoom-value' }, view.scale + '×'),
+                  h('button', {
+                    type: 'button', className: 'pe-zoom', title: t('action.zoomIn'),
+                    onClick: () => zoomBy(1),
+                  }, '+'))),
               h('div', { className: 'pe-hud pe-hud-br' },
                 h(Minimap, { store, snapshot, onJump: lookAt })),
               snapshot.ready === false
@@ -12245,6 +12514,7 @@ window.__ModuleLoader__.load({
                 h(SpeciesPanel, {
                   rows: snapshot.species ?? [],
                   t,
+                  onPick: pickSpecies,
                   onLocate: locateSpecies,
                   inferred: snapshot.causeSource === undefined ? 0 : snapshot.causeSource.inferred,
                 })),
@@ -12308,7 +12578,9 @@ window.__ModuleLoader__.load({
      */
     Object.assign(CHINESE, {
       // --- tabs and panel titles -------------------------------------------
-      'action.step': '单步',
+      'action.zoomIn': '放大',
+  'action.zoomOut': '缩小',
+  'action.step': '单步',
       'action.deselect': '取消选择',
       'inspect.title': '详情',
       'inspect.emptyHint': '左键放置，右键擦除；点一只生物看它的基因',
@@ -12460,6 +12732,8 @@ window.__ModuleLoader__.load({
       'brush.preview': '放置 {tool}',
       'brush.cell': '格子 {x}, {y}',
       'toast.erased': '擦除了这一片',
+      'toast.picked': '已选中 {species} · 现在点地图放置',
+      'toast.pickedEmpty': '已选中 {species} · 地图上暂无个体',
       'toast.placed': '放出了 {n} 只',
       'toast.blocked': '这里放不下，附近也没有合适的地方',
 
@@ -12467,7 +12741,9 @@ window.__ModuleLoader__.load({
       'chart.title': '种群变化',
     })
     Object.assign(ENGLISH, {
-      'action.step': 'Step',
+      'action.zoomIn': 'Zoom in',
+  'action.zoomOut': 'Zoom out',
+  'action.step': 'Step',
       'action.deselect': 'Deselect',
       'inspect.title': 'Details',
       'inspect.emptyHint': 'Left-click places, right-click erases; click a creature for its genes',
@@ -12597,6 +12873,8 @@ window.__ModuleLoader__.load({
       'brush.preview': 'Place {tool}',
       'brush.cell': 'cell {x}, {y}',
       'toast.erased': 'Cleared that patch',
+      'toast.picked': 'Selected {species} · click the map to place',
+      'toast.pickedEmpty': 'Selected {species} · none on the map yet',
       'toast.placed': 'Released {n}',
       'toast.blocked': 'Nothing fits here, and no room nearby',
       'chart.title': 'Populations',
@@ -12641,6 +12919,9 @@ window.__ModuleLoader__.load({
 .pe-toast{position:absolute;left:50%;bottom:104px;transform:translateX(-50%);padding:6px 12px;border-radius:999px;background:rgba(20,22,28,.82);color:#fff;font-size:11.5px;line-height:16px;box-shadow:0 8px 20px rgba(0,0,0,.32);pointer-events:none}
 .pe-hud{position:absolute;display:flex;align-items:center;gap:6px;pointer-events:none}
 .pe-hud-bl{left:12px;bottom:12px}
+.pe-zoom{pointer-events:auto;width:22px;height:22px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:1px solid var(--dsw-alias-border-l2);background:rgba(20,22,28,.72);color:#fff;font-size:14px;line-height:1;cursor:pointer}
+.pe-zoom:hover{background:rgba(40,44,54,.9)}
+.pe-zoom-value{min-width:26px;text-align:center}
 .pe-hud-br{right:12px;bottom:12px;pointer-events:auto}
 .pe-hud-item{padding:2px 7px;border-radius:7px;background:rgba(20,22,28,.55);color:#fff;font-size:10.5px;line-height:15px;font-variant-numeric:tabular-nums;backdrop-filter:blur(4px)}
 .pe-minimap{padding:5px;border-radius:10px;background:rgba(20,22,28,.6);backdrop-filter:blur(6px);box-shadow:0 6px 18px rgba(0,0,0,.28)}
@@ -12695,7 +12976,7 @@ window.__ModuleLoader__.load({
 .pe-need-fill{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--dsw-alias-state-warn-primary),var(--dsw-alias-state-error-primary))}
 .pe-need-value{text-align:right;font-size:10px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
 .pe-tag-intent{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary)}@media (max-width: 980px){.pe-side{width:270px}.pe-tools{grid-template-columns:repeat(3,1fr)}}
-.pe-stagewrap{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0}
+.pe-stagewrap{position:relative;display:flex;flex-direction:column;flex:1;min-width:0;min-height:0}
 .pe-eventbar{display:flex;align-items:center;gap:8px;flex:none;height:46px;padding:0 10px;border-top:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);overflow:hidden}
 .pe-eventbar-title{flex:none;color:var(--dsw-alias-label-secondary);font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
 .pe-events-filters{display:flex;gap:3px;flex:none}
@@ -12725,7 +13006,7 @@ window.__ModuleLoader__.load({
 .pe-muted{color:var(--dsw-alias-label-secondary)}
 .pe-mono{font-variant-numeric:tabular-nums}
 
-.pe-srow{display:grid;grid-template-columns:13px 1fr 40px 52px 46px;align-items:center;gap:6px;font-size:11px;line-height:16px;cursor:pointer;border-radius:6px;padding:1px 3px}
+.pe-srow{display:grid;grid-template-columns:13px 1fr 34px 46px 40px 20px;align-items:center;gap:6px;font-size:11px;line-height:16px;cursor:pointer;border-radius:6px;padding:1px 3px}
 .pe-srow:hover{background:var(--dsw-alias-bg-layer-2)}
 .pe-srow-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pe-srow-num{text-align:right;font-variant-numeric:tabular-nums}
@@ -12733,6 +13014,8 @@ window.__ModuleLoader__.load({
 .pe-srow-head{color:var(--dsw-alias-label-secondary);font-size:10px;cursor:default}
 .pe-sbar{height:5px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);overflow:hidden;border:1px solid var(--dsw-alias-border-l1)}
 .pe-sbar-fill{display:block;height:100%;border-radius:999px}
+.pe-locate{width:18px;height:18px;padding:0;border-radius:5px;border-color:transparent;background:transparent;color:var(--dsw-alias-label-secondary)}
+.pe-locate:hover{background:var(--dsw-alias-bg-overlay);color:var(--dsw-alias-label-primary)}
 .pe-causes{display:flex;height:6px;border-radius:999px;overflow:hidden;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1)}
 .pe-cause{display:block;height:100%}
 

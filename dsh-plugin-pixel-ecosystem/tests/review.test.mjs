@@ -80,7 +80,8 @@ test('a reload is faithful in state, and forks only through quantisation', { tod
   // test pins the QUANTISATION BOUND rather than bit-identical continuation.
   const world = createWorld({ seed: 99 })
   for (let tick = 0; tick < 120; tick++) stepWorld(world, TICK)
-  const restored = deserializeWorld(JSON.parse(JSON.stringify(serializeWorld(world))))
+  const saved = serializeWorld(world)
+  const restored = deserializeWorld(JSON.parse(JSON.stringify(saved)))
 
   assert.equal(restored.rngState, world.rngState, 'the RNG stream position must survive a reload')
   assert.equal(restored.nextId, world.nextId, 'id allocation must survive a reload')
@@ -92,12 +93,22 @@ test('a reload is faithful in state, and forks only through quantisation', { tod
     'an animal must resume the activity it was in, with the same end time')
   assert.ok(Math.abs(before.thinkTimer - after.thinkTimer) < 1e-6, 'the think timer must survive a reload')
 
-  let worst = 0
-  for (let index = 0; index < world.grass.length; index++) {
-    worst = Math.max(worst, Math.abs(world.grass[index] - restored.grass[index]))
+  // The quantisation step is a property of the SAVE, not of the number 0..1: a
+  // field is packed against its own scale (the payload carries it), so the
+  // absolute error grows with that scale. A lush cell with a range of 1.2 kg/m^2
+  // is allowed 1.2/255, not 1/255 — asserting the 0..1 step here failed on any
+  // world whose grass grew past one kilogram (docs/20-CORE-LOOP.md section 5).
+  for (const field of ['grass', 'weed']) {
+    const scale = Number(saved.scales?.[field]) > 0 ? Number(saved.scales[field]) : 1
+    const tolerance = scale / 255 + 1e-6
+    let worst = 0
+    for (let index = 0; index < world[field].length; index++) {
+      worst = Math.max(worst, Math.abs(world[field][index] - restored[field][index]))
+    }
+    assert.ok(worst <= tolerance,
+      'the quantised ' + field + ' field must stay inside its own step (' + scale + '/255 = ' + tolerance
+      + '), drifted ' + worst)
   }
-  assert.ok(worst <= 1 / 255 + 1e-6,
-    'the quantised producer field must stay inside the documented 8-bit step, drifted ' + worst)
 })
 
 // ---------------------------------------------------------------------------

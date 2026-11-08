@@ -58,6 +58,8 @@
     const TERRAIN_TOOL_IDS = ['water', 'sand', 'dirt', 'stone', 'erase', 'pointer']
     const BRUSHES = [0, 1, 2]
     const BRUSH_RADIUS = [0, 1, 2]
+    // 1x = one pixel per cell = the whole map at a glance. That is a real,
+    // wanted view, not an error state: the player uses it to find their animals.
     const MIN_SCALE = 1
     const MAX_SCALE = 16
 
@@ -210,10 +212,25 @@
       const height = Math.max(18, Math.min(world.height, Math.floor(stage.height / scale)))
       const x = clamp(Math.round(camera.cx - width / 2), 0, Math.max(0, world.width - width))
       const y = clamp(Math.round(camera.cy - height / 2), 0, Math.max(0, world.height - height))
-      // The canvas is centred in the stage, so the leftover margin is a letterbox.
-      const offsetX = Math.max(0, (stage.width - width * scale) / 2)
-      const offsetY = Math.max(0, (stage.height - height * scale) / 2)
-      return { x, y, width, height, scale, offsetX, offsetY }
+      // The canvas covers the stage exactly.
+      //
+      // A floored cell count always leaves a few pixels over (74px of stage at
+      // scale 5 is 14.8 cells), and those used to become a black gutter around
+      // the map. They are absorbed here as a sub-pixel stretch instead, so the
+      // canvas box, the stage box and the HUD all describe the same rectangle.
+      // The real pixels-per-cell is reported per axis, so hit testing still maps
+      // the cursor onto the cell the player actually sees.
+      const cssWidth = Math.max(1, Math.round(stage.width))
+      const cssHeight = Math.max(1, Math.round(stage.height))
+      return {
+        x, y, width, height, scale,
+        cssWidth,
+        cssHeight,
+        offsetX: 0,
+        offsetY: 0,
+        pxPerCellX: cssWidth / width,
+        pxPerCellY: cssHeight / height,
+      }
     }
 
     /**
@@ -225,9 +242,15 @@
      * @returns {{x: number, y: number}} world cell (fractional).
      */
     function worldFromPoint(view, stageRect, clientX, clientY) {
+      // The canvas stretches a floored cell count over the whole stage, so the
+      // honest mapping is "stage pixels per cell", not the integer zoom.
+      const ppcX = Number.isFinite(view.pxPerCellX) && view.pxPerCellX > 0 ? view.pxPerCellX : view.scale
+      const ppcY = Number.isFinite(view.pxPerCellY) && view.pxPerCellY > 0 ? view.pxPerCellY : view.scale
+      const offsetX = Number.isFinite(view.offsetX) ? view.offsetX : 0
+      const offsetY = Number.isFinite(view.offsetY) ? view.offsetY : 0
       return {
-        x: view.x + (clientX - stageRect.left - view.offsetX) / view.scale,
-        y: view.y + (clientY - stageRect.top - view.offsetY) / view.scale,
+        x: view.x + (clientX - stageRect.left - offsetX) / ppcX,
+        y: view.y + (clientY - stageRect.top - offsetY) / ppcY,
       }
     }
 
@@ -478,20 +501,44 @@
       const body = rows.map((row) => {
         const species = SPECIES[row.id]
         const color = species === undefined ? '#999' : species.color
+        const name = t('species.' + row.id)
         return h('div', {
           key: row.id,
           className: 'pe-srow' + (row.count === 0 ? ' is-gone' : ''),
-          onClick: () => props.onLocate(row.id),
-          title: row.count === 0 ? t('species.extinct') : t('species.deadTotal', { n: row.dead }),
+          // Clicking the row means "I want to place this one": it arms the same
+          // brush the palette card arms, and flies to a living member so the
+          // player can see what they are about to add more of.
+          role: 'button',
+          tabIndex: 0,
+          onClick: () => props.onPick(row.id),
+          onKeyDown: (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return
+            event.preventDefault()
+            props.onPick(row.id)
+          },
+          title: row.count === 0 ? t('species.extinct') : t('species.deadTotal', { n: row.dead }) + ' · ' + name,
         },
           h(PixelGlyph, { name: speciesGlyph(row.id), color, size: 12 }),
-          h('span', { className: 'pe-srow-name' }, t('species.' + row.id)),
+          h('span', { className: 'pe-srow-name' }, name),
           h('span', { className: 'pe-srow-num' }, String(row.count)),
           h('span', { className: 'pe-sbar' }, h('span', {
             className: 'pe-sbar-fill',
             style: { width: percentOf(row.meanRatio) + '%', background: color },
           })),
-          h('span', { className: 'pe-srow-num' }, row.count === 0 ? '—' : shortTime(row.meanAge)))
+          h('span', { className: 'pe-srow-num' }, row.count === 0 ? '—' : shortTime(row.meanAge)),
+          // Locating is still here, one icon away: picking must not cost the
+          // player the ability to just go and watch a species.
+          h('button', {
+            type: 'button',
+            className: 'pe-icon-btn pe-locate',
+            title: t('events.locate') + ' · ' + name,
+            'aria-label': t('events.locate') + ' · ' + name,
+            onClick: (event) => {
+              event.stopPropagation()
+              props.onLocate(row.id)
+            },
+            onKeyDown: event => event.stopPropagation(),
+          }, h(PixelGlyph, { name: 'target', size: 10 })))
       })
       const deadRows = rows.filter(row => row.dead > 0).map((row) => {
         const species = SPECIES[row.id]
@@ -785,7 +832,7 @@
      */
     const STAGE_CONTROLS = [
       '.pe-onboard', '.pe-notice', '.pe-emptyworld', '.pe-modal',
-      '.pe-inspector', '.pe-eventbar', '.pe-hud', '.pe-tabs', '.pe-tools',
+      '.pe-inspector', '.pe-eventbar', '.pe-hud', '.pe-tabs', '.pe-tools', '.pe-zoom',
     ].join(',')
 
     /**
@@ -839,7 +886,13 @@
 
       React.useEffect(() => {
         store.ensureWorld()
-        store.setView({ x: view.x, y: view.y, width: view.width, height: view.height, scale: view.scale })
+        store.setView({
+        x: view.x, y: view.y, width: view.width, height: view.height, scale: view.scale,
+        // The canvas box is the stage box: draw() sizes the element from this and
+        // paints the view into its backing store, so the visible map can never be
+        // smaller than the panel.
+        cssWidth: view.cssWidth, cssHeight: view.cssHeight,
+      })
         store.attach(canvasRef.current)
         return () => store.detach()
         // Attach once: the viewport effect below re-points the renderer, so a
@@ -848,12 +901,30 @@
       }, [store])
 
       React.useEffect(() => {
-        store.setView({ x: view.x, y: view.y, width: view.width, height: view.height, scale: view.scale })
+        store.setView({
+        x: view.x, y: view.y, width: view.width, height: view.height, scale: view.scale,
+        // The canvas box is the stage box: draw() sizes the element from this and
+        // paints the view into its backing store, so the visible map can never be
+        // smaller than the panel.
+        cssWidth: view.cssWidth, cssHeight: view.cssHeight,
+      })
       }, [store, view.x, view.y, view.width, view.height, view.scale])
 
       React.useEffect(() => {
         store.setBrush(tool, BRUSH_RADIUS[brushIndex])
       }, [store, tool, brushIndex])
+
+      // The paint loop asks for a re-measure whenever the canvas and its box
+      // disagree, which is the only check that cannot be missed by an observer.
+      React.useEffect(() => {
+        if (typeof store.setViewportListener !== 'function') return undefined
+        store.setViewportListener((width, height) => {
+          setStageSize(previous => (previous.width === width && previous.height === height
+            ? previous
+            : { width, height }))
+        })
+        return () => store.setViewportListener(null)
+      }, [store])
 
       React.useEffect(() => {
         const stage = stageRef.current
@@ -931,12 +1002,26 @@
       /** Fit the whole map at an integer zoom. */
       const fitAll = React.useCallback(() => {
         const fit = Math.min(stageSize.width / worldSize.width, stageSize.height / worldSize.height)
-        cameraRef.current.scale = clamp(Math.max(1, Math.floor(fit)), 1, MAX_SCALE)
+        cameraRef.current.scale = clamp(Math.max(1, Math.floor(fit)), MIN_SCALE, MAX_SCALE)
         cameraRef.current.cx = worldSize.width / 2
         cameraRef.current.cy = worldSize.height / 2
         cameraRef.current.fitted = true
         bumpCamera()
       }, [stageSize, worldSize, bumpCamera])
+
+      /**
+       * Zoom one step around the middle of the map.
+       *
+       * The wheel does the same thing around the cursor; this exists so the
+       * direction is also reachable from the keyboard (+ / -) and so a test can
+       * pin it without synthesising wheel events.
+       * @param {number} steps - +1 zooms in, -1 zooms out.
+       */
+      const zoomBy = React.useCallback((steps) => {
+        const current = cameraRef.current
+        cameraRef.current.scale = clamp(current.scale + steps, MIN_SCALE, MAX_SCALE)
+        bumpCamera()
+      }, [bumpCamera])
 
       /**
        * Fly to the place an event happened, and open the animal when it is still
@@ -947,7 +1032,7 @@
         if (event.id > 0) store.select(event.id)
       }, [store, lookAt])
 
-      /** Fly to the first living member of a species (species table row). */
+      /** Fly to the first living member of a species, and select it. */
       const locateSpecies = React.useCallback((id) => {
         const world = store.getWorld()
         if (world === null || world === undefined) return
@@ -956,6 +1041,29 @@
         lookAt(entity.x, entity.y)
         store.select(entity.id)
       }, [store, lookAt])
+
+      /**
+       * Arm this species' brush from the species table.
+       *
+       * The palette card and this row must end up in exactly the same state, so
+       * they call the same setTool. When the species is extinct there is nothing
+       * to fly to, and the toast says so instead of moving the camera nowhere.
+       */
+      const pickSpecies = React.useCallback((id) => {
+        setTool(id)
+        const name = t('species.' + id)
+        const world = store.getWorld()
+        const entity = world === null || world === undefined
+          ? undefined
+          : world.entities.find(candidate => candidate.species === id)
+        if (entity === undefined) {
+          showToast(t('toast.pickedEmpty', { species: name }))
+          return
+        }
+        lookAt(entity.x, entity.y)
+        store.select(entity.id)
+        showToast(t('toast.picked', { species: name }))
+      }, [store, lookAt, showToast, t])
 
       /** Put a starter population back into an empty world. */
       const restockWorld = React.useCallback(() => {
@@ -1093,6 +1201,9 @@
           if (isStageControl(event.target)) return
           event.preventDefault()
           const current = viewRef.current
+          // Wheel up = zoom in, wheel down = zoom out: the map convention, and the
+          // direction the person playing actually expects. Do not "fix" this again
+          // without asking them.
           const nextScale = clamp(current.scale + (event.deltaY < 0 ? 1 : -1), MIN_SCALE, MAX_SCALE)
           if (nextScale === current.scale) return
           const world = store.getWorld() ?? { width: current.width, height: current.height }
@@ -1159,7 +1270,9 @@
           if (event.code === 'Space') { event.preventDefault(); store.togglePause() }
           else if (event.key === '1' || event.key === '2' || event.key === '3' || event.key === '4') {
             store.setSpeed([1, 2, 4, 8][Number(event.key) - 1])
-          } else if (event.key === 'f' || event.key === 'F') fitAll()
+          } else if (event.key === '+' || event.key === '=' ) zoomBy(1)
+          else if (event.key === '-' || event.key === '_') zoomBy(-1)
+          else if (event.key === 'f' || event.key === 'F') fitAll()
           else if (event.key === 'h' || event.key === 'H') setHelpOpen(open => !open)
         }
         if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
@@ -1241,7 +1354,7 @@
               h('div', { className: 'pe-title' }, t('panel.title')),
               h('div', { className: 'pe-sub' },
                 t('stat.day', { day: snapshot.stats?.day ?? 1 }) + ' · ' + (snapshot.stats?.clock ?? '06:00') +
-                ' · ' + t('status.temperature', { n: Math.round(climate.temperature ?? 0) })))),
+                ' · ' + t('status.temperature', { n: Math.round(climate.temperature ?? 0) }) + ' · v' + BUILD_VERSION))),
           h('div', { className: 'pe-statusbar' },
             h('span', { className: 'pe-pill' + (snapshot.paused ? '' : ' pe-pill-live') },
               snapshot.paused ? t('speed.paused') : t('status.pulse', { births: pulse.births, deaths: pulse.deaths })),
@@ -1287,22 +1400,24 @@
               ref: stageRef,
               style: { cursor: tool === 'pointer' ? 'grab' : 'crosshair' },
             },
-              h('canvas', {
-                ref: canvasRef,
-                className: 'pe-canvas',
-                width: view.width * view.scale,
-                height: view.height * view.scale,
-                style: {
-                  width: (view.width * view.scale) + 'px',
-                  height: (view.height * view.scale) + 'px',
-                },
-              }),
+              // No width/height/style here on purpose: the store owns the canvas
+              // size so the painted frame and the visible box can never disagree.
+              h('canvas', { ref: canvasRef, className: 'pe-canvas' }),
               brushPreview,
               h('div', { className: 'pe-hud pe-hud-bl' },
                 h('span', { className: 'pe-hud-item' },
                   hover === null ? '—' : t('brush.cell', { x: Math.round(hover.x), y: Math.round(hover.y) })),
                 h('span', { className: 'pe-hud-item' }, t('brush.preview', { tool: labelFor(tool) })),
-                h('span', { className: 'pe-hud-item' }, view.scale + '×')),
+                h('span', { className: 'pe-hud-item' },
+                  h('button', {
+                    type: 'button', className: 'pe-zoom', title: t('action.zoomOut'),
+                    onClick: () => zoomBy(-1),
+                  }, '−'),
+                  h('span', { className: 'pe-zoom-value' }, view.scale + '×'),
+                  h('button', {
+                    type: 'button', className: 'pe-zoom', title: t('action.zoomIn'),
+                    onClick: () => zoomBy(1),
+                  }, '+'))),
               h('div', { className: 'pe-hud pe-hud-br' },
                 h(Minimap, { store, snapshot, onJump: lookAt })),
               snapshot.ready === false
@@ -1355,6 +1470,7 @@
                 h(SpeciesPanel, {
                   rows: snapshot.species ?? [],
                   t,
+                  onPick: pickSpecies,
                   onLocate: locateSpecies,
                   inferred: snapshot.causeSource === undefined ? 0 : snapshot.causeSource.inferred,
                 })),
