@@ -34,7 +34,12 @@ const SAMPLE_EVERY = 1_000
 // animal for travelling to water and to resting spots, so the equilibrium sits
 // lower than in the 320x200 build. The floor only has to prove a species can
 // build a breeding population, not that it fills its cap.
-const VIABLE_PEAK = { rabbit: 120, deer: 25, fox: 12, wolf: 5, crow: 18, fish: 55, pike: 5 }
+const VIABLE_PEAK = {
+  rabbit: 120, deer: 22, fox: 12, wolf: 5, crow: 18, fish: 55, pike: 5,
+  // The land/water bridge: a heron or a bear that never reaches a handful of
+  // adults means the cross-habitat link does not work at all.
+  heron: 5, otter: 5, bear: 3, frog: 20,
+}
 /**
  * How many checkpoints a species may read zero while immigration rescues it.
  * The migration net fires every 25–45 world seconds, i.e. every 0.25–0.45 of a

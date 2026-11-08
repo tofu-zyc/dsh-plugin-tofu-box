@@ -1,0 +1,68 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>species sheet</title>
+<style>html,body{margin:0;background:#0d1018;color:#c9d4e4;font:12px ui-monospace,Consolas,monospace}
+canvas{display:block;image-rendering:pixelated;margin:10px}#status{padding:6px 10px;color:#8ce0a4}</style>
+</head><body>
+<div id="status">booting…</div>
+<canvas id="sheet"></canvas>
+<script>
+  window.__failures = []
+  window.addEventListener('error', (e) => window.__failures.push(String(e.message || e)))
+  window.__ModuleLoader__ = { load(entry) { window.__entry = entry } }
+</script>
+<script src="../client.js"></script>
+<script>
+  const S = Number(new URLSearchParams(location.search).get('scale') || 4)
+  try {
+    const stub = {
+      createElement: (t, p, ...c) => ({ t, p, c }), Component: function () {}, Fragment: 'F',
+      useState: (v) => [v, () => {}], useEffect() {}, useRef: (v) => ({ current: v }),
+      useCallback: (f) => f, useMemo: (f) => f(), useSyncExternalStore() {},
+    }
+    const engine = window.__entry.factory((id) => { if (id === 'react') return stub; throw new Error(id) }).__engine
+    const image = new Image()
+    image.onload = () => {
+      const { ATLAS, ATLAS_SLOTS } = engine
+      const only = new URLSearchParams(location.search).get('only')
+      const ids = only ? only.split(',') : Object.keys(ATLAS_SLOTS)
+      const cols = Math.max(...ids.map(id => Object.values(ATLAS_SLOTS[id]).reduce((n, list) => n + list.length, 0)))
+      const label = 78
+      const canvas = document.getElementById('sheet')
+      canvas.width = label + cols * ATLAS.cellWidth * S + 8
+      canvas.height = ids.length * ATLAS.cellHeight * S + 8
+      const ctx = canvas.getContext('2d')
+      ctx.imageSmoothingEnabled = false
+      ctx.fillStyle = '#151a24'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ids.forEach((id, row) => {
+        ctx.fillStyle = '#7f97b4'
+        ctx.font = '12px Consolas, monospace'
+        ctx.fillText(id, 8, row * ATLAS.cellHeight * S + ATLAS.cellHeight * S / 2 + 4)
+        const roles = ATLAS_SLOTS[id]
+        const list = [...roles.idle, ...(roles.walk || []), ...roles.run]
+        list.slice(0, cols).forEach((slot, column) => {
+          const sx = (slot % ATLAS.columns) * ATLAS.cellWidth
+          const sy = Math.floor(slot / ATLAS.columns) * ATLAS.cellHeight
+          ctx.drawImage(image, sx, sy, ATLAS.cellWidth, ATLAS.cellHeight,
+            label + column * ATLAS.cellWidth * S, row * ATLAS.cellHeight * S,
+            ATLAS.cellWidth * S, ATLAS.cellHeight * S)
+          const walkStart = roles.idle.length
+          const runStart = walkStart + (roles.walk ? roles.walk.length : 0)
+          const tint = column < walkStart ? 'rgba(120,200,255,0.55)'
+            : (column < runStart ? 'rgba(150,255,180,0.55)' : 'rgba(255,180,120,0.6)')
+          ctx.fillStyle = tint
+          ctx.fillRect(label + column * ATLAS.cellWidth * S, row * ATLAS.cellHeight * S + 2, 3, 8)
+        })
+        ctx.strokeStyle = 'rgba(255,255,255,0.07)'
+        ctx.beginPath()
+        ctx.moveTo(0, (row + 1) * ATLAS.cellHeight * S)
+        ctx.lineTo(canvas.width, (row + 1) * ATLAS.cellHeight * S)
+        ctx.stroke()
+      })
+      document.getElementById('status').textContent = 'species=' + ids.length + ' failures=' + JSON.stringify(window.__failures)
+    }
+    image.src = 'data:image/png;base64,' + engine.SPRITE_ATLAS_PNG
+  } catch (error) {
+    document.getElementById('status').textContent = 'FATAL: ' + (error && error.stack ? error.stack : error)
+  }
+</script></body></html>

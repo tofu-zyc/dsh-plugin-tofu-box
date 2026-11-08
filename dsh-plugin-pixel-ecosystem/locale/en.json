@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Pixel terrarium",
-    "description": "A pixel ecology sandbox in one full main panel: two producer chains (grass on land, weed underwater) feed a land and a water food web — rabbits, deer, foxes and wolves, crows scavenging remains, plus fish and pike — that graze, hunt, breed and die while the leftovers rot back into fertile soil. Animals carry heritable genes, so populations drift on their own. Something to poke at while the AI works; the world lives in browser storage, so it is still there next time."
+    "description": "A pixel ecology sandbox in one full main panel: two producer chains (grass on land, weed underwater) feed a land and a water food web — rabbits, deer, foxes and wolves, crows scavenging the remains, plus fish, pike and otters in the lake, herons and bears wading in to take fish out of it, and frogs grazing the shallows. They graze, hunt, breed and die while the leftovers rot back into fertile soil. Animals carry heritable genes, so populations drift on their own. Something to poke at while the AI works; the world lives in browser storage, so it is still there next time."
   }
 }
