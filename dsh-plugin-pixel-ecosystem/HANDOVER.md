@@ -509,5 +509,27 @@ generate_image  ──►  assets/models/<id>.json  ──►  tools/pixel/rig.m
 
 ---
 
+## 13. 0.2.2 修掉的缺陷（2026-11，本轮交付）
+
+§7 里原本挂着的几条，这一轮修完了，改动都在 \`client.js\`，都带实测证据：
+
+| 缺陷 | 根因 | 代码位置 | 回归保护 |
+| --- | --- | --- | --- |
+| 动物在水陆边界无限打转 | \`moveToward\` 撞墙时 \`heading = nextRandom()\` 随机重设 | \`moveToward\` 的绕行循环 + 新增的 \`nearbyStand\` | 探针：贴水边 1 格内 70–85 只，连续 120 tick 位移 <1.2 格的为 **0** |
+| 鱼看起来飘在空中 | 所有动物统一画地面椭圆阴影 | \`drawAtlasAnimal\` 里按 \`speciesRow.habitat === 'water'\` 分支 | 截图目视 |
+| 水草放不下/看不见 | \`sowProducer\` 只在 WATER 写入；渲染也只处理水面 | \`sowProducer\` 增加 SAND/DIRT 分支；\`paintGround\` 增加湿草混色 | 目视 + \`weed cover is visible on water\` 用例仍绿 |
+| 奔跑与行走无差别 | 角色由 \`moved/TICK\` 判（含昼夜活动系数）；追逐/逃跑倍率过低；步频不随跑动变化 | \`stepEntity\` 的 \`entity.running\` + \`atlasFrameRole\` + \`ATLAS_GAIT\` 乘 1.45 + SPECIES 的 flee/huntSpeed | 探针：稳态 40 跑 / 200 走 / 449 休息 |
+| 生命工具条缺 4 个新物种 | \`LIFE_TOOLS\` 手写 11 项 | 改为 \`[...SPECIES_IDS]\` | \`client.test.mjs\`：每个 SPECIES_IDS 都必须在 LIFE_TOOLS 里 |
+| 树挡不住动物 | 植物画进 1px 地面缓冲，动物最后画在显示层 | \`drawDepthLayers\`（植物与动物合并按 y 排序）+ \`spriteToCanvas\` | 截图目视 |
+
+同时放宽/收紧了几个数值：种群上限 兔 620→400、鱼 520→170、青蛙 420→160（高倍下会叠成一堵墙）；
+逃跑 1.35–1.7 → 1.85–2.15、捕猎 0.9–1.15 → 1.25–1.55。三种子 soak 复测：11 物种全部 \`zero@0\`，
+吞吐 337–378 tick/s。
+
+**还没做**（用户明确说后面再说）：衰老掉属性（\`STAGE_SPEED\` 只有速度差，能量/视力不随年龄变）、
+同类争斗、疾病。尸体是**已有**的（\`meatGain\` + 乌鸦 scavenge 在用）。
+
+---
+
 **最后一件事**：这个项目的用户在评价时会**实际打开界面看**，并且多次因为"看起来没变化 / 点不动"而退回。
 所以任何改动交付前，至少要有一张真浏览器截图或一段可复现的验证输出，而不是"测试通过"四个字。
