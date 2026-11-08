@@ -1549,6 +1549,23 @@ window.__ModuleLoader__.load({
      * @param {object} species - species row.
      * @param {object} grid - grid of all animals.
      */
+/**
+ * Perception and belief: what an animal currently knows about its world.
+ *
+ * OWNER: behaviour
+ * Scans the real neighbourhood (not random sampling) on a staggered ~1 Hz
+ * schedule and writes belief entries with timestamps so they can go stale:
+ *   belief.food   { x, y, t, value }
+ *   belief.threat { x, y, t, predator }
+ *   belief.water  { x, y, t }
+ *   belief.home   { x, y }
+ *   belief.caches [{ x, y, t }]
+ * Contract: docs/20-CORE-LOOP.md section 2.3.
+ *
+ * Not implemented yet: this part exists so the owner has a stable file to fill
+ * without editing src/manifest.json (Lead owns that file).
+ */
+
     // ---------------------------------------------------------------------
     // Needs, temperament and life stages
     // ---------------------------------------------------------------------
@@ -1668,6 +1685,19 @@ window.__ModuleLoader__.load({
       }
       return best
     }
+
+/**
+ * The body: reserve, structure, maturity, health, fatigue, metabolism.
+ *
+ * OWNER: sim-core
+ * Implements the DEB-lite equations in docs/20-CORE-LOOP.md section 4:
+ *   metabolise(entity, dt)  -> consumes/produces body.E, body.V, body.M
+ *   applyDamage(entity, amount, cause)
+ * This is the single energy ledger. Nothing else may write body.E.
+ *
+ * Not implemented yet: this part exists so the owner has a stable file to fill
+ * without editing src/manifest.json (Lead owns that file).
+ */
 
     /**
      * Score the candidate actions and commit to the best one.
@@ -1830,6 +1860,19 @@ window.__ModuleLoader__.load({
       }
     }
 
+
+/**
+ * Execution: the state machine that turns a goal into timed action.
+ *
+ * OWNER: behaviour
+ * States have a duration and a completion condition; decide() is only called at
+ * state boundaries or on an interrupt. Interrupt priority:
+ *   flee > survive (drink/warm) > opportunity (hunt/forage) > intrinsic (play/socialize)
+ * Contract: docs/20-CORE-LOOP.md section 2.3.
+ *
+ * Not implemented yet: this part exists so the owner has a stable file to fill
+ * without editing src/manifest.json (Lead owns that file).
+ */
 
     /**
      * Feed one animal: graze a producer field, catch prey, or scavenge a corpse.
@@ -2389,6 +2432,30 @@ window.__ModuleLoader__.load({
       handleImmigration(world, step)
       stepEntities(world, step)
     }
+
+/**
+ * Climate: sun angle, season phase, temperature.
+ *
+ * OWNER: sim-core
+ * stepClimate(world, dt) writes world.climate: { t, dayPhase, yearPhase, temperature, sunlight }.
+ * Everything that depends on time of day, season or temperature reads from here;
+ * no other system may re-derive daylight.
+ *
+ * Not implemented yet: this part exists so the owner has a stable file to fill
+ * without editing src/manifest.json (Lead owns that file).
+ */
+
+/**
+ * Trait cards: composable phenotype, compiled once per birth.
+ *
+ * OWNER: sim-core
+ * A trait is data: { id, hooks: { metabolism, speed, ... }, params, upkeep }.
+ * Phenotype = compilePhenotype(species, genes) evaluated at birth, never per tick.
+ * Every trait pays upkeep in the energy ledger so no combo is free.
+ *
+ * Not implemented yet: this part exists so the owner has a stable file to fill
+ * without editing src/manifest.json (Lead owns that file).
+ */
 
     // ---------------------------------------------------------------------
     // Player interaction: terrain, producers, plants, animals

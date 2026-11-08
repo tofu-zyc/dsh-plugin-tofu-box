@@ -22,7 +22,7 @@ test('the manifest lists every part and nothing else', () => {
   const files = manifest.parts.map(part => part.file)
   assert.equal(new Set(files).size, files.length, 'duplicate part in the manifest')
   for (const part of manifest.parts) {
-    assert.match(part.file, /^\d\d-[a-z0-9-]+\.js$/, part.file + ' is not NN-name.js')
+    assert.match(part.file, /^\d\d[a-z]?-[a-z0-9-]+\.js$/, part.file + ' is not NN[a]-name.js')
     assert.equal(typeof part.description, 'string')
     assert.ok(part.description.length > 0, part.file + ' has no description')
   }

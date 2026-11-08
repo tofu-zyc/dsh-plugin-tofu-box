@@ -38,12 +38,24 @@
       "description": "killEntity, moveToward, food/prey search"
     },
     {
+      "file": "08b-perception.js",
+      "description": "Perception and belief cache"
+    },
+    {
       "file": "09-needs.js",
       "description": "Need channels, traits, life stages, decay"
     },
     {
+      "file": "09b-body.js",
+      "description": "Body ledger: reserve, structure, maturity, metabolism"
+    },
+    {
       "file": "10-decide.js",
       "description": "Utility scoring: decide()"
+    },
+    {
+      "file": "10b-execution.js",
+      "description": "Timed state machine and plan execution"
     },
     {
       "file": "11-feed.js",
@@ -56,6 +68,14 @@
     {
       "file": "13-fields.js",
       "description": "Producers, plants, corpses, immigration, stepWorld"
+    },
+    {
+      "file": "13b-climate.js",
+      "description": "Sun, season and temperature"
+    },
+    {
+      "file": "13c-traits.js",
+      "description": "Trait cards and phenotype compilation"
     },
     {
       "file": "14-player-tools.js",
