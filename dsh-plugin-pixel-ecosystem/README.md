@@ -13,8 +13,9 @@
 有昼夜明暗，世界自动存进浏览器本地，关掉页面再回来还在。它就是给「AI 干活、你等结果的那几分钟」摸鱼用的，
 不联网、不改你的会话、不碰 Host。
 
-> **状态：0.2.2 已发布到 npm**（`npm i dsh-plugin-pixel-ecosystem@0.2.2`）。
-> 0.2.2 = 美术换代（AI 出图 → 拆件成可编辑模型）+ 四个真 bug 修复，见文末「0.2.2 修复了什么」。
+> **状态：0.2.3 已发布到 npm**（`npm i dsh-plugin-pixel-ecosystem@0.2.3`）。
+> 0.2.2 = 美术换代（AI 出图 → 拆件成可编辑模型）+ 四个真 bug 修复，见文末「0.2.2 修复了什么」；
+> 0.2.3 只修文档与 description，代码与 0.2.2 完全相同。
 > 0.1.0 当时提交成功但仍在 npm 的 staged publishing 队列里等 maintainer 批准；
 > 在 `npm view dsh-plugin-pixel-ecosystem versions` 列出你要装的那个版本之前，只能 `link:` 或 git 直装（见下面「安装」）。
 > 本插件是独立插件，**不并入 `tofu-box` 伞包**（清单里标了 `dsh.umbrella: false`）。
@@ -46,7 +47,7 @@
 
 ```bash
 # 1) npm（版本进入 npm 的 staged publishing 队列后，要 maintainer 批准才会出现在版本列表里）
-dsh plugin --profile <你的profile> add dsh-plugin-pixel-ecosystem@0.2.2
+dsh plugin --profile <你的profile> add dsh-plugin-pixel-ecosystem@0.2.3
 
 # 2) 本插件是独立插件，**不在 tofu-box 伞包里**（清单里 dsh.umbrella: false），
 #    所以没有"装伞包顺带装它"这条路，只能单独装。
