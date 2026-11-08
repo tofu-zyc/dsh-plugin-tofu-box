@@ -11653,6 +11653,33 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Interactive chrome that is rendered INSIDE the stage.
+     *
+     * The stage owns pointerdown/move/up so the map can be panned and painted,
+     * and it calls preventDefault() on pointerdown to stop text selection and
+     * native drag. That call also cancels the compatibility mouse events, so a
+     * <button> nested in the stage never receives a click: the first-run guide's
+     * "Got it", the save notice and the empty-world restock were all dead
+     * buttons. Any pointer that starts on chrome must be ignored by the stage
+     * handlers entirely.
+     */
+    const STAGE_CONTROLS = [
+      '.pe-onboard', '.pe-notice', '.pe-emptyworld', '.pe-modal',
+      '.pe-inspector', '.pe-eventbar', '.pe-hud', '.pe-tabs', '.pe-tools',
+    ].join(',')
+
+    /**
+     * Whether a pointer event started on chrome rather than on the map.
+     * @param {object} target - the event target.
+     * @returns {boolean} true when the target belongs to a control.
+     */
+    function isStageControl(target) {
+      if (target === null || target === undefined) return false
+      if (typeof target.closest !== 'function') return false
+      return target.closest(STAGE_CONTROLS) !== null
+    }
+
+    /**
      * The whole panel.
      * @param {object} props - slot props plus props.store, props.locale, props.layout.
      * @returns {object} React element.
@@ -11826,6 +11853,9 @@ window.__ModuleLoader__.load({
         const shouldPan = (event) => toolRef.current === 'pointer' || event.button === 1
 
         const handleDown = (event) => {
+          // A press that starts on a card/panel is a click on that control, not a
+          // stroke on the map: preventDefault() here would eat the click.
+          if (isStageControl(event.target)) return
           if (event.button !== 0 && event.button !== 1 && event.button !== 2) return
           const drag = dragRef.current
           drag.mode = shouldPan(event) ? 'pan' : 'paint'
@@ -11847,6 +11877,8 @@ window.__ModuleLoader__.load({
         }
 
         const handleMove = (event) => {
+          // Hovering a card must not move the brush preview or repaint the panel.
+          if (isStageControl(event.target)) return
           const point = cellAt(event.clientX, event.clientY)
           const cell = Math.round(point.x) + ',' + Math.round(point.y)
           setHover({ x: point.x, y: point.y })
@@ -11889,6 +11921,8 @@ window.__ModuleLoader__.load({
         }
 
         const handleWheel = (event) => {
+          // Scrolling over a card scrolls the card; zooming the map under it does not.
+          if (isStageControl(event.target)) return
           event.preventDefault()
           const current = viewRef.current
           const nextScale = clamp(current.scale + (event.deltaY < 0 ? 1 : -1), MIN_SCALE, MAX_SCALE)
@@ -11915,7 +11949,10 @@ window.__ModuleLoader__.load({
           dragRef.current.mode = 'none'
         }
 
-        const handleContext = (event) => event.preventDefault()
+        const handleContext = (event) => {
+          if (isStageControl(event.target)) return
+          event.preventDefault()
+        }
 
         stage.addEventListener('pointerdown', handleDown)
         stage.addEventListener('pointermove', handleMove)
@@ -12536,7 +12573,7 @@ window.__ModuleLoader__.load({
 .pe-body{display:flex;flex:1;min-height:0;min-width:0}
 .pe-stage{position:relative;flex:1;min-width:0;min-height:0;overflow:hidden;background:radial-gradient(circle at 50% 40%, var(--dsw-alias-bg-layer-1), var(--dsw-alias-bg-base) 70%)}
 .pe-canvas{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);image-rendering:pixelated;image-rendering:crisp-edges;touch-action:none;display:block;border-radius:2px;box-shadow:0 10px 30px rgba(0,0,0,.22)}
-.pe-toast{position:absolute;left:50%;bottom:56px;transform:translateX(-50%);padding:6px 12px;border-radius:999px;background:rgba(20,22,28,.82);color:#fff;font-size:11.5px;line-height:16px;box-shadow:0 8px 20px rgba(0,0,0,.32);pointer-events:none}
+.pe-toast{position:absolute;left:50%;bottom:104px;transform:translateX(-50%);padding:6px 12px;border-radius:999px;background:rgba(20,22,28,.82);color:#fff;font-size:11.5px;line-height:16px;box-shadow:0 8px 20px rgba(0,0,0,.32);pointer-events:none}
 .pe-hud{position:absolute;display:flex;align-items:center;gap:6px;pointer-events:none}
 .pe-hud-bl{left:12px;bottom:12px}
 .pe-hud-br{right:12px;bottom:12px;pointer-events:auto}
@@ -12664,7 +12701,7 @@ window.__ModuleLoader__.load({
 .pe-pill-warn{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-primary)}
 .pe-pill-live{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary)}
 .pe-brushpreview{position:absolute;transform:translate(-50%,-50%);border:1px dashed rgba(255,255,255,.85);border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.35);pointer-events:none;z-index:3}
-.pe-notice{position:absolute;left:50%;top:14px;transform:translateX(-50%);width:min(460px,calc(100% - 24px));padding:10px 12px;border-radius:11px;background:var(--dsw-alias-bg-overlay);border:1px solid var(--dsw-alias-state-warn-primary);box-shadow:0 12px 28px rgba(0,0,0,.3);z-index:6}
+.pe-notice{position:absolute;left:50%;bottom:56px;transform:translateX(-50%);width:min(460px,calc(100% - 24px));padding:10px 12px;border-radius:11px;background:var(--dsw-alias-bg-overlay);border:1px solid var(--dsw-alias-state-warn-primary);box-shadow:0 12px 28px rgba(0,0,0,.3);z-index:6}
 .pe-notice-title{font-weight:650;font-size:12px;line-height:17px;color:var(--dsw-alias-state-warn-primary)}
 .pe-notice-body{margin-top:3px;font-size:11.5px;line-height:16px;color:var(--dsw-alias-label-secondary)}
 .pe-notice-actions{display:flex;justify-content:flex-end;margin-top:7px}
@@ -12802,6 +12839,8 @@ window.__ModuleLoader__.load({
       GLYPHS,
       PANEL_GLYPH,
       TerrariumPanel,
+      isStageControl,
+      STAGE_CONTROLS,
       Inspector,
       PopulationChart,
       Minimap,

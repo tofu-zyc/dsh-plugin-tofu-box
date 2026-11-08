@@ -773,6 +773,33 @@
     }
 
     /**
+     * Interactive chrome that is rendered INSIDE the stage.
+     *
+     * The stage owns pointerdown/move/up so the map can be panned and painted,
+     * and it calls preventDefault() on pointerdown to stop text selection and
+     * native drag. That call also cancels the compatibility mouse events, so a
+     * <button> nested in the stage never receives a click: the first-run guide's
+     * "Got it", the save notice and the empty-world restock were all dead
+     * buttons. Any pointer that starts on chrome must be ignored by the stage
+     * handlers entirely.
+     */
+    const STAGE_CONTROLS = [
+      '.pe-onboard', '.pe-notice', '.pe-emptyworld', '.pe-modal',
+      '.pe-inspector', '.pe-eventbar', '.pe-hud', '.pe-tabs', '.pe-tools',
+    ].join(',')
+
+    /**
+     * Whether a pointer event started on chrome rather than on the map.
+     * @param {object} target - the event target.
+     * @returns {boolean} true when the target belongs to a control.
+     */
+    function isStageControl(target) {
+      if (target === null || target === undefined) return false
+      if (typeof target.closest !== 'function') return false
+      return target.closest(STAGE_CONTROLS) !== null
+    }
+
+    /**
      * The whole panel.
      * @param {object} props - slot props plus props.store, props.locale, props.layout.
      * @returns {object} React element.
@@ -946,6 +973,9 @@
         const shouldPan = (event) => toolRef.current === 'pointer' || event.button === 1
 
         const handleDown = (event) => {
+          // A press that starts on a card/panel is a click on that control, not a
+          // stroke on the map: preventDefault() here would eat the click.
+          if (isStageControl(event.target)) return
           if (event.button !== 0 && event.button !== 1 && event.button !== 2) return
           const drag = dragRef.current
           drag.mode = shouldPan(event) ? 'pan' : 'paint'
@@ -967,6 +997,8 @@
         }
 
         const handleMove = (event) => {
+          // Hovering a card must not move the brush preview or repaint the panel.
+          if (isStageControl(event.target)) return
           const point = cellAt(event.clientX, event.clientY)
           const cell = Math.round(point.x) + ',' + Math.round(point.y)
           setHover({ x: point.x, y: point.y })
@@ -1009,6 +1041,8 @@
         }
 
         const handleWheel = (event) => {
+          // Scrolling over a card scrolls the card; zooming the map under it does not.
+          if (isStageControl(event.target)) return
           event.preventDefault()
           const current = viewRef.current
           const nextScale = clamp(current.scale + (event.deltaY < 0 ? 1 : -1), MIN_SCALE, MAX_SCALE)
@@ -1035,7 +1069,10 @@
           dragRef.current.mode = 'none'
         }
 
-        const handleContext = (event) => event.preventDefault()
+        const handleContext = (event) => {
+          if (isStageControl(event.target)) return
+          event.preventDefault()
+        }
 
         stage.addEventListener('pointerdown', handleDown)
         stage.addEventListener('pointermove', handleMove)

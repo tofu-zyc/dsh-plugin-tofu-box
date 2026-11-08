@@ -129,6 +129,8 @@
       GLYPHS,
       PANEL_GLYPH,
       TerrariumPanel,
+      isStageControl,
+      STAGE_CONTROLS,
       Inspector,
       PopulationChart,
       Minimap,
