@@ -1,0 +1,11 @@
+{
+  "version": "3.3.4",
+  "backend": "WebGPU",
+  "webgl_fallback": true,
+  "source_commit": "0123456789abcdef0123456789abcdef01234567",
+  "source_url": "https://example.invalid/pvz_perf/tree/0123456789abcdef0123456789abcdef01234567",
+  "files": {
+    "index.html": { "bytes": 318 },
+    "launcher.js": { "bytes": 96 }
+  }
+}

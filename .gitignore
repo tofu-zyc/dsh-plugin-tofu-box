@@ -39,3 +39,10 @@ dist/
 .DS_Store
 *.log
 Thumbs.db
+
+# 临时探针/构建产物（pvz 插件开发会话）
+/.probe/
+/.tmp/
+
+# 插件安装源的一次性副本（链接安装用，卸载可安全删除）
+/.agents/local-install/

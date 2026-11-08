@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Plants vs. Zombies shelf",
+    "description": "Runs your local pvz_perf web build inside DSH: a sidebar entry opens a full-screen game layer, Hide keeps the round alive in the background, so a wave fits between agent turns. The game files stay on your disk; this plugin ships no game assets."
+  }
+}
