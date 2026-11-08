@@ -252,7 +252,18 @@ test('winter ground reads paler than summer and grows snow', () => {
     const world = mixedWorld({ grass: 0.6 })
     world.tick = 0
     world.time = 0
-    world.climate = { dayPhase: 0.5, yearPhase, temperature: 5, sunlight: 0.7 }
+    // Start from a REAL climate record so every field the renderer reads exists
+    // (this fixture used to hand-write the record and went stale: it was missing
+    // `season` and `waterTemperature`, so the snow test could not see the season
+    // at all). Only the scenario values are pinned on top.
+    engine.stepClimate(world, engine.TICK)
+    world.climate.dayPhase = 0.5
+    world.climate.yearPhase = yearPhase
+    // Same relation 13b-climate uses: +1 midsummer, -1 midwinter.
+    world.climate.season = Math.cos(2 * Math.PI * (yearPhase - 0.5))
+    world.climate.temperature = 5
+    world.climate.waterTemperature = 5
+    world.climate.sunlight = 0.7
     const frame = paintWorld(world)
     let pale = 0
     let total = 0
@@ -270,8 +281,12 @@ test('winter ground reads paler than summer and grows snow', () => {
     }
     return { mean: total / land, pale }
   }
-  const summer = sample(0.3)
-  const winter = sample(0.95)
+  // Pick phases inside the snow PROFILE, not arbitrary ones: snow cover is a
+  // year-phase profile now (17-palette SNOW_PROFILE), peaking at 0.82-0.86 and
+  // only 0.2 at the 0.95 shoulder, which is too little to cross the pale
+  // threshold this test counts. Summer sits on the profile's zero plateau.
+  const summer = sample(0.4)
+  const winter = sample(0.84)
   assert.ok(winter.mean > summer.mean + 25,
     `winter ground must read paler: summer ${summer.mean.toFixed(1)} vs winter ${winter.mean.toFixed(1)}`)
   assert.ok(winter.pale > 40, `winter must cover open ground with snow, only ${winter.pale} pale land cells`)
@@ -358,8 +373,8 @@ test('snow falls only in winter and the weather layer can be switched off', () =
     for (const index of changedCells(first, second)) if (world.terrain[index] !== TERRAIN.WATER) changed += 1
     return changed
   }
-  assert.ok(landChanges(0.95, null) > 0, 'winter snow must move between ticks')
-  assert.equal(landChanges(0.95, { weather: false }), 0, 'with the weather layer off the land must not animate')
+  assert.ok(landChanges(0.84, null) > 0, 'winter snow must move between ticks')
+  assert.equal(landChanges(0.84, { weather: false }), 0, 'with the weather layer off the land must not animate')
   assert.equal(landChanges(0.3, null), 0, 'no snow outside winter')
 })
 
@@ -395,4 +410,116 @@ test('a sleeping animal reads lower than a standing one', () => {
   assert.ok(sleeping.bottom === standing.bottom, 'both poses must keep their feet planted on the same row')
   assert.ok(sleeping.cells < standing.cells,
     `sleeping must cover fewer pixels: standing ${standing.cells}, sleeping ${sleeping.cells}`)
+})
+/** How many land cells a phase paints as covered in snow. */
+function snowCoverage(yearPhase) {
+  const world = mixedWorld({ grass: 0.5 })
+  world.tick = 0
+  world.time = 0
+  world.climate = { dayPhase: 0.5, yearPhase, temperature: -5, sunlight: 0.6 }
+  const frame = paintWorld(world)
+  let pale = 0
+  for (let y = 0; y < world.height; y++) {
+    for (let x = 20; x < world.width; x++) {
+      const color = frame[y * world.width + x]
+      if ((color & 0xFF) > 195 && ((color >>> 8) & 0xFF) > 195 && ((color >>> 16) & 0xFF) > 195) pale += 1
+    }
+  }
+  return pale
+}
+
+test('deep snow is a short window with lighter banks either side', () => {
+  const deep = snowCoverage(0.84)
+  const before = snowCoverage(0.78)
+  const after = snowCoverage(0.95)
+  const summer = snowCoverage(0.38)
+  assert.ok(deep > 150, `mid-winter must be snow covered, only ${deep} cells`)
+  assert.ok(before > 5 && before < deep * 0.8, `early winter must be a bank, not a full cover: ${before} vs ${deep}`)
+  assert.ok(after > 0 && after < deep * 0.6, `late winter must be melting: ${after} vs ${deep}`)
+  assert.equal(summer, 0, 'high summer must have no snow at all')
+})
+
+test('trees are not all the same silhouette', () => {
+  const paint = (id) => {
+    const world = mixedWorld({ grass: 0.5 })
+    world.tick = 0
+    world.time = 0
+    world.climate = { dayPhase: 0.5, yearPhase: 0.38, temperature: 16, sunlight: 0.9 }
+    world.trees.push({ id, x: 25.5, y: 15.5, variant: 'tree', size: 3, age: 40, foliage: 1, seedTimer: 50 })
+    const frame = paintWorld(world)
+    const cells = []
+    for (let y = 4; y < 16; y++) {
+      for (let x = 17; x < 34; x++) cells.push(frame[y * world.width + x])
+    }
+    return cells.join(',')
+  }
+  const round = paint(5)
+  const wide = paint(12)
+  const leaning = paint(13)
+  assert.notEqual(round, wide, 'a round crown and a wide crown must not paint the same cells')
+  assert.notEqual(wide, leaning, 'a wide crown and a leaning crown must not paint the same cells')
+  assert.notEqual(round, leaning, 'a round crown and a leaning crown must not paint the same cells')
+})
+
+test('evergreens stay green through winter, deciduous trees go bare', () => {
+  const crown = (id) => {
+    const world = mixedWorld({ grass: 0.5 })
+    world.tick = 0
+    world.time = 0
+    world.climate = { dayPhase: 0.5, yearPhase: 0.84, temperature: -6, sunlight: 0.55 }
+    world.trees.push({ id, x: 25.5, y: 15.5, variant: 'tree', size: 3, age: 40, foliage: 1, seedTimer: 50 })
+    const frame = paintWorld(world)
+    let green = 0
+    let brown = 0
+    for (let y = 2; y < 17; y++) {
+      for (let x = 16; x < 35; x++) {
+        const color = frame[y * world.width + x]
+        const red = color & 0xFF
+        const greenChannel = (color >>> 8) & 0xFF
+        const blue = (color >>> 16) & 0xFF
+        if (greenChannel > red + 18 && greenChannel > blue + 8) green += 1
+        if (red > greenChannel + 14 && red > blue + 20) brown += 1
+      }
+    }
+    return { green, brown }
+  }
+  // id 7 hits the evergreen modulus (id % 7 === 0); id 5 is deciduous.
+  const evergreen = crown(7)
+  const deciduous = crown(5)
+  assert.ok(evergreen.green > 20, `a conifer must keep needles in winter, saw ${evergreen.green} green cells`)
+  assert.equal(deciduous.green, 0, `a deciduous crown must have no green left, saw ${deciduous.green}`)
+  assert.ok(deciduous.brown > 5, `a bare tree must still be visible as wood, saw ${deciduous.brown} brown cells`)
+})
+
+test('the ground ramp has more than eight cover levels', () => {
+  const world = mixedWorld()
+  for (let y = 0; y < world.height; y++) {
+    for (let x = 0; x < world.width; x++) {
+      const index = y * world.width + x
+      world.terrain[index] = x < 20 ? TERRAIN.WATER : TERRAIN.GRASS
+      world.grass[index] = x < 20 ? 0 : (x - 20) / 19
+      world.weed[index] = 0
+    }
+  }
+  world.tick = 0
+  world.time = 0
+  world.climate = { dayPhase: 0.6, yearPhase: 0.38, temperature: 18, sunlight: 0.9 }
+  const frame = paintWorld(world)
+  const shades = new Set()
+  for (let y = 0; y < world.height; y++) {
+    for (let x = 20; x < world.width; x++) shades.add(frame[y * world.width + x])
+  }
+  assert.ok(shades.size > 10, `twenty cover values must not collapse into ${shades.size} colours`)
+})
+
+test('the same year phase paints the same ground in two worlds', () => {
+  const ground = () => {
+    const world = mixedWorld({ grass: 0.55 })
+    world.tick = 7
+    world.time = 0
+    world.climate = { dayPhase: 0.5, yearPhase: 0.84, temperature: -4, sunlight: 0.6 }
+    const frame = paintWorld(world)
+    return Array.from(frame.slice(0, 400)).join(',')
+  }
+  assert.equal(ground(), ground(), 'two worlds at the same year phase must share one look')
 })

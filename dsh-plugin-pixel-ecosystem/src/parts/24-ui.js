@@ -164,6 +164,37 @@
     }
 
     /**
+     * What the header says about the autosave: its size, that it is running, or
+     * that the browser refused to store it.
+     * @param {Function} t - translator.
+     * @param {object} save - snapshot.save.
+     * @returns {string} label, or an empty string when nothing was saved yet.
+     */
+    function saveLabel(t, save) {
+      if (save === null || save === undefined) return ''
+      if (save.pending === true) return t('status.savePending')
+      if (save.failed === true) return t('status.saveFailed')
+      if (save.stored !== true) return ''
+      return t('status.saved', { size: formatSaveSize(save.size) })
+    }
+
+    /**
+     * One sentence per save failure. saveError() tags the reason, so an
+     * incompatible save is never described as a damaged one.
+     * @param {Function} t - translator.
+     * @param {object} notice - snapshot.notice.
+     * @returns {string} body text.
+     */
+    function noticeBody(t, notice) {
+      if (notice === null || notice === undefined) return ''
+      if (notice.kind === 'legacy') return t('notice.legacyBody')
+      if (notice.code === 'unsupported_version') return t('notice.unsupportedVersion')
+      if (notice.code === 'no_decompressor') return t('notice.noDecompressor')
+      if (notice.code === 'corrupt') return t('notice.corrupt')
+      return t('notice.loadBody', { reason: notice.detail === null || notice.detail === undefined ? '' : notice.detail })
+    }
+
+    /**
      * The one and only camera to viewport conversion.
      *
      * The render path and the input path both call this. Two separate copies of
@@ -1122,7 +1153,9 @@
           h('div', { className: 'pe-statusbar' },
             h('span', { className: 'pe-pill' + (snapshot.paused ? '' : ' pe-pill-live') },
               snapshot.paused ? t('speed.paused') : t('status.pulse', { births: pulse.births, deaths: pulse.deaths })),
-            h('span', { className: 'pe-pill' }, t('stat.corpses') + ' ' + (snapshot.stats?.corpses ?? 0))),
+            h('span', { className: 'pe-pill' }, t('stat.corpses') + ' ' + (snapshot.stats?.corpses ?? 0)),
+            h('span', { className: 'pe-pill' + (snapshot.save?.failed === true ? ' pe-pill-warn' : '') },
+              saveLabel(t, snapshot.save))),
           h('div', { className: 'pe-chips' }, speciesChips),
           h('div', { className: 'pe-controls' },
             h('button', {
@@ -1181,9 +1214,10 @@
               h('div', { className: 'pe-hud pe-hud-br' },
                 h(Minimap, { store, snapshot, onJump: lookAt })),
               snapshot.ready === false
-                ? h('div', { className: 'pe-blank' }, t('status.ready'))
+                ? h('div', { className: 'pe-emptyworld' },
+                    h('div', { className: 'pe-emptyworld-title' }, t('status.loading')))
                 : null,
-              snapshot.world !== undefined && snapshot.world.empty === true
+              snapshot.ready === true && snapshot.world !== undefined && snapshot.world.empty === true
                 ? h(EmptyWorldOverlay, { t, onRestock: restockWorld })
                 : null,
               snapshot.onboarding === true
@@ -1191,13 +1225,10 @@
                 : h(OnboardingOverlay, { t, onDismiss: () => store.markOnboardingSeen() }),
               snapshot.notice === null || snapshot.notice === undefined
                 ? null
-                : h('div', { className: 'pe-notice' },
+                : h('div', { className: 'pe-notice', title: snapshot.notice.detail ?? '' },
                     h('div', { className: 'pe-notice-title' },
                       snapshot.notice.kind === 'legacy' ? t('notice.legacyTitle') : t('notice.loadTitle')),
-                    h('div', { className: 'pe-notice-body' },
-                      snapshot.notice.kind === 'legacy'
-                        ? t('notice.legacyBody')
-                        : t('notice.loadBody', { reason: snapshot.notice.detail ?? '' })),
+                    h('div', { className: 'pe-notice-body' }, noticeBody(t, snapshot.notice)),
                     h('div', { className: 'pe-notice-actions' },
                       h('button', { type: 'button', className: 'pe-btn', onClick: () => store.dismissNotice() },
                         t('notice.dismiss')))),

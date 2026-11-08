@@ -199,6 +199,24 @@
         intent: entity.intent ?? null,
         intentScore: entity.intentScore ?? null,
         genes: { ...entity.genes },
+        // Why each behaviour field is or is not here (docs/20 §5):
+        //
+        //  state   — the current bout {id, since, until, min, phase, why, score,
+        //            x, y}. CANNOT be re-derived: without it a loaded animal
+        //            starts a fresh bout from wherever it stands and the panel
+        //            loses "why did it do that". Saved.
+        //  plan    — the committed step list for that bout. Saved, same reason.
+        //  belief  — remembered food/water/home/threat plus the cache list, every
+        //            entry time-stamped. Saved: memory is the animal's history.
+        //  drives  — a DERIVED cache, not missing: updateDrives() rebuilds all
+        //            eight channels from body.E/Emax and the need channels on the
+        //            first tick after a load (hunger is literally 1 - E/Emax).
+        //            It is still written here so the inspector has numbers on the
+        //            very first frame instead of a row of blanks.
+        //  needs   — thirst / social / safety ARE stateful (nothing derives them
+        //            from the body), so those are saved; hunger inside it is a
+        //            getter over the reserve and is therefore ignored on restore.
+        stateEndedAt: Number.isFinite(entity.stateEndedAt) ? entity.stateEndedAt : null,
         needs: entity.needs === undefined ? null : {
           hunger: entity.needs.hunger,
           thirst: entity.needs.thirst,
@@ -394,6 +412,7 @@
         }
         if (saved.drives !== null && typeof saved.drives === 'object') entity.drives = { ...saved.drives }
         if (saved.state !== null && typeof saved.state === 'object') entity.state = saved.state
+        if (Number.isFinite(saved.stateEndedAt)) entity.stateEndedAt = saved.stateEndedAt
         if (saved.plan !== null && typeof saved.plan === 'object') entity.plan = saved.plan
         if (saved.belief !== null && typeof saved.belief === 'object') entity.belief = saved.belief
         world.entities.push(entity)

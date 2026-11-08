@@ -83,7 +83,7 @@
      * every one of 655k cells; a lookup is roughly a quarter of the cost and the
      * output is identical.
      */
-    const GRASS_LUT = new Int32Array(8 * 32)
+    const GRASS_LUT = new Int32Array(GRASS_STEPS * 32)
     const grassLutState = { key: -1 }
 
     /**
@@ -93,7 +93,7 @@
      */
     function grassLutFor(look) {
       if (grassLutState.key === look.key) return GRASS_LUT
-      for (let step = 0; step < 8; step++) {
+      for (let step = 0; step < GRASS_STEPS; step++) {
         for (let delta = 0; delta < 32; delta++) {
           GRASS_LUT[(step << 5) | delta] = nudgeColor(look.ramp[step], delta - 16)
         }
@@ -103,7 +103,10 @@
     }
 
     /** Slow sine fields, cached per world size: the meadow's patches and snow drifts. */
-    const patchState = { width: 0, height: 0, xs: null, ys: null, driftX: null, driftY: null, driftU: null, driftV: null }
+    const patchState = {
+      width: 0, height: 0, xs: null, ys: null,
+      driftX: null, driftY: null, driftU: null, driftV: null, driftM: null, driftN: null,
+    }
 
     /**
      * Build one separable sine table pair.
@@ -133,12 +136,15 @@
       if (patchState.width === width && patchState.height === height) return patchState
       patchState.xs = sineTable(width, 0.055, 0.7)
       patchState.ys = sineTable(height, 0.043, -1.1)
-      // Drift field: a 33-cell undulation crossed with a 55-cell one, which has no
-      // visible tiling at 6x and still varies cell to cell across a hillside.
+      // Drift field: three crossed undulations at 33, 18 and 11 cells. One pair
+      // alone prints round polka dots; stacking scales gives banks that read as
+      // depth instead of spots.
       patchState.driftX = sineTable(width, 0.19, 0.3)
       patchState.driftY = sineTable(height, 0.23, -0.7)
-      patchState.driftU = sineTable(width, 0.07, 1.7)
-      patchState.driftV = sineTable(height, 0.09, 0.2)
+      patchState.driftU = sineTable(width, 0.35, 1.7)
+      patchState.driftV = sineTable(height, 0.29, 0.2)
+      patchState.driftM = sineTable(width, 0.11, -2.1)
+      patchState.driftN = sineTable(height, 0.13, 0.9)
       patchState.width = width
       patchState.height = height
       return patchState
@@ -263,9 +269,10 @@
       const weed = world.weed
       const depth = world.depth
       const time = world.tick * 0.05
-      const patch = patchTablesFor(world.width, world.height)
-      const patchXs = patch.xs
-      const patchYs = patch.ys
+      const tables = patchTablesFor(world.width, world.height)
+      const patchXs = tables.xs
+      const patchYs = tables.ys
+      const tick = world.tick
       const ramp = grassLutFor(look)
       const water = waterTablesFor(look)
       const waterBase = water.base
@@ -284,6 +291,8 @@
         const outBase = row * view.width
         const termBase = row * 6
         const patchY = patchYs[worldY]
+        // Hoisted out of the column loop: the clump field is separable too.
+        const clumpRow = tables.driftV[worldY] * 3
         for (let col = 0; col < view.width; col++) {
           const worldX = view.x + col
           const index = rowBase + worldX
@@ -312,8 +321,13 @@
               color = waterRipple[tableIndex]
             }
             // Icy shallows: in deep winter the rim of the lake freezes before the
-            // middle does, and that white edge is most of what says "frozen".
-            if (snow > 0.4 && d < 0.22) color = blendColor(color, SNOW_COLORS.light, snow * (0.22 - d) * 2.2)
+            // middle does, and that white edge is most of what says "frozen". The
+            // drift field breaks the contour up: a pure depth threshold printed a
+            // perfect white disc wherever the lake had a shoal.
+            if (snow > 0.4 && d < 0.24) {
+              const ice = clamp((0.24 - d) * 3.4 * (0.55 + 0.9 * snowDriftAt(tables, worldX, worldY)), 0, 0.88)
+              if (ice > 0.05) color = blendColor(color, snow > 0.8 ? SNOW_COLORS.light : SNOW_COLORS.mid, ice * snow)
+            }
             const cover = weed[index]
             // Submerged weed dies back under the ice, so the frozen water shows
             // through in winter instead of staying a green soup.
@@ -337,18 +351,22 @@
             if (damp > 0.3) color = blendColor(color, weedColors[1], Math.min(0.5, damp * 0.55))
             // Snow settles in patches, not per-pixel: the dither is sampled in
             // 2x2 blocks, which at 6x reads as banks of snow instead of static.
-            if (snow > 0.15) color = snowCovered(color, snow, 1, snowDriftAt(patch, worldX, worldY))
+            if (snow > 0.15) color = snowCovered(color, snow, 1, snowDriftAt(tables, worldX, worldY))
           } else if (surface === TERRAIN.STONE) {
             color = nudgeColor(PALETTE.stone[noise > 198 ? 2 : 1], noiseAt(noise))
-            if (snow > 0.15) color = snowCovered(color, snow, 0.8, snowDriftAt(patch, worldX, worldY))
+            if (snow > 0.15) color = snowCovered(color, snow, 0.8, snowDriftAt(tables, worldX, worldY))
           } else {
             const cover = grass[index]
-            const step = cover <= 0 ? 0 : Math.min(7, (cover * 8) | 0)
-            const sway = SWAY[((worldX * 5 + worldY * 11) + (world.tick >> 2)) & 15]
-            // Two scales of variation: a cell-level flicker (blades) and a slow
-            // field (patches of drier and lusher ground). Without the slow one
-            // the meadow is one flat green sheet.
-            let delta = sway + Math.round(patchXs[worldX] * patchY * 7)
+            const step = cover <= 0 ? 0 : Math.min(GRASS_STEPS - 1, (cover * GRASS_STEPS) | 0)
+            // Wind sway, phased by the cell hash instead of by (x*5 + y*11): the
+            // arithmetic version repeated every 16 cells and printed diagonal
+            // bands over the whole meadow.
+            const sway = SWAY[(noise + (tick >> 2)) & 15]
+            // Three scales of variation: a cell-level flicker (blades), a medium
+            // clump field, and the slow one for patches of drier and lusher
+            // ground. Without them the meadow is one flat green sheet.
+            const clump = (tables.driftU[worldX] * clumpRow) | 0
+            let delta = sway + clump + ((patchXs[worldX] * patchY * 7) | 0)
             if (noise < 48) delta += 3
             if (delta < -16) delta = -16
             else if (delta > 15) delta = 15
@@ -361,7 +379,7 @@
             else if (cover < 0.08 && (noise & 63) === 5) color = blendColor(color, PALETTE.dirt[0], 0.5)
             // Snow settles on open ground first: tall cover still pokes through,
             // which is the difference between "winter" and "white paint".
-            if (snow > 0.15) color = snowCovered(color, snow, 0.78 + cover * 0.18, snowDriftAt(patch, worldX, worldY))
+            if (snow > 0.15) color = snowCovered(color, snow, 0.78 + cover * 0.18, snowDriftAt(tables, worldX, worldY))
           }
           out[outBase + col] = color
         }
@@ -435,7 +453,7 @@
     function snowCovered(color, snow, exposure, flake) {
       // `flake` is the smooth drift field (0..1), with a little per-cell texture on
       // top: the drifts give the banks, the texture keeps them from looking flat.
-      const amount = snow * (0.5 + 0.62 * flake) - (exposure - 1) * 0.35
+      const amount = snow * (0.64 + 0.44 * flake) - (exposure - 1) * 0.35
       if (amount < 0.06) return color
       // Fixed-point blend instead of blendColor: this runs on every land pixel
       // of a winter frame, and the float version measured 13 ms of the 32 ms
@@ -462,8 +480,9 @@
      */
     function snowDriftAt(tables, x, y) {
       const broad = tables.driftX[x] * tables.driftY[y]
-      const narrow = tables.driftU[x] * tables.driftV[y]
-      return clamp(0.5 + 0.32 * broad + 0.22 * narrow, 0, 1)
+      const middle = tables.driftU[x] * tables.driftV[y]
+      const fine = tables.driftM[x] * tables.driftN[y]
+      return clamp(0.5 + 0.26 * broad + 0.16 * middle + 0.1 * fine, 0, 1)
     }
 
     /**
@@ -508,7 +527,7 @@
         const rowBase = y * viewWidth
         // On snow a neutral multiply reads as grey paint; keeping a little more
         // blue in the shadow is what makes it read as snow in shade.
-        const bq = cool <= 0 ? q : q + Math.round((256 - q) * cool * 0.32)
+        const bq = cool <= 0 ? q : q + Math.round((256 - q) * cool * 0.2)
         for (let x = fromX; x <= toX; x++) {
           const color = out[rowBase + x]
           out[rowBase + x] = (0xFF000000
@@ -822,7 +841,7 @@
           else if (surface === TERRAIN.STONE) color = PALETTE.stone[1]
           else if (surface === TERRAIN.SAND) color = PALETTE.sand[1]
           else if (surface === TERRAIN.DIRT) color = PALETTE.dirt[1]
-          else color = ramp[Math.min(7, (world.grass[index] * 8) | 0)]
+          else color = ramp[Math.min(GRASS_STEPS - 1, (world.grass[index] * GRASS_STEPS) | 0)]
           out[y * width + x] = color
         }
       }

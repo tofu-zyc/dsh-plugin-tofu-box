@@ -236,21 +236,25 @@
       return [mix(from[0], to[0], t), mix(from[1], to[1], t), mix(from[2], to[2], t)]
     }
 
+    /** Cover steps in the ground ramp. Sixteen reads smoother at 6x than eight. */
+    const GRASS_STEPS = 16
+
     /**
-     * Eight-step ground ramp between three anchors: bare, mixed, lush.
+     * Ground ramp between three anchors: bare, mixed, lush.
      *
      * Two scales is the whole trick behind a meadow that does not read as one
      * flat green sheet: the low half is dry/dormant ground, the high half is
-     * living cover. Season only swaps the anchors.
+     * living cover. Season only swaps the anchors; sixteen steps give the
+     * per-cell dither enough room to layer without banding.
      * @param {number[]} dry - bare-ground triple.
      * @param {number[]} lush - full-cover triple.
-     * @returns {number[]} eight packed colours, bare → lush.
+     * @returns {number[]} `GRASS_STEPS` packed colours, bare → lush.
      */
     function grassRampFrom(dry, lush) {
       const mid = [(dry[0] + lush[0]) / 2, (dry[1] + lush[1]) / 2, (dry[2] + lush[2]) / 2]
-      const ramp = new Array(8)
-      for (let step = 0; step < 8; step++) {
-        const t = step / 7
+      const ramp = new Array(GRASS_STEPS)
+      for (let step = 0; step < GRASS_STEPS; step++) {
+        const t = step / (GRASS_STEPS - 1)
         const from = t < 0.5 ? dry : mid
         const to = t < 0.5 ? mid : lush
         const local = t < 0.5 ? t * 2 : (t - 0.5) * 2

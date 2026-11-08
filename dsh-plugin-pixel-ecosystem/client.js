@@ -308,7 +308,7 @@ window.__ModuleLoader__.load({
           speed: [2.6, 4.3], vision: [5, 13], size: [0.75, 1.35],
           metabolism: [0.75, 1.3], lifespan: [140, 240], fertility: [70, 110],
         },
-        history: { maturityYears: 0.3, lifespanYears: [1, 3], littersPerYear: 4.5, litterMassShare: 0.15 },
+        history: { maturityYears: 0.3, lifespanYears: [1, 3], littersPerYear: 4.5, litterMassShare: 0.08 },
         balance: { litter: [4, 7], fleeSpeed: 1.9 },
       },
       deer: {
@@ -322,7 +322,7 @@ window.__ModuleLoader__.load({
           speed: [2.6, 3.8], vision: [8, 16], size: [1.4, 2.2],
           metabolism: [1.05, 1.5], lifespan: [1100, 1600], fertility: [600, 720],
         },
-        history: { maturityYears: 2, lifespanYears: [10, 15], littersPerYear: 1, litterMassShare: 0.067 },
+        history: { maturityYears: 2, lifespanYears: [10, 15], littersPerYear: 1, litterMassShare: 0.05 },
         balance: { litter: [1, 3], fleeSpeed: 1.85 },
       },
       fox: {
@@ -334,7 +334,7 @@ window.__ModuleLoader__.load({
           speed: [3.9, 5.7], vision: [9, 19], size: [0.85, 1.55],
           metabolism: [0.85, 1.35], lifespan: [300, 420], fertility: [600, 720],
         },
-        history: { maturityYears: 0.8, lifespanYears: [3, 10], littersPerYear: 1, litterMassShare: 0.11 },
+        history: { maturityYears: 0.8, lifespanYears: [3, 10], littersPerYear: 1, litterMassShare: 0.08 },
         balance: { litter: [3, 6], catchRadius: 1.15, huntSpeed: 1.5, scavengeShare: 0.6 },
       },
       wolf: {
@@ -347,7 +347,7 @@ window.__ModuleLoader__.load({
           speed: [4.3, 6.0], vision: [11, 22], size: [1.3, 2.1],
           metabolism: [1.25, 1.9], lifespan: [700, 900], fertility: [600, 720],
         },
-        history: { maturityYears: 2.5, lifespanYears: [6, 8], littersPerYear: 1, litterMassShare: 0.044 },
+        history: { maturityYears: 2.5, lifespanYears: [6, 8], littersPerYear: 1, litterMassShare: 0.035 },
         balance: { litter: [3, 5], catchRadius: 1.3, huntSpeed: 1.45, scavengeShare: 0.55 },
       },
       crow: {
@@ -359,7 +359,7 @@ window.__ModuleLoader__.load({
           speed: [5.2, 7.6], vision: [14, 26], size: [0.8, 1.2],
           metabolism: [0.85, 1.3], lifespan: [500, 700], fertility: [360, 600],
         },
-        history: { maturityYears: 1, lifespanYears: [4, 8], littersPerYear: 1, litterMassShare: 0.2 },
+        history: { maturityYears: 1, lifespanYears: [4, 8], littersPerYear: 1, litterMassShare: 0.12 },
         balance: { litter: [3, 5], scavengeRadius: 1.7, corpseShare: 0.8 },
       },
       fish: {
@@ -448,7 +448,7 @@ window.__ModuleLoader__.load({
           speed: [1.4, 2.6], vision: [3, 7], size: [0.55, 0.9],
           metabolism: [0.6, 1.05], lifespan: [150, 260], fertility: [500, 700],
         },
-        history: { maturityYears: 1, lifespanYears: [3, 5], littersPerYear: 1, litterMassShare: 0.04 },
+        history: { maturityYears: 1, lifespanYears: [3, 5], littersPerYear: 1, litterMassShare: 0.03 },
         balance: { litter: [8, 14], fleeSpeed: 2.15 },
       },
     }
@@ -519,11 +519,16 @@ window.__ModuleLoader__.load({
         const birthMass = litterMass / litterMax
         const birthReserve = reserveCapacity(species, birthMass) * BIRTH_RESERVE_SHARE
         balance.birthMass = birthMass
-        balance.breedCost = (litterMass * BIO.MEAT_ENERGY + litterMax * birthReserve)
+        /** What one whole litter costs the parent, kJ: tissue plus the kits' reserves. */
+        balance.litterCost = (litterMass * BIO.MEAT_ENERGY + litterMax * birthReserve)
           / BIO.REPRODUCTION_EFFICIENCY
         // A species may only breed when its reserve covers the whole litter, so
         // the ledger never has to invent the difference.
-        balance.breedEnergy = Math.min(capacity * 0.97, balance.breedCost * 1.02)
+        balance.breedEnergy = Math.min(capacity * 0.97, balance.litterCost * 1.02)
+        // The litter is now charged per newborn inside spawnEntity(), out of the
+        // parent's real reserve. This legacy field has to stay ZERO or the parent
+        // would be billed twice for the same litter.
+        balance.breedCost = 0
         // The reserve is spent inside metabolise() and nowhere else. These two
         // keys stay because other layers read them; they must stay zero or the
         // animal would be charged twice for standing still.
@@ -729,8 +734,12 @@ window.__ModuleLoader__.load({
       return (x, y) => {
         const fx = x / cellSize
         const fy = y / cellSize
-        const x0 = fx | 0
-        const y0 = fy | 0
+        // Indices are clamped, not trusted: a caller may sample outside the
+        // lattice (an offset coordinate, a brush near the edge) and an undefined
+        // lattice read makes a whole field NaN silently. That is exactly the bug
+        // that turned 58 water cells into NaN and poisoned the energy book.
+        const x0 = Math.min(cols - 2, Math.max(0, fx | 0))
+        const y0 = Math.min(rows - 2, Math.max(0, fy | 0))
         const tx = smooth(fx - x0)
         const ty = smooth(fy - y0)
         const i0 = y0 * cols + x0
@@ -1006,7 +1015,7 @@ window.__ModuleLoader__.load({
         } else if (terrain === TERRAIN.WATER) {
           const x = i % world.width
           const y = (i / world.width) | 0
-          const rank = 0.3 + 0.5 * patch(x + 17, y + 29)
+          const rank = 0.3 + 0.5 * patch((x + 17) % world.width, (y + 29) % world.height)
           const soil = 0.4 + 0.6 * world.waterFertility[i]
           world.weed[i] = clamp(PRODUCERS.weed.bmax * rank * soil, 0, PRODUCERS.weed.bmax)
           world.detritus[i] = world.weed[i] * 0.25
@@ -1322,13 +1331,25 @@ window.__ModuleLoader__.load({
       // its structure and the derived views (energy accessor, hunger channel).
       const body = installLedger(entity)
       body.E = clamp(body.Emax * (options?.reserve ?? (newborn ? BIRTH_RESERVE_SHARE : SPAWN_RESERVE_SHARE)), 0, body.Emax)
-      // A newborn (or a released animal) is energy ENTERING the system. The book
-      // records it under its own name instead of pretending gestation is free.
+      // Where a new body's energy came from decides how it is booked.
+      //
+      //  - A NEWBORN is a transfer FROM ITS PARENT: the parent pays the whole
+      //    cost out of its own reserve and the difference (conversion efficiency
+      //    below 1) leaves as heat, which is real respiration. Nothing appears
+      //    out of nowhere, so the energy panel stops being flattened by a fake
+      //    "reproduction" source twice the size of everything else.
+      //  - A PARENTLESS spawn (starting stock, immigration, a player release) is
+      //    genuinely new energy, and the book names it rather than hiding it.
       if (world.budget !== undefined) {
-        // The structure is energy entering the world with a new body. The
-        // reserve that comes with it is counted by the ledger accessor itself,
-        // so it must NOT be added here as well or it would be counted twice.
-        world.budget.reproduction += body.V * BIO.MEAT_ENERGY
+        const newbornEnergy = body.V * BIO.MEAT_ENERGY + body.E
+        const parent = options?.parent
+        if (parent !== undefined && parent !== null && parent.body !== undefined && parent.body.dead !== true) {
+          const paid = payFromReserve(parent, newbornEnergy / BIO.REPRODUCTION_EFFICIENCY)
+          // Positive when the parent covered the litter: the gap is the heat.
+          world.budget.animalRespired += paid - newbornEnergy
+        } else {
+          world.budget.reproduction += newbornEnergy
+        }
       }
       world.entities.push(entity)
       world.population[speciesId] = (world.population[speciesId] ?? 0) + 1
@@ -3121,6 +3142,29 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Take energy out of a reserve to pay for something the body made (a litter).
+     *
+     * This is an internal transfer, not a spend: the caller books the conversion
+     * loss itself, so the ledger is muted while the reserve moves and the energy
+     * does not get counted twice.
+     * @param {object} entity - the payer.
+     * @param {number} kilojoules - what it owes, kJ.
+     * @returns {number} what it could actually pay, kJ.
+     */
+    function payFromReserve(entity, kilojoules) {
+      const body = bodyOf(entity)
+      if (!(kilojoules > 0) || body.dead === true) return 0
+      const paid = Math.min(body.E, kilojoules)
+      ledgerWriteDepth += 1
+      try {
+        body.E -= paid
+      } finally {
+        ledgerWriteDepth -= 1
+      }
+      return paid
+    }
+
+    /**
      * Wound an animal; the health cost is paid over the next days, not at once.
      * @param {object} entity - the animal.
      * @param {number} days - how long the wound keeps hurting.
@@ -4472,20 +4516,11 @@ window.__ModuleLoader__.load({
       }
       // Metabolism is 09b's ledger, called just before this function from
       // stepEntities(); behaviour must never write body.E or charge a second
-      // drain, or an animal would pay for existing twice. A body-less entity
-      // (an old save opened by a build without the ledger) still gets the flat
-      // fallback drain so it cannot live forever.
+      // drain, or an animal would pay for existing twice. Every animal has a
+      // ledger (spawnEntity installs one), so there is no second death path:
+      // starvation, cold and old age all end in metabolise() -> dieOf().
       const body = entity.body
       const hasBody = body !== undefined && Number.isFinite(body.E)
-      if (!hasBody) {
-        entity.energy -= (balance.drain * genes.metabolism + (entity.fleeing ? (balance.fleeDrain ?? 0) : 0)) * dt
-        entity.energy = Math.min(entity.energy, balance.maxEnergy)
-        const reserve = entity.energy
-        if (reserve <= 0 || entity.age > genes.lifespan) {
-          killEntity(world, entity, reserve <= 0 ? 'starved' : 'old')
-          return false
-        }
-      }
       const territory = species.territory
       const ownGrid = species.role === 'hunter' ? grids.hunter : grids.prey
       const crowded = territory !== undefined && countNearby(ownGrid, entity.x, entity.y, territory.radius,
@@ -5660,6 +5695,24 @@ window.__ModuleLoader__.load({
         intent: entity.intent ?? null,
         intentScore: entity.intentScore ?? null,
         genes: { ...entity.genes },
+        // Why each behaviour field is or is not here (docs/20 §5):
+        //
+        //  state   — the current bout {id, since, until, min, phase, why, score,
+        //            x, y}. CANNOT be re-derived: without it a loaded animal
+        //            starts a fresh bout from wherever it stands and the panel
+        //            loses "why did it do that". Saved.
+        //  plan    — the committed step list for that bout. Saved, same reason.
+        //  belief  — remembered food/water/home/threat plus the cache list, every
+        //            entry time-stamped. Saved: memory is the animal's history.
+        //  drives  — a DERIVED cache, not missing: updateDrives() rebuilds all
+        //            eight channels from body.E/Emax and the need channels on the
+        //            first tick after a load (hunger is literally 1 - E/Emax).
+        //            It is still written here so the inspector has numbers on the
+        //            very first frame instead of a row of blanks.
+        //  needs   — thirst / social / safety ARE stateful (nothing derives them
+        //            from the body), so those are saved; hunger inside it is a
+        //            getter over the reserve and is therefore ignored on restore.
+        stateEndedAt: Number.isFinite(entity.stateEndedAt) ? entity.stateEndedAt : null,
         needs: entity.needs === undefined ? null : {
           hunger: entity.needs.hunger,
           thirst: entity.needs.thirst,
@@ -5855,6 +5908,7 @@ window.__ModuleLoader__.load({
         }
         if (saved.drives !== null && typeof saved.drives === 'object') entity.drives = { ...saved.drives }
         if (saved.state !== null && typeof saved.state === 'object') entity.state = saved.state
+        if (Number.isFinite(saved.stateEndedAt)) entity.stateEndedAt = saved.stateEndedAt
         if (saved.plan !== null && typeof saved.plan === 'object') entity.plan = saved.plan
         if (saved.belief !== null && typeof saved.belief === 'object') entity.belief = saved.belief
         world.entities.push(entity)
@@ -6213,21 +6267,25 @@ window.__ModuleLoader__.load({
       return [mix(from[0], to[0], t), mix(from[1], to[1], t), mix(from[2], to[2], t)]
     }
 
+    /** Cover steps in the ground ramp. Sixteen reads smoother at 6x than eight. */
+    const GRASS_STEPS = 16
+
     /**
-     * Eight-step ground ramp between three anchors: bare, mixed, lush.
+     * Ground ramp between three anchors: bare, mixed, lush.
      *
      * Two scales is the whole trick behind a meadow that does not read as one
      * flat green sheet: the low half is dry/dormant ground, the high half is
-     * living cover. Season only swaps the anchors.
+     * living cover. Season only swaps the anchors; sixteen steps give the
+     * per-cell dither enough room to layer without banding.
      * @param {number[]} dry - bare-ground triple.
      * @param {number[]} lush - full-cover triple.
-     * @returns {number[]} eight packed colours, bare → lush.
+     * @returns {number[]} `GRASS_STEPS` packed colours, bare → lush.
      */
     function grassRampFrom(dry, lush) {
       const mid = [(dry[0] + lush[0]) / 2, (dry[1] + lush[1]) / 2, (dry[2] + lush[2]) / 2]
-      const ramp = new Array(8)
-      for (let step = 0; step < 8; step++) {
-        const t = step / 7
+      const ramp = new Array(GRASS_STEPS)
+      for (let step = 0; step < GRASS_STEPS; step++) {
+        const t = step / (GRASS_STEPS - 1)
         const from = t < 0.5 ? dry : mid
         const to = t < 0.5 ? mid : lush
         const local = t < 0.5 ? t * 2 : (t - 0.5) * 2
@@ -7159,12 +7217,16 @@ window.__ModuleLoader__.load({
         const dy = (py - cy) / 2.1
         if (dx * dx + dy * dy <= 1) {
           if (x >= 5 && y <= cy - 1) return 0
-          if (snowCap > 0.4 && py < cy - 0.4) return SNOW_COLORS.mid
+          // Under ice the pad is pale all over with a shaded rim, so it reads as
+          // a frozen pad rather than as a dark bar with a white stripe.
+          if (snowCap > 0.4) return py > cy + 0.7 || x < 1 ? SNOW_COLORS.shade : SNOW_COLORS.mid
+          // A pad has to read against the water it floats on: weed-on-weed was
+          // invisible, which left the flower floating in mid air as a pink square.
           if (py < cy - 0.6) return PALETTE.weedStalk
-          if (py > cy + 0.8) return leaf.dark
-          return weed[1]
+          if (py > cy + 0.8 || x < 1) return leaf.outline
+          return ((x + y) & 3) === 0 ? weed[1] : leaf.mid
         }
-        if (variant === 1 && snowCap < 0.2 && y <= 2 && Math.abs(px - width / 2) < 1.6) {
+        if (variant === 1 && snowCap < 0.2 && y <= 1 && Math.abs(px - width / 2) < 1.1) {
           return y === 0 ? PALETTE.flowers[1] : PALETTE.flowers[3]
         }
         return 0
@@ -7187,8 +7249,8 @@ window.__ModuleLoader__.load({
         }
         if (stalk(3, -1.6, 10) || stalk(5.5, 0.4, 9) || stalk(7.2, 1.8, 7)) {
           // A reed is olive, not teal: the teal read as a weed stalk in the water.
-          // The tips stay clear of the snow so the clump still pokes out of it.
-          if (snowCap > 0.5 && y > 3 && y < 8) return SNOW_COLORS.mid
+          // Snow is not painted on a stalk: a pale band mid-stalk turned the whole
+          // reed bed into a row of fences. Stalks poke out of the snow instead.
           return y < 2 ? PALETTE.trunkDark : (y < 5 ? leaf.light : leaf.mid)
         }
         if (y >= height - 2 && Math.abs(x + 0.5 - 5) < 2.4) return leaf.dark
@@ -7862,7 +7924,7 @@ window.__ModuleLoader__.load({
      * every one of 655k cells; a lookup is roughly a quarter of the cost and the
      * output is identical.
      */
-    const GRASS_LUT = new Int32Array(8 * 32)
+    const GRASS_LUT = new Int32Array(GRASS_STEPS * 32)
     const grassLutState = { key: -1 }
 
     /**
@@ -7872,7 +7934,7 @@ window.__ModuleLoader__.load({
      */
     function grassLutFor(look) {
       if (grassLutState.key === look.key) return GRASS_LUT
-      for (let step = 0; step < 8; step++) {
+      for (let step = 0; step < GRASS_STEPS; step++) {
         for (let delta = 0; delta < 32; delta++) {
           GRASS_LUT[(step << 5) | delta] = nudgeColor(look.ramp[step], delta - 16)
         }
@@ -7882,7 +7944,10 @@ window.__ModuleLoader__.load({
     }
 
     /** Slow sine fields, cached per world size: the meadow's patches and snow drifts. */
-    const patchState = { width: 0, height: 0, xs: null, ys: null, driftX: null, driftY: null, driftU: null, driftV: null }
+    const patchState = {
+      width: 0, height: 0, xs: null, ys: null,
+      driftX: null, driftY: null, driftU: null, driftV: null, driftM: null, driftN: null,
+    }
 
     /**
      * Build one separable sine table pair.
@@ -7912,12 +7977,15 @@ window.__ModuleLoader__.load({
       if (patchState.width === width && patchState.height === height) return patchState
       patchState.xs = sineTable(width, 0.055, 0.7)
       patchState.ys = sineTable(height, 0.043, -1.1)
-      // Drift field: a 33-cell undulation crossed with a 55-cell one, which has no
-      // visible tiling at 6x and still varies cell to cell across a hillside.
+      // Drift field: three crossed undulations at 33, 18 and 11 cells. One pair
+      // alone prints round polka dots; stacking scales gives banks that read as
+      // depth instead of spots.
       patchState.driftX = sineTable(width, 0.19, 0.3)
       patchState.driftY = sineTable(height, 0.23, -0.7)
-      patchState.driftU = sineTable(width, 0.07, 1.7)
-      patchState.driftV = sineTable(height, 0.09, 0.2)
+      patchState.driftU = sineTable(width, 0.35, 1.7)
+      patchState.driftV = sineTable(height, 0.29, 0.2)
+      patchState.driftM = sineTable(width, 0.11, -2.1)
+      patchState.driftN = sineTable(height, 0.13, 0.9)
       patchState.width = width
       patchState.height = height
       return patchState
@@ -8042,9 +8110,10 @@ window.__ModuleLoader__.load({
       const weed = world.weed
       const depth = world.depth
       const time = world.tick * 0.05
-      const patch = patchTablesFor(world.width, world.height)
-      const patchXs = patch.xs
-      const patchYs = patch.ys
+      const tables = patchTablesFor(world.width, world.height)
+      const patchXs = tables.xs
+      const patchYs = tables.ys
+      const tick = world.tick
       const ramp = grassLutFor(look)
       const water = waterTablesFor(look)
       const waterBase = water.base
@@ -8063,6 +8132,8 @@ window.__ModuleLoader__.load({
         const outBase = row * view.width
         const termBase = row * 6
         const patchY = patchYs[worldY]
+        // Hoisted out of the column loop: the clump field is separable too.
+        const clumpRow = tables.driftV[worldY] * 3
         for (let col = 0; col < view.width; col++) {
           const worldX = view.x + col
           const index = rowBase + worldX
@@ -8091,8 +8162,13 @@ window.__ModuleLoader__.load({
               color = waterRipple[tableIndex]
             }
             // Icy shallows: in deep winter the rim of the lake freezes before the
-            // middle does, and that white edge is most of what says "frozen".
-            if (snow > 0.4 && d < 0.22) color = blendColor(color, SNOW_COLORS.light, snow * (0.22 - d) * 2.2)
+            // middle does, and that white edge is most of what says "frozen". The
+            // drift field breaks the contour up: a pure depth threshold printed a
+            // perfect white disc wherever the lake had a shoal.
+            if (snow > 0.4 && d < 0.24) {
+              const ice = clamp((0.24 - d) * 3.4 * (0.55 + 0.9 * snowDriftAt(tables, worldX, worldY)), 0, 0.88)
+              if (ice > 0.05) color = blendColor(color, snow > 0.8 ? SNOW_COLORS.light : SNOW_COLORS.mid, ice * snow)
+            }
             const cover = weed[index]
             // Submerged weed dies back under the ice, so the frozen water shows
             // through in winter instead of staying a green soup.
@@ -8116,18 +8192,22 @@ window.__ModuleLoader__.load({
             if (damp > 0.3) color = blendColor(color, weedColors[1], Math.min(0.5, damp * 0.55))
             // Snow settles in patches, not per-pixel: the dither is sampled in
             // 2x2 blocks, which at 6x reads as banks of snow instead of static.
-            if (snow > 0.15) color = snowCovered(color, snow, 1, snowDriftAt(patch, worldX, worldY))
+            if (snow > 0.15) color = snowCovered(color, snow, 1, snowDriftAt(tables, worldX, worldY))
           } else if (surface === TERRAIN.STONE) {
             color = nudgeColor(PALETTE.stone[noise > 198 ? 2 : 1], noiseAt(noise))
-            if (snow > 0.15) color = snowCovered(color, snow, 0.8, snowDriftAt(patch, worldX, worldY))
+            if (snow > 0.15) color = snowCovered(color, snow, 0.8, snowDriftAt(tables, worldX, worldY))
           } else {
             const cover = grass[index]
-            const step = cover <= 0 ? 0 : Math.min(7, (cover * 8) | 0)
-            const sway = SWAY[((worldX * 5 + worldY * 11) + (world.tick >> 2)) & 15]
-            // Two scales of variation: a cell-level flicker (blades) and a slow
-            // field (patches of drier and lusher ground). Without the slow one
-            // the meadow is one flat green sheet.
-            let delta = sway + Math.round(patchXs[worldX] * patchY * 7)
+            const step = cover <= 0 ? 0 : Math.min(GRASS_STEPS - 1, (cover * GRASS_STEPS) | 0)
+            // Wind sway, phased by the cell hash instead of by (x*5 + y*11): the
+            // arithmetic version repeated every 16 cells and printed diagonal
+            // bands over the whole meadow.
+            const sway = SWAY[(noise + (tick >> 2)) & 15]
+            // Three scales of variation: a cell-level flicker (blades), a medium
+            // clump field, and the slow one for patches of drier and lusher
+            // ground. Without them the meadow is one flat green sheet.
+            const clump = (tables.driftU[worldX] * clumpRow) | 0
+            let delta = sway + clump + ((patchXs[worldX] * patchY * 7) | 0)
             if (noise < 48) delta += 3
             if (delta < -16) delta = -16
             else if (delta > 15) delta = 15
@@ -8140,7 +8220,7 @@ window.__ModuleLoader__.load({
             else if (cover < 0.08 && (noise & 63) === 5) color = blendColor(color, PALETTE.dirt[0], 0.5)
             // Snow settles on open ground first: tall cover still pokes through,
             // which is the difference between "winter" and "white paint".
-            if (snow > 0.15) color = snowCovered(color, snow, 0.78 + cover * 0.18, snowDriftAt(patch, worldX, worldY))
+            if (snow > 0.15) color = snowCovered(color, snow, 0.78 + cover * 0.18, snowDriftAt(tables, worldX, worldY))
           }
           out[outBase + col] = color
         }
@@ -8214,7 +8294,7 @@ window.__ModuleLoader__.load({
     function snowCovered(color, snow, exposure, flake) {
       // `flake` is the smooth drift field (0..1), with a little per-cell texture on
       // top: the drifts give the banks, the texture keeps them from looking flat.
-      const amount = snow * (0.5 + 0.62 * flake) - (exposure - 1) * 0.35
+      const amount = snow * (0.64 + 0.44 * flake) - (exposure - 1) * 0.35
       if (amount < 0.06) return color
       // Fixed-point blend instead of blendColor: this runs on every land pixel
       // of a winter frame, and the float version measured 13 ms of the 32 ms
@@ -8241,8 +8321,9 @@ window.__ModuleLoader__.load({
      */
     function snowDriftAt(tables, x, y) {
       const broad = tables.driftX[x] * tables.driftY[y]
-      const narrow = tables.driftU[x] * tables.driftV[y]
-      return clamp(0.5 + 0.32 * broad + 0.22 * narrow, 0, 1)
+      const middle = tables.driftU[x] * tables.driftV[y]
+      const fine = tables.driftM[x] * tables.driftN[y]
+      return clamp(0.5 + 0.26 * broad + 0.16 * middle + 0.1 * fine, 0, 1)
     }
 
     /**
@@ -8287,7 +8368,7 @@ window.__ModuleLoader__.load({
         const rowBase = y * viewWidth
         // On snow a neutral multiply reads as grey paint; keeping a little more
         // blue in the shadow is what makes it read as snow in shade.
-        const bq = cool <= 0 ? q : q + Math.round((256 - q) * cool * 0.32)
+        const bq = cool <= 0 ? q : q + Math.round((256 - q) * cool * 0.2)
         for (let x = fromX; x <= toX; x++) {
           const color = out[rowBase + x]
           out[rowBase + x] = (0xFF000000
@@ -8601,7 +8682,7 @@ window.__ModuleLoader__.load({
           else if (surface === TERRAIN.STONE) color = PALETTE.stone[1]
           else if (surface === TERRAIN.SAND) color = PALETTE.sand[1]
           else if (surface === TERRAIN.DIRT) color = PALETTE.dirt[1]
-          else color = ramp[Math.min(7, (world.grass[index] * 8) | 0)]
+          else color = ramp[Math.min(GRASS_STEPS - 1, (world.grass[index] * GRASS_STEPS) | 0)]
           out[y * width + x] = color
         }
       }
@@ -8629,7 +8710,6 @@ window.__ModuleLoader__.load({
     function paintWorld(world, pixels) {
       return paintView(world, { x: 0, y: 0, width: world.width, height: world.height }, pixels, 1, null)
     }
-
     // ---------------------------------------------------------------------
     // Store: owns the world, the viewport and the simulation loop
     // ---------------------------------------------------------------------
@@ -9032,16 +9112,155 @@ window.__ModuleLoader__.load({
       let onboardingFlag = null
       /** One-shot message about the save file: legacy format or a failed read. */
       let notice = null
+      /** Bumped whenever the world object is replaced, to cancel stale work. */
+      let worldToken = 0
+      /** The in-flight first load, so every caller shares one. */
+      let loadPromise = null
+      /** True while a compressed save is being written. */
+      let savePending = false
+      /** What the panel says about the autosave: size, when, and how it went. */
+      let saveState = { size: 0, at: 0, pending: false, failed: false, stored: false }
 
-      /** Load the saved world, or create a fresh one. */
-      function ensureWorld() {
-        if (world !== null) return world
-        const stored = readStored()
-        notice = stored.notice
-        world = stored.world ?? createWorld()
+      /**
+       * Install a world object and point the renderer at it.
+       *
+       * The view request may have arrived before the world did (the canvas is
+       * attached during the first render), so it is replayed here: now that the
+       * real world size is known, setView() clamps it and sizes the buffers.
+       * @param {object} next - the world to adopt.
+       * @returns {object} the same world.
+       */
+      function adoptWorld(next) {
+        world = next
+        worldToken += 1
         world.hydrologyDirty = false
         minimap = null
+        const request = { x: view.x, y: view.y, width: view.width, height: view.height, scale: view.scale }
+        view = { x: 0, y: 0, width: 0, height: 0, scale: view.scale }
+        // A first render has no view request yet; attach() picks the default.
+        if (request.width > 0 && request.height > 0) setView(request)
         return world
+      }
+
+      /**
+       * Unpack the first save and adopt it.
+       *
+       * Only this path is asynchronous: a save is gzipped, and gzip needs
+       * unpackWorld(). The store therefore keeps `world === null` and `loading`
+       * true for the few dozen milliseconds it takes, and the panel says so
+       * instead of showing an empty world.
+       * @param {string} raw - the stored payload.
+       * @returns {Promise<object|null>} the world, once there is one.
+       */
+      function startLoad(raw) {
+        if (loadPromise !== null) return loadPromise
+        const token = worldToken
+        loadPromise = decodeStored(raw)
+          .then((stored) => {
+            if (worldToken !== token) return world
+            notice = stored.notice
+            const adopted = adoptWorld(stored.world === null ? createWorld() : stored.world)
+            if (stored.world !== null) {
+              // A resumed world already has a save in storage; show its size in the
+              // header straight away instead of waiting for the next autosave.
+              saveState = { size: raw.length, at: adopted.time, pending: false, failed: false, stored: true }
+            }
+            return adopted
+          })
+          .catch(() => {
+            // A world that cannot be loaded must never leave the panel empty.
+            return worldToken === token ? adoptWorld(createWorld()) : world
+          })
+          .then(() => {
+            publish()
+            return world
+          })
+        return loadPromise
+      }
+
+      /**
+       * The world for this store, creating one when there is nothing to load.
+       *
+       * Synchronous by contract: the tests, the scene lab and the panel's first
+       * render all treat this as "give me the world now". That is possible in
+       * every case except resuming a compressed save, which is the one path that
+       * returns null and settles through whenReady().
+       * @returns {object|null} the world, or null while a save is being unpacked.
+       */
+      function ensureWorld() {
+        if (world !== null) return world
+        const stored = readRaw()
+        if (stored.raw === null || stored.raw === '') {
+          // Nothing to decompress. An old build's world may still sit in the v1
+          // key: report it, leave it exactly where it is, and start fresh.
+          if (stored.legacy !== null && stored.legacy !== '') notice = { kind: 'legacy', detail: null }
+          return adoptWorld(createWorld())
+        }
+        startLoad(stored.raw)
+        return null
+      }
+
+      /**
+       * Wait until a world exists. The formal entry point for the async path.
+       * @returns {Promise<object|null>} the world.
+       */
+      function whenReady() {
+        if (world !== null) return Promise.resolve(world)
+        ensureWorld()
+        return loadPromise === null ? Promise.resolve(world) : loadPromise.then(() => world)
+      }
+
+      /**
+       * Read both storage keys without interpreting them. Synchronous on purpose:
+       * deciding whether there is anything to decompress must not need a promise.
+       * @returns {{raw: string|null, legacy: string|null}} stored payloads.
+       */
+      function readRaw() {
+        const result = { raw: null, legacy: null }
+        if (storage === null) return result
+        try {
+          result.raw = storage.getItem(STORAGE_KEY)
+        } catch {
+          result.raw = null
+        }
+        if (result.raw === null || result.raw === undefined || result.raw === '') {
+          try {
+            result.legacy = storage.getItem(LEGACY_STORAGE_KEY)
+          } catch {
+            result.legacy = null
+          }
+        }
+        return result
+      }
+
+      /**
+       * Unpack and validate one stored payload, turning a failure into a notice.
+       *
+       * 0.2.x swallowed every load failure, so a corrupted or version-mismatched
+       * save looked exactly like a first run. G5 (failure must be explainable)
+       * needs the opposite: the reason travels with the result and the panel
+       * shows it instead of quietly starting over.
+       * @param {string} raw - the stored payload.
+       * @returns {Promise<{world: object|null, notice: object|null}>} world and notice.
+       */
+      async function decodeStored(raw) {
+        try {
+          // Both formats arrive here: a gzipped payload from packWorld, and the
+          // plain JSON an older autosave or the teardown path may have written.
+          const payload = await unpackWorld(raw)
+          return { world: deserializeWorld(payload), notice: null }
+        } catch (error) {
+          const detail = error !== null && error !== undefined && error.message !== undefined
+            ? String(error.message)
+            : String(error)
+          // saveError() tags the reason: unsupported_version | corrupt |
+          // no_decompressor. The panel turns the code into a sentence instead of
+          // showing one vague "load failed" to everyone.
+          const code = error !== null && error !== undefined && typeof error.code === 'string'
+            ? error.code
+            : 'corrupt'
+          return { world: null, notice: { kind: 'load', code, detail } }
+        }
       }
 
       /**
@@ -9051,55 +9270,94 @@ window.__ModuleLoader__.load({
        * save looked exactly like a first run. G5 (failure must be explainable)
        * needs the opposite: the reason travels with the result and the panel
        * shows it instead of quietly starting over.
-       * @returns {{world: object|null, notice: object|null}} world and notice.
+       * @returns {Promise<{world: object|null, notice: object|null}>} world and notice.
        */
-      function readStored() {
-        const result = { world: null, notice: null }
-        if (storage === null) return result
-        let raw = null
-        try {
-          raw = storage.getItem(STORAGE_KEY)
-        } catch {
-          return result
-        }
-        if (raw === null || raw === undefined || raw === '') {
-          // Nothing to resume. An old build's world may still sit in the v1 key:
-          // report it and leave it exactly where it is (this build never writes
-          // it), rather than letting the first autosave look like a clean slate.
-          let legacy = null
-          try {
-            legacy = storage.getItem(LEGACY_STORAGE_KEY)
-          } catch {
-            legacy = null
+      async function readStored() {
+        const stored = readRaw()
+        if (stored.raw === null || stored.raw === '') {
+          return {
+            world: null,
+            notice: stored.legacy === null || stored.legacy === '' ? null : { kind: 'legacy', detail: null },
           }
-          if (legacy !== null && legacy !== undefined && legacy !== '') {
-            result.notice = { kind: 'legacy', detail: null }
-          }
-          return result
         }
-        try {
-          result.world = deserializeWorld(JSON.parse(raw))
-        } catch (error) {
-          const detail = error !== null && error !== undefined && error.message !== undefined
-            ? String(error.message)
-            : String(error)
-          result.notice = { kind: 'load', detail }
-        }
-        return result
+        return decodeStored(stored.raw)
       }
 
-      /** Read and parse the saved world, ignoring anything unusable. */
-      function load() {
-        return readStored().world
-      }
-
-      /** Persist the world; a full or missing storage is not fatal. */
+      /**
+       * Persist the world, compressed, without blocking a frame.
+       *
+       * packWorld() gzips several megabytes of JSON, which is tens of
+       * milliseconds: enough to drop frames if it ran on the animation loop. It
+       * therefore runs off a microtask, and a re-entrancy guard stops a slow save
+       * from stacking up when the player scrubs speed.
+       * @returns {Promise<boolean>} true when the world reached storage.
+       */
       function save() {
-        if (storage === null || world === null) return
+        if (storage === null || world === null) return Promise.resolve(false)
+        if (savePending) return Promise.resolve(false)
+        const token = worldToken
+        const target = world
+        const savedAt = target.time
+        savePending = true
+        saveState = { size: saveState.size, at: savedAt, pending: true, failed: false, stored: saveState.stored }
+        markDirty()
+        return Promise.resolve()
+          .then(() => (typeof packWorld === 'function'
+            ? packWorld(target)
+            : { text: JSON.stringify(serializeWorld(target)), bytes: 0 }))
+          .then((packed) => {
+            // A world that was replaced while packing must not be written over
+            // the new one.
+            if (worldToken !== token) return false
+            try {
+              storage.setItem(STORAGE_KEY, packed.text)
+              const size = Number.isFinite(packed.bytes) && packed.bytes > 0 ? packed.bytes : packed.text.length
+              saveState = { size, at: savedAt, pending: false, failed: false, stored: true }
+              return true
+            } catch {
+              // Quota or disabled storage: keep playing, and let the panel say so.
+              saveState = { size: 0, at: savedAt, pending: false, failed: true, stored: saveState.stored }
+              return false
+            }
+          })
+          .catch(() => {
+            saveState = { size: 0, at: savedAt, pending: false, failed: true, stored: saveState.stored }
+            return false
+          })
+          .finally(() => {
+            savePending = false
+            markDirty()
+          })
+      }
+
+      /**
+       * Save right now, compressed. Awaitable, so a caller that is about to close
+       * or hide the panel can make sure the write landed.
+       * @returns {Promise<boolean>} true when the world reached storage.
+       */
+      function saveNow() {
+        return save()
+      }
+
+      /**
+       * Last-resort synchronous save, for page teardown only.
+       *
+       * A gzip cannot finish once the page is closing, so this writes the
+       * uncompressed (coarsely packed) payload instead: roughly half the raw JSON
+       * and over the 5 MB quota on a full-size world, which is why it is the
+       * fallback and not the normal path. unpackWorld accepts both forms and the
+       * header records the packing, so a save written here still loads.
+       * @returns {boolean} true when the payload reached storage.
+       */
+      function saveSync() {
+        if (storage === null || world === null) return false
         try {
-          storage.setItem(STORAGE_KEY, JSON.stringify(serializeWorld(world)))
+          const text = JSON.stringify(serializeWorld(world, { detail: 'low' }))
+          storage.setItem(STORAGE_KEY, text)
+          saveState = { size: text.length, at: world.time, pending: false, failed: false, stored: true }
+          return true
         } catch {
-          // Quota or disabled storage: keep running unsaved.
+          return false
         }
       }
 
@@ -9740,6 +9998,9 @@ window.__ModuleLoader__.load({
           // first render, before the mount effect has created the world.
           return {
             ready: false,
+            // ready === false only ever means "unpacking a save right now"; a
+            // store with nothing to load has a world before this runs.
+            loading: true,
             paused,
             speed,
             time: 0,
@@ -9759,6 +10020,7 @@ window.__ModuleLoader__.load({
             onboarding: onboardingSeen(),
             notice,
             causeSource: { exact: 0, inferred: 0 },
+            save: { size: saveState.size, at: saveState.at, pending: saveState.pending, failed: saveState.failed, stored: saveState.stored },
           }
         }
         const stats = sampleStats(world)
@@ -9770,6 +10032,7 @@ window.__ModuleLoader__.load({
         for (const id of SPECIES_IDS) population += stats.counts[id] ?? 0
         return {
           ready: true,
+          loading: false,
           paused,
           speed,
           time: world.time,
@@ -9789,6 +10052,7 @@ window.__ModuleLoader__.load({
           onboarding: onboardingSeen(),
           notice,
           causeSource: { exact: causeSource.exact, inferred: causeSource.inferred },
+          save: { size: saveState.size, at: saveState.at, pending: saveState.pending, failed: saveState.failed, stored: saveState.stored },
         }
       }
 
@@ -9906,15 +10170,25 @@ window.__ModuleLoader__.load({
        * @param {object} next - `{ x, y, width, height }` in cells.
        */
       function setView(next) {
-        if (world === null) ensureWorld()
+        const scale = typeof next.scale === 'number' && next.scale > 0 ? next.scale : (view.scale ?? 1)
+        if (world === null) {
+          // The world is still being unpacked. Remember the request; the load
+          // continuation replays it once the real size is known.
+          ensureWorld()
+          view = {
+            x: Math.max(0, next.x | 0),
+            y: Math.max(0, next.y | 0),
+            width: Math.max(1, next.width | 0),
+            height: Math.max(1, next.height | 0),
+            scale,
+          }
+          return
+        }
         const width = Math.max(1, Math.min(world.width, next.width | 0))
         const height = Math.max(1, Math.min(world.height, next.height | 0))
         const x = clamp(next.x | 0, 0, Math.max(0, world.width - width))
         const y = clamp(next.y | 0, 0, Math.max(0, world.height - height))
         const resized = width !== view.width || height !== view.height || imageData === null
-        // Keep the zoom: the renderer needs it to size the display blit and to
-        // decide whether the atlas sprites are worth drawing.
-        const scale = typeof next.scale === 'number' && next.scale > 0 ? next.scale : (view.scale ?? 1)
         view = { x, y, width, height, scale }
         if (resized && context !== null) {
           imageData = context.createImageData(width, height)
@@ -9940,8 +10214,41 @@ window.__ModuleLoader__.load({
           canvas = null
           return
         }
+        ensureBuffers()
+        ensureAtlas(publish)
+        if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+          // A gzip cannot finish once the page is tearing down, so unload writes
+          // the uncompressed payload; hiding the tab still gets the real thing.
+          window.addEventListener('beforeunload', saveSync)
+          if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+            document.addEventListener('visibilitychange', onVisibilityChange)
+          }
+        }
+        startLoop()
+        publish()
+      }
+
+      /** Save as soon as the tab is hidden: the last chance an async write has. */
+      function onVisibilityChange() {
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') save()
+      }
+
+      /**
+       * Size the pixel buffers for the current view.
+       *
+       * Split out of attach() because the world may still be unpacking when the
+       * canvas arrives: the load continuation calls this again once it knows the
+       * real world size.
+       */
+      function ensureBuffers() {
+        if (context === null || world === null) return
         if (view.width <= 0 || view.height <= 0) {
-          view = { x: 0, y: 0, width: Math.min(world.width, 160), height: Math.min(world.height, 100), scale: view.scale ?? 1 }
+          view = {
+            x: 0, y: 0,
+            width: Math.min(world.width, 160),
+            height: Math.min(world.height, 100),
+            scale: view.scale ?? 1,
+          }
         }
         imageData = context.createImageData(view.width, view.height)
         frameBuffer = new Uint32Array(imageData.data.buffer)
@@ -9951,19 +10258,16 @@ window.__ModuleLoader__.load({
           offscreen.height = view.height
           offscreenContext = offscreen.getContext('2d', { alpha: false })
         }
-        ensureAtlas(publish)
-        if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-          window.addEventListener('beforeunload', save)
-        }
-        startLoop()
-        publish()
       }
 
       /** Unbind the canvas and save. */
       function detach() {
         stopLoop()
         if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
-          window.removeEventListener('beforeunload', save)
+          window.removeEventListener('beforeunload', saveSync)
+          if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+            document.removeEventListener('visibilitychange', onVisibilityChange)
+          }
         }
         canvas = null
         context = null
@@ -9981,7 +10285,10 @@ window.__ModuleLoader__.load({
        * @returns {number} how many animals were released.
        */
       function restock() {
-        if (world === null) ensureWorld()
+        if (world === null) {
+          ensureWorld()
+          return 0
+        }
         let released = 0
         const spots = 6
         for (const id of SPECIES_IDS) {
@@ -10008,19 +10315,13 @@ window.__ModuleLoader__.load({
 
       /** Replace the world with a fresh one. */
       function newWorld(seed) {
-        world = createWorld(seed === undefined ? {} : { seed })
-        world.hydrologyDirty = false
+        // Cancel any load still in flight: the player asked for a new world, and
+        // an older save finishing late must not replace it.
+        worldToken += 1
+        adoptWorld(createWorld(seed === undefined ? {} : { seed }))
         selectedId = 0
         follow = false
         accumulator = 0
-        minimap = null
-        if (context !== null) {
-          const width = Math.min(world.width, Math.max(1, view.width))
-          const height = Math.min(world.height, Math.max(1, view.height))
-          view = { x: 0, y: 0, width, height, scale: view.scale ?? 1 }
-          imageData = context.createImageData(width, height)
-          frameBuffer = new Uint32Array(imageData.data.buffer)
-        }
         save()
         publish()
       }
@@ -10049,7 +10350,12 @@ window.__ModuleLoader__.load({
         },
         /** @returns {{width: number, height: number, data: Uint32Array}} minimap. */
         getMinimap(width = 160, height = 100) {
-          if (world === null) ensureWorld()
+          if (world === null) {
+            ensureWorld()
+            // An empty frame is better than a crash: the panel repaints as soon
+            // as the world lands.
+            return { width, height, data: new Uint32Array(width * height) }
+          }
           if (minimap === null || minimap.width !== width || minimap.height !== height) {
             minimap = { width, height, data: paintMinimap(world, width, height) }
           }
@@ -10070,7 +10376,10 @@ window.__ModuleLoader__.load({
         },
         /** Advance exactly one tick while paused. */
         stepOnce() {
-          if (world === null) ensureWorld()
+          if (world === null) {
+            ensureWorld()
+            return
+          }
           stepWorld(world, TICK)
           pushHistory(world)
           publish()
@@ -10084,7 +10393,10 @@ window.__ModuleLoader__.load({
           hover = point === null || point === undefined ? null : { x: point.x, y: point.y }
         },
         paintAt(x, y, erase = false) {
-          if (world === null) ensureWorld()
+          if (world === null) {
+            ensureWorld()
+            return 0
+          }
           // Anything the brush spawns is the player's doing, not a birth: the
           // id watermark tells the observer exactly which animals appeared.
           const before = Number.isFinite(world.nextId) ? world.nextId : 0
@@ -10129,13 +10441,17 @@ window.__ModuleLoader__.load({
         },
         newWorld,
         restock,
+        whenReady,
         markOnboardingSeen,
         resetOnboarding,
         dismissNotice,
         save,
-        peekSave() {
+        saveNow,
+        /** @returns {Promise<object|null>} the stored world, without side effects. */
+        async peekSave() {
           // Peeking must not consume the notice that the panel has not shown yet.
-          return readStored().world
+          const stored = await readStored()
+          return stored.world
         },
         dispose() {
           detach()
@@ -10641,6 +10957,37 @@ window.__ModuleLoader__.load({
      */
     function percentOf(ratio) {
       return Math.round(clamp(Number.isFinite(ratio) ? ratio : 0, 0, 1) * 100)
+    }
+
+    /**
+     * What the header says about the autosave: its size, that it is running, or
+     * that the browser refused to store it.
+     * @param {Function} t - translator.
+     * @param {object} save - snapshot.save.
+     * @returns {string} label, or an empty string when nothing was saved yet.
+     */
+    function saveLabel(t, save) {
+      if (save === null || save === undefined) return ''
+      if (save.pending === true) return t('status.savePending')
+      if (save.failed === true) return t('status.saveFailed')
+      if (save.stored !== true) return ''
+      return t('status.saved', { size: formatSaveSize(save.size) })
+    }
+
+    /**
+     * One sentence per save failure. saveError() tags the reason, so an
+     * incompatible save is never described as a damaged one.
+     * @param {Function} t - translator.
+     * @param {object} notice - snapshot.notice.
+     * @returns {string} body text.
+     */
+    function noticeBody(t, notice) {
+      if (notice === null || notice === undefined) return ''
+      if (notice.kind === 'legacy') return t('notice.legacyBody')
+      if (notice.code === 'unsupported_version') return t('notice.unsupportedVersion')
+      if (notice.code === 'no_decompressor') return t('notice.noDecompressor')
+      if (notice.code === 'corrupt') return t('notice.corrupt')
+      return t('notice.loadBody', { reason: notice.detail === null || notice.detail === undefined ? '' : notice.detail })
     }
 
     /**
@@ -11602,7 +11949,9 @@ window.__ModuleLoader__.load({
           h('div', { className: 'pe-statusbar' },
             h('span', { className: 'pe-pill' + (snapshot.paused ? '' : ' pe-pill-live') },
               snapshot.paused ? t('speed.paused') : t('status.pulse', { births: pulse.births, deaths: pulse.deaths })),
-            h('span', { className: 'pe-pill' }, t('stat.corpses') + ' ' + (snapshot.stats?.corpses ?? 0))),
+            h('span', { className: 'pe-pill' }, t('stat.corpses') + ' ' + (snapshot.stats?.corpses ?? 0)),
+            h('span', { className: 'pe-pill' + (snapshot.save?.failed === true ? ' pe-pill-warn' : '') },
+              saveLabel(t, snapshot.save))),
           h('div', { className: 'pe-chips' }, speciesChips),
           h('div', { className: 'pe-controls' },
             h('button', {
@@ -11661,9 +12010,10 @@ window.__ModuleLoader__.load({
               h('div', { className: 'pe-hud pe-hud-br' },
                 h(Minimap, { store, snapshot, onJump: lookAt })),
               snapshot.ready === false
-                ? h('div', { className: 'pe-blank' }, t('status.ready'))
+                ? h('div', { className: 'pe-emptyworld' },
+                    h('div', { className: 'pe-emptyworld-title' }, t('status.loading')))
                 : null,
-              snapshot.world !== undefined && snapshot.world.empty === true
+              snapshot.ready === true && snapshot.world !== undefined && snapshot.world.empty === true
                 ? h(EmptyWorldOverlay, { t, onRestock: restockWorld })
                 : null,
               snapshot.onboarding === true
@@ -11671,13 +12021,10 @@ window.__ModuleLoader__.load({
                 : h(OnboardingOverlay, { t, onDismiss: () => store.markOnboardingSeen() }),
               snapshot.notice === null || snapshot.notice === undefined
                 ? null
-                : h('div', { className: 'pe-notice' },
+                : h('div', { className: 'pe-notice', title: snapshot.notice.detail ?? '' },
                     h('div', { className: 'pe-notice-title' },
                       snapshot.notice.kind === 'legacy' ? t('notice.legacyTitle') : t('notice.loadTitle')),
-                    h('div', { className: 'pe-notice-body' },
-                      snapshot.notice.kind === 'legacy'
-                        ? t('notice.legacyBody')
-                        : t('notice.loadBody', { reason: snapshot.notice.detail ?? '' })),
+                    h('div', { className: 'pe-notice-body' }, noticeBody(t, snapshot.notice)),
                     h('div', { className: 'pe-notice-actions' },
                       h('button', { type: 'button', className: 'pe-btn', onClick: () => store.dismissNotice() },
                         t('notice.dismiss')))),
@@ -11912,7 +12259,13 @@ window.__ModuleLoader__.load({
       'status.restock': '补充生物',
       'status.temperature': '{n} °C',
       'status.pulse': '近 60 秒 出生 {births} · 死亡 {deaths}',
-      'status.ready': '正在生成世界…',
+      'status.loading': '正在读取世界…',
+      'status.saved': '存档 {size}',
+      'status.savePending': '保存中…',
+      'status.saveFailed': '存不进本地存储',
+      'notice.unsupportedVersion': '这份存档来自不兼容的版本，已经开了新世界；旧存档原样保留。',
+      'notice.corrupt': '存档已损坏，读不出来，已经开了新世界。',
+      'notice.noDecompressor': '这个浏览器不支持解压存档，已经开了新世界。',
       'notice.legacyTitle': '发现旧版存档',
       'notice.legacyBody': '0.3 的存档格式和旧版不兼容，已经为你开了新世界。旧存档原样保留，没被覆盖。',
       'notice.loadTitle': '读档失败',
@@ -12043,7 +12396,13 @@ window.__ModuleLoader__.load({
       'status.restock': 'Restock',
       'status.temperature': '{n} °C',
       'status.pulse': 'last 60s  born {births} · died {deaths}',
-      'status.ready': 'Building the world…',
+      'status.loading': 'Reading the world…',
+      'status.saved': 'Saved {size}',
+      'status.savePending': 'Saving…',
+      'status.saveFailed': 'Cannot save locally',
+      'notice.unsupportedVersion': 'That save comes from an incompatible version, so a fresh world was started; the old save is left untouched.',
+      'notice.corrupt': 'The save is damaged and could not be read, so a fresh world was started.',
+      'notice.noDecompressor': 'This browser cannot decompress a save, so a fresh world was started.',
       'notice.legacyTitle': 'Older save found',
       'notice.legacyBody': 'The 0.3 save format cannot read the old world, so a fresh one was started. Your old save is untouched and was not overwritten.',
       'notice.loadTitle': 'Could not load the save',
@@ -12292,6 +12651,8 @@ window.__ModuleLoader__.load({
       energyResidual,
       grazingIntake,
       dryMatterRequirement,
+      GRAZE_REFERENCE,
+      INTAKE_CEILING,
       ROLE_TRAITS,
       STAGE_SCALE,
       TUNING,

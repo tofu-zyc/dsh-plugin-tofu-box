@@ -35,7 +35,7 @@
     },
     {
       "file": "08-sim-constants.js",
-      "description": "killEntity, moveToward, food/prey search"
+      "description": "State classes, movement, prey/flora search"
     },
     {
       "file": "08b-perception.js",

@@ -118,13 +118,25 @@
       // its structure and the derived views (energy accessor, hunger channel).
       const body = installLedger(entity)
       body.E = clamp(body.Emax * (options?.reserve ?? (newborn ? BIRTH_RESERVE_SHARE : SPAWN_RESERVE_SHARE)), 0, body.Emax)
-      // A newborn (or a released animal) is energy ENTERING the system. The book
-      // records it under its own name instead of pretending gestation is free.
+      // Where a new body's energy came from decides how it is booked.
+      //
+      //  - A NEWBORN is a transfer FROM ITS PARENT: the parent pays the whole
+      //    cost out of its own reserve and the difference (conversion efficiency
+      //    below 1) leaves as heat, which is real respiration. Nothing appears
+      //    out of nowhere, so the energy panel stops being flattened by a fake
+      //    "reproduction" source twice the size of everything else.
+      //  - A PARENTLESS spawn (starting stock, immigration, a player release) is
+      //    genuinely new energy, and the book names it rather than hiding it.
       if (world.budget !== undefined) {
-        // The structure is energy entering the world with a new body. The
-        // reserve that comes with it is counted by the ledger accessor itself,
-        // so it must NOT be added here as well or it would be counted twice.
-        world.budget.reproduction += body.V * BIO.MEAT_ENERGY
+        const newbornEnergy = body.V * BIO.MEAT_ENERGY + body.E
+        const parent = options?.parent
+        if (parent !== undefined && parent !== null && parent.body !== undefined && parent.body.dead !== true) {
+          const paid = payFromReserve(parent, newbornEnergy / BIO.REPRODUCTION_EFFICIENCY)
+          // Positive when the parent covered the litter: the gap is the heat.
+          world.budget.animalRespired += paid - newbornEnergy
+        } else {
+          world.budget.reproduction += newbornEnergy
+        }
       }
       world.entities.push(entity)
       world.population[speciesId] = (world.population[speciesId] ?? 0) + 1

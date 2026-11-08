@@ -738,12 +738,16 @@
         const dy = (py - cy) / 2.1
         if (dx * dx + dy * dy <= 1) {
           if (x >= 5 && y <= cy - 1) return 0
-          if (snowCap > 0.4 && py < cy - 0.4) return SNOW_COLORS.mid
+          // Under ice the pad is pale all over with a shaded rim, so it reads as
+          // a frozen pad rather than as a dark bar with a white stripe.
+          if (snowCap > 0.4) return py > cy + 0.7 || x < 1 ? SNOW_COLORS.shade : SNOW_COLORS.mid
+          // A pad has to read against the water it floats on: weed-on-weed was
+          // invisible, which left the flower floating in mid air as a pink square.
           if (py < cy - 0.6) return PALETTE.weedStalk
-          if (py > cy + 0.8) return leaf.dark
-          return weed[1]
+          if (py > cy + 0.8 || x < 1) return leaf.outline
+          return ((x + y) & 3) === 0 ? weed[1] : leaf.mid
         }
-        if (variant === 1 && snowCap < 0.2 && y <= 2 && Math.abs(px - width / 2) < 1.6) {
+        if (variant === 1 && snowCap < 0.2 && y <= 1 && Math.abs(px - width / 2) < 1.1) {
           return y === 0 ? PALETTE.flowers[1] : PALETTE.flowers[3]
         }
         return 0
@@ -766,8 +770,8 @@
         }
         if (stalk(3, -1.6, 10) || stalk(5.5, 0.4, 9) || stalk(7.2, 1.8, 7)) {
           // A reed is olive, not teal: the teal read as a weed stalk in the water.
-          // The tips stay clear of the snow so the clump still pokes out of it.
-          if (snowCap > 0.5 && y > 3 && y < 8) return SNOW_COLORS.mid
+          // Snow is not painted on a stalk: a pale band mid-stalk turned the whole
+          // reed bed into a row of fences. Stalks poke out of the snow instead.
           return y < 2 ? PALETTE.trunkDark : (y < 5 ? leaf.light : leaf.mid)
         }
         if (y >= height - 2 && Math.abs(x + 0.5 - 5) < 2.4) return leaf.dark

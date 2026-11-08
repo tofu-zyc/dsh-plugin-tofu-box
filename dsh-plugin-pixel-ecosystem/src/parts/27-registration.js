@@ -62,6 +62,8 @@
       energyResidual,
       grazingIntake,
       dryMatterRequirement,
+      GRAZE_REFERENCE,
+      INTAKE_CEILING,
       ROLE_TRAITS,
       STAGE_SCALE,
       TUNING,

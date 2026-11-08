@@ -83,9 +83,10 @@ function cssText() {
  * A store with a live world, no storage and a frozen clock.
  * @returns {object} store.
  */
-function quietStore() {
+async function quietStore() {
   const store = engine.createStore({ storage: null, requestFrame: () => 0, cancelFrame: () => {}, now: () => 0 })
   store.ensureWorld()
+  await store.whenReady()
   return store
 }
 
@@ -112,11 +113,11 @@ function runWorld(store, ticks = 40) {
 // Registration
 // ---------------------------------------------------------------------------
 
-test('the client injects exactly the slots and locale services', () => {
+test('the client injects exactly the slots and locale services', async () => {
   assert.deepEqual([...plugin.inject], ['slots', 'locale'])
 })
 
-test('apply() seats the sidebar icon and the keyed main panel under one id', () => {
+test('apply() seats the sidebar icon and the keyed main panel under one id', async () => {
   const { registrations, injected } = mount()
   assert.deepEqual(injected, ['sidebar.panellist', 'main'], 'both additive seats must be injected')
   assert.equal(registrations.length, 2, 'the plugin adds exactly two seats')
@@ -131,7 +132,7 @@ test('apply() seats the sidebar icon and the keyed main panel under one id', () 
   assert.equal(typeof main.component, 'function', 'the main seat renders a component')
 })
 
-test('the main seat hands the shared store, locale and layout to the panel', () => {
+test('the main seat hands the shared store, locale and layout to the panel', async () => {
   const layout = { selectPanel() {} }
   const { registrations, locale } = mount({ layout })
   let element = registrations[1].component({ someSlotProp: true })
@@ -144,12 +145,12 @@ test('the main seat hands the shared store, locale and layout to the panel', () 
   assert.equal(typeof element.props.store.getSnapshot, 'function', 'one store must be created per plugin instance')
 })
 
-test('the sidebar label resolves through the active dictionary', () => {
+test('the sidebar label resolves through the active dictionary', async () => {
   assert.equal(mount({ localeId: 'zh' }).registrations[0].entry.label(), CHINESE['panel.title'])
   assert.equal(mount({ localeId: 'en' }).registrations[0].entry.label(), ENGLISH['panel.title'])
 })
 
-test('apply() registers both dictionaries for every built-in locale id', () => {
+test('apply() registers both dictionaries for every built-in locale id', async () => {
   const { locale } = mount()
   assert.equal(locale.dictionaryFor(LOCALE_NAMESPACE, 'zh'), CHINESE)
   assert.equal(locale.dictionaryFor(LOCALE_NAMESPACE, 'en'), ENGLISH)
@@ -162,11 +163,11 @@ test('apply() registers both dictionaries for every built-in locale id', () => {
 // Dictionaries and stylesheet
 // ---------------------------------------------------------------------------
 
-test('CHINESE and ENGLISH carry exactly the same keys', () => {
+test('CHINESE and ENGLISH carry exactly the same keys', async () => {
   assert.deepEqual(Object.keys(CHINESE).sort(), Object.keys(ENGLISH).sort())
 })
 
-test('every key the panels render exists in both dictionaries, and no key is dead', () => {
+test('every key the panels render exists in both dictionaries, and no key is dead', async () => {
   const required = new Set()
   // Brushes, species, genes, intents, stages.
   for (const tool of ['grass', 'weed', 'tree', 'bush']) required.add('tool.' + tool)
@@ -209,8 +210,15 @@ test('every key the panels render exists in both dictionaries, and no key is dea
   // Tabs, guide, status and the save-file notice.
   for (const key of ['tools', 'species', 'energy']) required.add('tab.' + key)
   for (const key of ['title', 'step1', 'step2', 'step3', 'dismiss', 'again']) required.add('onboard.' + key)
-  for (const key of ['emptyWorld', 'emptyWorldHint', 'restock', 'temperature', 'pulse', 'ready']) required.add('status.' + key)
-  for (const key of ['legacyTitle', 'legacyBody', 'loadTitle', 'loadBody', 'dismiss']) required.add('notice.' + key)
+  for (const key of [
+    'emptyWorld', 'emptyWorldHint', 'restock', 'temperature', 'pulse', 'loading',
+    'saved', 'savePending', 'saveFailed',
+  ]) required.add('status.' + key)
+  // One sentence per save-error code, plus the legacy and generic fallbacks.
+  for (const key of [
+    'legacyTitle', 'legacyBody', 'loadTitle', 'loadBody', 'dismiss',
+    'unsupportedVersion', 'corrupt', 'noDecompressor',
+  ]) required.add('notice.' + key)
   for (const key of ['preview', 'cell']) required.add('brush.' + key)
   for (const key of ['erased']) required.add('toast.' + key)
   // Every literal t('...') the bundle calls, plus the DESIGN 7 key table.
@@ -236,7 +244,7 @@ test('every key the panels render exists in both dictionaries, and no key is dea
   }
 })
 
-test('every life tool resolves to a dictionary entry', () => {
+test('every life tool resolves to a dictionary entry', async () => {
   // Regression guard for the 0.1.0 test report: all eleven life tools were
   // labelled with t('tool.' + id), but the seven animal ids only exist as
   // 'species.*', so those palette buttons rendered a raw key.
@@ -247,7 +255,7 @@ test('every life tool resolves to a dictionary entry', () => {
   }
 })
 
-test('every CSS selector is pe- prefixed', () => {
+test('every CSS selector is pe- prefixed', async () => {
   const css = cssText()
   assert.ok(css.length > 1000, 'the stylesheet looks truncated (' + css.length + ' chars)')
   assert.equal(css.includes('/*'), false, 'the stylesheet must not carry comments: the selector scan reads them as selectors')
@@ -274,9 +282,9 @@ test('every CSS selector is pe- prefixed', () => {
 // Components
 // ---------------------------------------------------------------------------
 
-test('TerrariumPanel renders against a real store with the panel title and one chip per species', () => {
+test('TerrariumPanel renders against a real store with the panel title and one chip per species', async () => {
   const { locale } = mount()
-  const store = quietStore()
+  const store = await quietStore()
   assert.equal(store.getSnapshot().ready, true, 'the store must have built a world')
   const tree = expand(TerrariumPanel({ store, locale, layout: undefined }))
 
@@ -308,9 +316,9 @@ test('TerrariumPanel renders against a real store with the panel title and one c
   store.dispose()
 })
 
-test('the species table lists every species with its reserve and death causes', () => {
+test('the species table lists every species with its reserve and death causes', async () => {
   const { locale } = mount()
-  const store = quietStore()
+  const store = await quietStore()
   const tree = expand(TerrariumPanel({ store, locale, layout: undefined }))
   const rows = findAll(tree, element => typeof element.props?.className === 'string' &&
     element.props.className.startsWith('pe-srow'))
@@ -324,9 +332,9 @@ test('the species table lists every species with its reserve and death causes', 
   store.dispose()
 })
 
-test('the inspector shows the eight drives, the state clock and the decision record', () => {
+test('the inspector shows the eight drives, the state clock and the decision record', async () => {
   const { locale } = mount()
-  const store = quietStore()
+  const store = await quietStore()
   runWorld(store, 30)
   const world = store.getWorld()
   const target = world.entities.find(entity => entity.state !== undefined) ?? world.entities[0]
@@ -350,9 +358,9 @@ test('the inspector shows the eight drives, the state clock and the decision rec
   store.dispose()
 })
 
-test('the energy panel draws the four-stage cascade once the world runs', () => {
+test('the energy panel draws the four-stage cascade once the world runs', async () => {
   const { locale } = mount()
-  const store = quietStore()
+  const store = await quietStore()
   const snapshot = runWorld(store, 60)
   assert.ok(snapshot.flows.gpp > 0, 'primary production must be measured, got ' + snapshot.flows.gpp)
   assert.ok(snapshot.flows.herbs >= 0 && snapshot.flows.carns >= 0, 'both animal flows must be numbers')
@@ -366,9 +374,9 @@ test('the energy panel draws the four-stage cascade once the world runs', () => 
   store.dispose()
 })
 
-test('the event ticker reports what the player did, and a click flies there', () => {
+test('the event ticker reports what the player did, and a click flies there', async () => {
   const { locale } = mount()
-  const store = quietStore()
+  const store = await quietStore()
   store.getSnapshot()
   const world = store.getWorld()
   const target = world.entities[0]
@@ -391,9 +399,9 @@ test('the event ticker reports what the player did, and a click flies there', ()
   store.dispose()
 })
 
-test('the first-run guide shows until it is dismissed', () => {
+test('the first-run guide shows until it is dismissed', async () => {
   const { locale } = mount()
-  const store = quietStore()
+  const store = await quietStore()
   assert.equal(store.getSnapshot().onboarding, false, 'a fresh store has not seen the guide')
   const before = expand(TerrariumPanel({ store, locale, layout: undefined }))
   assert.ok(textOf(before).includes(CHINESE['onboard.title']), 'the guide must greet a first-time player')
@@ -405,9 +413,9 @@ test('the first-run guide shows until it is dismissed', () => {
   store.dispose()
 })
 
-test('an empty world says so and offers a restock', () => {
+test('an empty world says so and offers a restock', async () => {
   const { locale } = mount()
-  const store = quietStore()
+  const store = await quietStore()
   store.getSnapshot()
   const world = store.getWorld()
   world.entities.length = 0
@@ -423,7 +431,7 @@ test('an empty world says so and offers a restock', () => {
   store.dispose()
 })
 
-test('the panel only offers "back to chat" when a layout service is available', () => {
+test('the panel only offers "back to chat" when a layout service is available', async () => {
   const plain = mount()
   const plainTree = expand(plain.registrations[1].component({}))
   assert.equal(buttonLabels(plainTree).includes(CHINESE['action.back']), false,
@@ -435,7 +443,7 @@ test('the panel only offers "back to chat" when a layout service is available', 
     'with a layout service the panel must offer "back to chat"')
 })
 
-test('PanelIcon renders a pixel grid as unit rects, with an outline when active', () => {
+test('PanelIcon renders a pixel grid as unit rects, with an outline when active', async () => {
   const inked = PANEL_GLYPH.reduce((total, row) => total + [...row].filter(cell => cell !== '.').length, 0)
   for (const row of PANEL_GLYPH) {
     assert.equal(row.length, PANEL_GLYPH[0].length, 'the icon glyph must be rectangular')
@@ -457,7 +465,7 @@ test('PanelIcon renders a pixel grid as unit rects, with an outline when active'
   assert.equal(outline.props.stroke, 'currentColor')
 })
 
-test('every species has its own glyph, and every event kind has one too', () => {
+test('every species has its own glyph, and every event kind has one too', async () => {
   for (const id of engine.SPECIES_IDS) {
     const grid = GLYPHS[id]
     assert.ok(Array.isArray(grid), 'species ' + id + ' has no glyph, so the palette shows a generic blob')
@@ -471,11 +479,11 @@ test('every species has its own glyph, and every event kind has one too', () => 
   }
 })
 
-test('the inspector never shows a raw {placeholder}', () => {
+test('the inspector never shows a raw {placeholder}', async () => {
   // Regression guard: placeholder text used to reach the screen whenever a
   // templated key was rendered without its parameters.
   const { locale } = mount()
-  const store = quietStore()
+  const store = await quietStore()
   runWorld(store, 30)
   const world = store.getWorld()
   store.selectAt(world.entities[0].x, world.entities[0].y)
@@ -491,7 +499,7 @@ test('the inspector never shows a raw {placeholder}', () => {
 // Persistence and the one-shot notices
 // ---------------------------------------------------------------------------
 
-test('the store writes a v2 save under the documented key and round-trips it', () => {
+test('the store writes a v2 save under the documented key and round-trips it', async () => {
   const data = new Map()
   const storage = {
     getItem: key => (data.has(key) ? data.get(key) : null),
@@ -500,22 +508,35 @@ test('the store writes a v2 save under the documented key and round-trips it', (
   const options = { storage, requestFrame: () => 0, cancelFrame: () => {}, now: () => 0 }
   const store = engine.createStore(options)
   store.ensureWorld()
+  await store.whenReady()
   engine.stepWorld(store.getWorld(), engine.TICK)
-  store.save()
+  assert.equal(await store.save(), true, 'save() must report that the world reached storage')
   assert.equal(data.has(STORAGE_KEY), true, 'the world must be saved under ' + STORAGE_KEY)
-  const saved = JSON.parse(data.get(STORAGE_KEY))
-  assert.equal(saved.version, 2, 'the save payload carries SAVE_VERSION 2')
+  const written = data.get(STORAGE_KEY)
+  assert.match(written, /^gz:/, 'the autosave must be the gzipped payload, not bare JSON')
+  const rawLength = JSON.stringify(engine.serializeWorld(store.getWorld(), { detail: 'full' })).length
+  assert.ok(written.length < rawLength,
+    'the gzipped payload must be smaller than the raw JSON (' + written.length + ' vs ' + rawLength + ' chars)')
+  assert.ok(written.length < 5 * 1024 * 1024,
+    'the save must fit a 5 MB localStorage quota, got ' + written.length + ' chars')
+  const packed = await engine.unpackWorld(written)
+  assert.equal(packed.version, 2, 'the save payload carries SAVE_VERSION 2')
+  assert.equal(typeof engine.formatSaveSize(packed ? 1 : 0), 'string', 'the panel formats the save size through the engine')
 
   // A second store loads that save instead of starting over.
   const restoredStore = engine.createStore(options)
   restoredStore.ensureWorld()
+  await restoredStore.whenReady()
   assert.equal(restoredStore.getWorld().tick, 1, 'the store must resume from the saved tick')
-  assert.equal(restoredStore.peekSave()?.tick, 1, 'peekSave must read the persisted world back')
+  assert.equal((await restoredStore.peekSave())?.tick, 1, 'peekSave must read the persisted world back')
   assert.equal(restoredStore.getSnapshot().notice, null, 'a healthy save produces no notice')
+  const save = restoredStore.getSnapshot().save
+  assert.equal(save.stored, true, 'the panel must know a save reached storage')
+  assert.ok(save.size > 0, 'the panel must know how big the save is')
   for (const instance of [store, restoredStore]) instance.dispose()
 })
 
-test('a legacy save is reported once and left untouched', () => {
+test('a legacy save is reported once and left untouched', async () => {
   const data = new Map()
   const storage = {
     getItem: key => (data.has(key) ? data.get(key) : null),
@@ -525,6 +546,7 @@ test('a legacy save is reported once and left untouched', () => {
   data.set(LEGACY_STORAGE_KEY, '{"version":1,"tick":7}')
   const store = engine.createStore({ storage, requestFrame: () => 0, cancelFrame: () => {}, now: () => 0 })
   store.ensureWorld()
+  await store.whenReady()
   const notice = store.getSnapshot().notice
   assert.notEqual(notice, null, 'an old save must be reported, not silently dropped')
   assert.equal(notice.kind, 'legacy', 'the notice must say the save is a legacy one')
@@ -537,7 +559,7 @@ test('a legacy save is reported once and left untouched', () => {
   store.dispose()
 })
 
-test('a corrupt save reports why instead of starting over silently', () => {
+test('a corrupt save reports why instead of starting over silently', async () => {
   const data = new Map([[STORAGE_KEY, '{not json']])
   const storage = {
     getItem: key => (data.has(key) ? data.get(key) : null),
@@ -545,19 +567,41 @@ test('a corrupt save reports why instead of starting over silently', () => {
   }
   const store = engine.createStore({ storage, requestFrame: () => 0, cancelFrame: () => {}, now: () => 0 })
   store.ensureWorld()
+  await store.whenReady()
   const notice = store.getSnapshot().notice
   assert.notEqual(notice, null, 'a corrupt save must be reported (G5)')
   assert.equal(notice.kind, 'load', 'the notice must be a load failure')
+  assert.equal(notice.code, 'corrupt', 'the engine tags a damaged payload so the panel can say so')
   assert.equal(typeof notice.detail, 'string', 'the failure must carry its reason')
   assert.ok(notice.detail.length > 0, 'the reason must not be empty')
   assert.equal(typeof store.getWorld().seed, 'number', 'a fresh world must still be built')
-  assert.equal(store.peekSave(), null, 'a corrupt save reads back as nothing')
+  assert.equal(await store.peekSave(), null, 'a corrupt save reads back as nothing')
   store.newWorld(4242)
   assert.equal(store.getWorld().seed, 4242, 'newWorld must honour the requested seed')
   store.dispose()
 })
 
-test('PixelGlyph renders one rect per inked cell and falls back for unknown names', () => {
+test('a save from another format says so instead of "corrupt"', async () => {
+  // The three save-error codes must reach the player as three different
+  // sentences: an incompatible version is not a damaged file.
+  const data = new Map([[STORAGE_KEY, JSON.stringify({ version: 1, tick: 7 })]])
+  const storage = {
+    getItem: key => (data.has(key) ? data.get(key) : null),
+    setItem: (key, value) => { data.set(key, value) },
+  }
+  const store = engine.createStore({ storage, requestFrame: () => 0, cancelFrame: () => {}, now: () => 0 })
+  store.ensureWorld()
+  await store.whenReady()
+  const notice = store.getSnapshot().notice
+  assert.notEqual(notice, null, 'an unusable save must be reported')
+  assert.equal(notice.kind, 'load', 'the notice is a load failure')
+  assert.equal(notice.code, 'unsupported_version', 'the code must distinguish a version mismatch from corruption')
+  assert.equal(data.get(STORAGE_KEY), JSON.stringify({ version: 1, tick: 7 }), 'the unreadable save is left untouched')
+  assert.equal(typeof store.getWorld().seed, 'number', 'a fresh world is built instead')
+  store.dispose()
+})
+
+test('PixelGlyph renders one rect per inked cell and falls back for unknown names', async () => {
   const inked = GLYPHS.grass.reduce((total, row) => total + [...row].filter(cell => cell !== '.').length, 0)
   const glyph = expand(PixelGlyph({ name: 'grass', size: 16 }))
   assert.equal(glyph.type, 'svg')

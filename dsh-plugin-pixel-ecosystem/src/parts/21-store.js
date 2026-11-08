@@ -400,16 +400,155 @@
       let onboardingFlag = null
       /** One-shot message about the save file: legacy format or a failed read. */
       let notice = null
+      /** Bumped whenever the world object is replaced, to cancel stale work. */
+      let worldToken = 0
+      /** The in-flight first load, so every caller shares one. */
+      let loadPromise = null
+      /** True while a compressed save is being written. */
+      let savePending = false
+      /** What the panel says about the autosave: size, when, and how it went. */
+      let saveState = { size: 0, at: 0, pending: false, failed: false, stored: false }
 
-      /** Load the saved world, or create a fresh one. */
-      function ensureWorld() {
-        if (world !== null) return world
-        const stored = readStored()
-        notice = stored.notice
-        world = stored.world ?? createWorld()
+      /**
+       * Install a world object and point the renderer at it.
+       *
+       * The view request may have arrived before the world did (the canvas is
+       * attached during the first render), so it is replayed here: now that the
+       * real world size is known, setView() clamps it and sizes the buffers.
+       * @param {object} next - the world to adopt.
+       * @returns {object} the same world.
+       */
+      function adoptWorld(next) {
+        world = next
+        worldToken += 1
         world.hydrologyDirty = false
         minimap = null
+        const request = { x: view.x, y: view.y, width: view.width, height: view.height, scale: view.scale }
+        view = { x: 0, y: 0, width: 0, height: 0, scale: view.scale }
+        // A first render has no view request yet; attach() picks the default.
+        if (request.width > 0 && request.height > 0) setView(request)
         return world
+      }
+
+      /**
+       * Unpack the first save and adopt it.
+       *
+       * Only this path is asynchronous: a save is gzipped, and gzip needs
+       * unpackWorld(). The store therefore keeps `world === null` and `loading`
+       * true for the few dozen milliseconds it takes, and the panel says so
+       * instead of showing an empty world.
+       * @param {string} raw - the stored payload.
+       * @returns {Promise<object|null>} the world, once there is one.
+       */
+      function startLoad(raw) {
+        if (loadPromise !== null) return loadPromise
+        const token = worldToken
+        loadPromise = decodeStored(raw)
+          .then((stored) => {
+            if (worldToken !== token) return world
+            notice = stored.notice
+            const adopted = adoptWorld(stored.world === null ? createWorld() : stored.world)
+            if (stored.world !== null) {
+              // A resumed world already has a save in storage; show its size in the
+              // header straight away instead of waiting for the next autosave.
+              saveState = { size: raw.length, at: adopted.time, pending: false, failed: false, stored: true }
+            }
+            return adopted
+          })
+          .catch(() => {
+            // A world that cannot be loaded must never leave the panel empty.
+            return worldToken === token ? adoptWorld(createWorld()) : world
+          })
+          .then(() => {
+            publish()
+            return world
+          })
+        return loadPromise
+      }
+
+      /**
+       * The world for this store, creating one when there is nothing to load.
+       *
+       * Synchronous by contract: the tests, the scene lab and the panel's first
+       * render all treat this as "give me the world now". That is possible in
+       * every case except resuming a compressed save, which is the one path that
+       * returns null and settles through whenReady().
+       * @returns {object|null} the world, or null while a save is being unpacked.
+       */
+      function ensureWorld() {
+        if (world !== null) return world
+        const stored = readRaw()
+        if (stored.raw === null || stored.raw === '') {
+          // Nothing to decompress. An old build's world may still sit in the v1
+          // key: report it, leave it exactly where it is, and start fresh.
+          if (stored.legacy !== null && stored.legacy !== '') notice = { kind: 'legacy', detail: null }
+          return adoptWorld(createWorld())
+        }
+        startLoad(stored.raw)
+        return null
+      }
+
+      /**
+       * Wait until a world exists. The formal entry point for the async path.
+       * @returns {Promise<object|null>} the world.
+       */
+      function whenReady() {
+        if (world !== null) return Promise.resolve(world)
+        ensureWorld()
+        return loadPromise === null ? Promise.resolve(world) : loadPromise.then(() => world)
+      }
+
+      /**
+       * Read both storage keys without interpreting them. Synchronous on purpose:
+       * deciding whether there is anything to decompress must not need a promise.
+       * @returns {{raw: string|null, legacy: string|null}} stored payloads.
+       */
+      function readRaw() {
+        const result = { raw: null, legacy: null }
+        if (storage === null) return result
+        try {
+          result.raw = storage.getItem(STORAGE_KEY)
+        } catch {
+          result.raw = null
+        }
+        if (result.raw === null || result.raw === undefined || result.raw === '') {
+          try {
+            result.legacy = storage.getItem(LEGACY_STORAGE_KEY)
+          } catch {
+            result.legacy = null
+          }
+        }
+        return result
+      }
+
+      /**
+       * Unpack and validate one stored payload, turning a failure into a notice.
+       *
+       * 0.2.x swallowed every load failure, so a corrupted or version-mismatched
+       * save looked exactly like a first run. G5 (failure must be explainable)
+       * needs the opposite: the reason travels with the result and the panel
+       * shows it instead of quietly starting over.
+       * @param {string} raw - the stored payload.
+       * @returns {Promise<{world: object|null, notice: object|null}>} world and notice.
+       */
+      async function decodeStored(raw) {
+        try {
+          // Both formats arrive here: a gzipped payload from packWorld, and the
+          // plain JSON an older autosave or the teardown path may have written.
+          const payload = await unpackWorld(raw)
+          return { world: deserializeWorld(payload), notice: null }
+        } catch (error) {
+          const detail = error !== null && error !== undefined && error.message !== undefined
+            ? String(error.message)
+            : String(error)
+          // saveError() tags the reason: unsupported_version | corrupt |
+          // no_decompressor. The panel turns the code into a sentence instead of
+          // showing one vague "load failed" to everyone.
+          const code = error !== null && error !== undefined && typeof error.code === 'string'
+            ? error.code
+            : 'corrupt'
+          return { world: null, notice: { kind: 'load', code, detail } }
+        }
       }
 
       /**
@@ -419,55 +558,94 @@
        * save looked exactly like a first run. G5 (failure must be explainable)
        * needs the opposite: the reason travels with the result and the panel
        * shows it instead of quietly starting over.
-       * @returns {{world: object|null, notice: object|null}} world and notice.
+       * @returns {Promise<{world: object|null, notice: object|null}>} world and notice.
        */
-      function readStored() {
-        const result = { world: null, notice: null }
-        if (storage === null) return result
-        let raw = null
-        try {
-          raw = storage.getItem(STORAGE_KEY)
-        } catch {
-          return result
-        }
-        if (raw === null || raw === undefined || raw === '') {
-          // Nothing to resume. An old build's world may still sit in the v1 key:
-          // report it and leave it exactly where it is (this build never writes
-          // it), rather than letting the first autosave look like a clean slate.
-          let legacy = null
-          try {
-            legacy = storage.getItem(LEGACY_STORAGE_KEY)
-          } catch {
-            legacy = null
+      async function readStored() {
+        const stored = readRaw()
+        if (stored.raw === null || stored.raw === '') {
+          return {
+            world: null,
+            notice: stored.legacy === null || stored.legacy === '' ? null : { kind: 'legacy', detail: null },
           }
-          if (legacy !== null && legacy !== undefined && legacy !== '') {
-            result.notice = { kind: 'legacy', detail: null }
-          }
-          return result
         }
-        try {
-          result.world = deserializeWorld(JSON.parse(raw))
-        } catch (error) {
-          const detail = error !== null && error !== undefined && error.message !== undefined
-            ? String(error.message)
-            : String(error)
-          result.notice = { kind: 'load', detail }
-        }
-        return result
+        return decodeStored(stored.raw)
       }
 
-      /** Read and parse the saved world, ignoring anything unusable. */
-      function load() {
-        return readStored().world
-      }
-
-      /** Persist the world; a full or missing storage is not fatal. */
+      /**
+       * Persist the world, compressed, without blocking a frame.
+       *
+       * packWorld() gzips several megabytes of JSON, which is tens of
+       * milliseconds: enough to drop frames if it ran on the animation loop. It
+       * therefore runs off a microtask, and a re-entrancy guard stops a slow save
+       * from stacking up when the player scrubs speed.
+       * @returns {Promise<boolean>} true when the world reached storage.
+       */
       function save() {
-        if (storage === null || world === null) return
+        if (storage === null || world === null) return Promise.resolve(false)
+        if (savePending) return Promise.resolve(false)
+        const token = worldToken
+        const target = world
+        const savedAt = target.time
+        savePending = true
+        saveState = { size: saveState.size, at: savedAt, pending: true, failed: false, stored: saveState.stored }
+        markDirty()
+        return Promise.resolve()
+          .then(() => (typeof packWorld === 'function'
+            ? packWorld(target)
+            : { text: JSON.stringify(serializeWorld(target)), bytes: 0 }))
+          .then((packed) => {
+            // A world that was replaced while packing must not be written over
+            // the new one.
+            if (worldToken !== token) return false
+            try {
+              storage.setItem(STORAGE_KEY, packed.text)
+              const size = Number.isFinite(packed.bytes) && packed.bytes > 0 ? packed.bytes : packed.text.length
+              saveState = { size, at: savedAt, pending: false, failed: false, stored: true }
+              return true
+            } catch {
+              // Quota or disabled storage: keep playing, and let the panel say so.
+              saveState = { size: 0, at: savedAt, pending: false, failed: true, stored: saveState.stored }
+              return false
+            }
+          })
+          .catch(() => {
+            saveState = { size: 0, at: savedAt, pending: false, failed: true, stored: saveState.stored }
+            return false
+          })
+          .finally(() => {
+            savePending = false
+            markDirty()
+          })
+      }
+
+      /**
+       * Save right now, compressed. Awaitable, so a caller that is about to close
+       * or hide the panel can make sure the write landed.
+       * @returns {Promise<boolean>} true when the world reached storage.
+       */
+      function saveNow() {
+        return save()
+      }
+
+      /**
+       * Last-resort synchronous save, for page teardown only.
+       *
+       * A gzip cannot finish once the page is closing, so this writes the
+       * uncompressed (coarsely packed) payload instead: roughly half the raw JSON
+       * and over the 5 MB quota on a full-size world, which is why it is the
+       * fallback and not the normal path. unpackWorld accepts both forms and the
+       * header records the packing, so a save written here still loads.
+       * @returns {boolean} true when the payload reached storage.
+       */
+      function saveSync() {
+        if (storage === null || world === null) return false
         try {
-          storage.setItem(STORAGE_KEY, JSON.stringify(serializeWorld(world)))
+          const text = JSON.stringify(serializeWorld(world, { detail: 'low' }))
+          storage.setItem(STORAGE_KEY, text)
+          saveState = { size: text.length, at: world.time, pending: false, failed: false, stored: true }
+          return true
         } catch {
-          // Quota or disabled storage: keep running unsaved.
+          return false
         }
       }
 
@@ -1108,6 +1286,9 @@
           // first render, before the mount effect has created the world.
           return {
             ready: false,
+            // ready === false only ever means "unpacking a save right now"; a
+            // store with nothing to load has a world before this runs.
+            loading: true,
             paused,
             speed,
             time: 0,
@@ -1127,6 +1308,7 @@
             onboarding: onboardingSeen(),
             notice,
             causeSource: { exact: 0, inferred: 0 },
+            save: { size: saveState.size, at: saveState.at, pending: saveState.pending, failed: saveState.failed, stored: saveState.stored },
           }
         }
         const stats = sampleStats(world)
@@ -1138,6 +1320,7 @@
         for (const id of SPECIES_IDS) population += stats.counts[id] ?? 0
         return {
           ready: true,
+          loading: false,
           paused,
           speed,
           time: world.time,
@@ -1157,6 +1340,7 @@
           onboarding: onboardingSeen(),
           notice,
           causeSource: { exact: causeSource.exact, inferred: causeSource.inferred },
+          save: { size: saveState.size, at: saveState.at, pending: saveState.pending, failed: saveState.failed, stored: saveState.stored },
         }
       }
 
@@ -1274,15 +1458,25 @@
        * @param {object} next - `{ x, y, width, height }` in cells.
        */
       function setView(next) {
-        if (world === null) ensureWorld()
+        const scale = typeof next.scale === 'number' && next.scale > 0 ? next.scale : (view.scale ?? 1)
+        if (world === null) {
+          // The world is still being unpacked. Remember the request; the load
+          // continuation replays it once the real size is known.
+          ensureWorld()
+          view = {
+            x: Math.max(0, next.x | 0),
+            y: Math.max(0, next.y | 0),
+            width: Math.max(1, next.width | 0),
+            height: Math.max(1, next.height | 0),
+            scale,
+          }
+          return
+        }
         const width = Math.max(1, Math.min(world.width, next.width | 0))
         const height = Math.max(1, Math.min(world.height, next.height | 0))
         const x = clamp(next.x | 0, 0, Math.max(0, world.width - width))
         const y = clamp(next.y | 0, 0, Math.max(0, world.height - height))
         const resized = width !== view.width || height !== view.height || imageData === null
-        // Keep the zoom: the renderer needs it to size the display blit and to
-        // decide whether the atlas sprites are worth drawing.
-        const scale = typeof next.scale === 'number' && next.scale > 0 ? next.scale : (view.scale ?? 1)
         view = { x, y, width, height, scale }
         if (resized && context !== null) {
           imageData = context.createImageData(width, height)
@@ -1308,8 +1502,41 @@
           canvas = null
           return
         }
+        ensureBuffers()
+        ensureAtlas(publish)
+        if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+          // A gzip cannot finish once the page is tearing down, so unload writes
+          // the uncompressed payload; hiding the tab still gets the real thing.
+          window.addEventListener('beforeunload', saveSync)
+          if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+            document.addEventListener('visibilitychange', onVisibilityChange)
+          }
+        }
+        startLoop()
+        publish()
+      }
+
+      /** Save as soon as the tab is hidden: the last chance an async write has. */
+      function onVisibilityChange() {
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') save()
+      }
+
+      /**
+       * Size the pixel buffers for the current view.
+       *
+       * Split out of attach() because the world may still be unpacking when the
+       * canvas arrives: the load continuation calls this again once it knows the
+       * real world size.
+       */
+      function ensureBuffers() {
+        if (context === null || world === null) return
         if (view.width <= 0 || view.height <= 0) {
-          view = { x: 0, y: 0, width: Math.min(world.width, 160), height: Math.min(world.height, 100), scale: view.scale ?? 1 }
+          view = {
+            x: 0, y: 0,
+            width: Math.min(world.width, 160),
+            height: Math.min(world.height, 100),
+            scale: view.scale ?? 1,
+          }
         }
         imageData = context.createImageData(view.width, view.height)
         frameBuffer = new Uint32Array(imageData.data.buffer)
@@ -1319,19 +1546,16 @@
           offscreen.height = view.height
           offscreenContext = offscreen.getContext('2d', { alpha: false })
         }
-        ensureAtlas(publish)
-        if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-          window.addEventListener('beforeunload', save)
-        }
-        startLoop()
-        publish()
       }
 
       /** Unbind the canvas and save. */
       function detach() {
         stopLoop()
         if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
-          window.removeEventListener('beforeunload', save)
+          window.removeEventListener('beforeunload', saveSync)
+          if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+            document.removeEventListener('visibilitychange', onVisibilityChange)
+          }
         }
         canvas = null
         context = null
@@ -1349,7 +1573,10 @@
        * @returns {number} how many animals were released.
        */
       function restock() {
-        if (world === null) ensureWorld()
+        if (world === null) {
+          ensureWorld()
+          return 0
+        }
         let released = 0
         const spots = 6
         for (const id of SPECIES_IDS) {
@@ -1376,19 +1603,13 @@
 
       /** Replace the world with a fresh one. */
       function newWorld(seed) {
-        world = createWorld(seed === undefined ? {} : { seed })
-        world.hydrologyDirty = false
+        // Cancel any load still in flight: the player asked for a new world, and
+        // an older save finishing late must not replace it.
+        worldToken += 1
+        adoptWorld(createWorld(seed === undefined ? {} : { seed }))
         selectedId = 0
         follow = false
         accumulator = 0
-        minimap = null
-        if (context !== null) {
-          const width = Math.min(world.width, Math.max(1, view.width))
-          const height = Math.min(world.height, Math.max(1, view.height))
-          view = { x: 0, y: 0, width, height, scale: view.scale ?? 1 }
-          imageData = context.createImageData(width, height)
-          frameBuffer = new Uint32Array(imageData.data.buffer)
-        }
         save()
         publish()
       }
@@ -1417,7 +1638,12 @@
         },
         /** @returns {{width: number, height: number, data: Uint32Array}} minimap. */
         getMinimap(width = 160, height = 100) {
-          if (world === null) ensureWorld()
+          if (world === null) {
+            ensureWorld()
+            // An empty frame is better than a crash: the panel repaints as soon
+            // as the world lands.
+            return { width, height, data: new Uint32Array(width * height) }
+          }
           if (minimap === null || minimap.width !== width || minimap.height !== height) {
             minimap = { width, height, data: paintMinimap(world, width, height) }
           }
@@ -1438,7 +1664,10 @@
         },
         /** Advance exactly one tick while paused. */
         stepOnce() {
-          if (world === null) ensureWorld()
+          if (world === null) {
+            ensureWorld()
+            return
+          }
           stepWorld(world, TICK)
           pushHistory(world)
           publish()
@@ -1452,7 +1681,10 @@
           hover = point === null || point === undefined ? null : { x: point.x, y: point.y }
         },
         paintAt(x, y, erase = false) {
-          if (world === null) ensureWorld()
+          if (world === null) {
+            ensureWorld()
+            return 0
+          }
           // Anything the brush spawns is the player's doing, not a birth: the
           // id watermark tells the observer exactly which animals appeared.
           const before = Number.isFinite(world.nextId) ? world.nextId : 0
@@ -1497,13 +1729,17 @@
         },
         newWorld,
         restock,
+        whenReady,
         markOnboardingSeen,
         resetOnboarding,
         dismissNotice,
         save,
-        peekSave() {
+        saveNow,
+        /** @returns {Promise<object|null>} the stored world, without side effects. */
+        async peekSave() {
           // Peeking must not consume the notice that the panel has not shown yet.
-          return readStored().world
+          const stored = await readStored()
+          return stored.world
         },
         dispose() {
           detach()

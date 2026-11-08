@@ -124,20 +124,11 @@
       }
       // Metabolism is 09b's ledger, called just before this function from
       // stepEntities(); behaviour must never write body.E or charge a second
-      // drain, or an animal would pay for existing twice. A body-less entity
-      // (an old save opened by a build without the ledger) still gets the flat
-      // fallback drain so it cannot live forever.
+      // drain, or an animal would pay for existing twice. Every animal has a
+      // ledger (spawnEntity installs one), so there is no second death path:
+      // starvation, cold and old age all end in metabolise() -> dieOf().
       const body = entity.body
       const hasBody = body !== undefined && Number.isFinite(body.E)
-      if (!hasBody) {
-        entity.energy -= (balance.drain * genes.metabolism + (entity.fleeing ? (balance.fleeDrain ?? 0) : 0)) * dt
-        entity.energy = Math.min(entity.energy, balance.maxEnergy)
-        const reserve = entity.energy
-        if (reserve <= 0 || entity.age > genes.lifespan) {
-          killEntity(world, entity, reserve <= 0 ? 'starved' : 'old')
-          return false
-        }
-      }
       const territory = species.territory
       const ownGrid = species.role === 'hunter' ? grids.hunter : grids.prey
       const crowded = territory !== undefined && countNearby(ownGrid, entity.x, entity.y, territory.radius,

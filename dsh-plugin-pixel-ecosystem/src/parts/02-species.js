@@ -57,7 +57,7 @@
           speed: [2.6, 4.3], vision: [5, 13], size: [0.75, 1.35],
           metabolism: [0.75, 1.3], lifespan: [140, 240], fertility: [70, 110],
         },
-        history: { maturityYears: 0.3, lifespanYears: [1, 3], littersPerYear: 4.5, litterMassShare: 0.15 },
+        history: { maturityYears: 0.3, lifespanYears: [1, 3], littersPerYear: 4.5, litterMassShare: 0.08 },
         balance: { litter: [4, 7], fleeSpeed: 1.9 },
       },
       deer: {
@@ -71,7 +71,7 @@
           speed: [2.6, 3.8], vision: [8, 16], size: [1.4, 2.2],
           metabolism: [1.05, 1.5], lifespan: [1100, 1600], fertility: [600, 720],
         },
-        history: { maturityYears: 2, lifespanYears: [10, 15], littersPerYear: 1, litterMassShare: 0.067 },
+        history: { maturityYears: 2, lifespanYears: [10, 15], littersPerYear: 1, litterMassShare: 0.05 },
         balance: { litter: [1, 3], fleeSpeed: 1.85 },
       },
       fox: {
@@ -83,7 +83,7 @@
           speed: [3.9, 5.7], vision: [9, 19], size: [0.85, 1.55],
           metabolism: [0.85, 1.35], lifespan: [300, 420], fertility: [600, 720],
         },
-        history: { maturityYears: 0.8, lifespanYears: [3, 10], littersPerYear: 1, litterMassShare: 0.11 },
+        history: { maturityYears: 0.8, lifespanYears: [3, 10], littersPerYear: 1, litterMassShare: 0.08 },
         balance: { litter: [3, 6], catchRadius: 1.15, huntSpeed: 1.5, scavengeShare: 0.6 },
       },
       wolf: {
@@ -96,7 +96,7 @@
           speed: [4.3, 6.0], vision: [11, 22], size: [1.3, 2.1],
           metabolism: [1.25, 1.9], lifespan: [700, 900], fertility: [600, 720],
         },
-        history: { maturityYears: 2.5, lifespanYears: [6, 8], littersPerYear: 1, litterMassShare: 0.044 },
+        history: { maturityYears: 2.5, lifespanYears: [6, 8], littersPerYear: 1, litterMassShare: 0.035 },
         balance: { litter: [3, 5], catchRadius: 1.3, huntSpeed: 1.45, scavengeShare: 0.55 },
       },
       crow: {
@@ -108,7 +108,7 @@
           speed: [5.2, 7.6], vision: [14, 26], size: [0.8, 1.2],
           metabolism: [0.85, 1.3], lifespan: [500, 700], fertility: [360, 600],
         },
-        history: { maturityYears: 1, lifespanYears: [4, 8], littersPerYear: 1, litterMassShare: 0.2 },
+        history: { maturityYears: 1, lifespanYears: [4, 8], littersPerYear: 1, litterMassShare: 0.12 },
         balance: { litter: [3, 5], scavengeRadius: 1.7, corpseShare: 0.8 },
       },
       fish: {
@@ -197,7 +197,7 @@
           speed: [1.4, 2.6], vision: [3, 7], size: [0.55, 0.9],
           metabolism: [0.6, 1.05], lifespan: [150, 260], fertility: [500, 700],
         },
-        history: { maturityYears: 1, lifespanYears: [3, 5], littersPerYear: 1, litterMassShare: 0.04 },
+        history: { maturityYears: 1, lifespanYears: [3, 5], littersPerYear: 1, litterMassShare: 0.03 },
         balance: { litter: [8, 14], fleeSpeed: 2.15 },
       },
     }
@@ -268,11 +268,16 @@
         const birthMass = litterMass / litterMax
         const birthReserve = reserveCapacity(species, birthMass) * BIRTH_RESERVE_SHARE
         balance.birthMass = birthMass
-        balance.breedCost = (litterMass * BIO.MEAT_ENERGY + litterMax * birthReserve)
+        /** What one whole litter costs the parent, kJ: tissue plus the kits' reserves. */
+        balance.litterCost = (litterMass * BIO.MEAT_ENERGY + litterMax * birthReserve)
           / BIO.REPRODUCTION_EFFICIENCY
         // A species may only breed when its reserve covers the whole litter, so
         // the ledger never has to invent the difference.
-        balance.breedEnergy = Math.min(capacity * 0.97, balance.breedCost * 1.02)
+        balance.breedEnergy = Math.min(capacity * 0.97, balance.litterCost * 1.02)
+        // The litter is now charged per newborn inside spawnEntity(), out of the
+        // parent's real reserve. This legacy field has to stay ZERO or the parent
+        // would be billed twice for the same litter.
+        balance.breedCost = 0
         // The reserve is spent inside metabolise() and nowhere else. These two
         // keys stay because other layers read them; they must stay zero or the
         // animal would be charged twice for standing still.

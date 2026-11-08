@@ -430,6 +430,29 @@
     }
 
     /**
+     * Take energy out of a reserve to pay for something the body made (a litter).
+     *
+     * This is an internal transfer, not a spend: the caller books the conversion
+     * loss itself, so the ledger is muted while the reserve moves and the energy
+     * does not get counted twice.
+     * @param {object} entity - the payer.
+     * @param {number} kilojoules - what it owes, kJ.
+     * @returns {number} what it could actually pay, kJ.
+     */
+    function payFromReserve(entity, kilojoules) {
+      const body = bodyOf(entity)
+      if (!(kilojoules > 0) || body.dead === true) return 0
+      const paid = Math.min(body.E, kilojoules)
+      ledgerWriteDepth += 1
+      try {
+        body.E -= paid
+      } finally {
+        ledgerWriteDepth -= 1
+      }
+      return paid
+    }
+
+    /**
      * Wound an animal; the health cost is paid over the next days, not at once.
      * @param {object} entity - the animal.
      * @param {number} days - how long the wound keeps hurting.

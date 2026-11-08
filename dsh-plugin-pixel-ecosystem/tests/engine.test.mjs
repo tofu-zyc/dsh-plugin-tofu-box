@@ -33,6 +33,7 @@ const {
   SPECIES, SPECIES_IDS, TERRAIN, GENE_KEYS, TICK,
   createWorld, stepWorld, place, spawnEntity, findEntityAt, sampleStats, pushHistory,
   serializeWorld, deserializeWorld, countSpecies, handleImmigration, settleTerrain, computeHydrology,
+  dryMatterRequirement, grazingIntake,
 } = engine
 
 /** Stocks that seed nothing, so a test starts from an empty world. */
@@ -593,7 +594,12 @@ test('breeding mutates genes inside the species ranges and increments the genera
     stepWorld(world, TICK)
     for (const entity of world.entities) {
       if (known.has(entity.id)) continue
-      children.push({ generation: entity.generation, energy: entity.energy, genes: { ...entity.genes } })
+      children.push({
+        generation: entity.generation,
+        energy: entity.energy,
+        emax: entity.body === undefined ? undefined : entity.body.Emax,
+        genes: { ...entity.genes },
+      })
     }
     // Rabbits breed density-dependently (DESIGN §5.2 territory), so clear the
     // newborns before the next round: this test is about the gates, not crowding.
@@ -616,16 +622,63 @@ test('breeding mutates genes inside the species ranges and increments the genera
   assert.ok(mutated, 'no child gene ever drifted from the parent: mutation is not wired up')
   assert.equal(parent.children, children.length, 'the parent must count every kit in its litters')
   assert.ok(parent.cooldown > 0, 'a parent must be on cooldown after breeding')
-  // The invariant: a newborn is alive but far from weaned - it cannot start at
-  // the adult reserve, and it must not start empty. The exact share is a tuning
-  // value (it was 40% in the 0.2.x table), so it is bounded, not pinned.
+  // The invariant: a newborn is alive but far from weaned - it must not start
+  // empty, and it must not start at its own reserve ceiling. It is measured
+  // against the KIT'S OWN capacity, not the adult start energy: since the energy
+  // ledger landed a kit is born at ~43 g with a 304 kJ reserve, which is only
+  // 8.5% of the adult number but a full share of its own body.
   const startEnergy = SPECIES.rabbit.balance.startEnergy
   for (const child of children) {
     assert.ok(child.energy > 0, 'a newborn must start with some reserve, got ' + child.energy)
-    assert.ok(child.energy < startEnergy, 'a newborn must not start at the adult reserve: ' + child.energy + ' >= ' + startEnergy)
-    assert.ok(child.energy >= startEnergy * 0.1 && child.energy <= startEnergy * 0.7,
-      'a newborn must start with a fraction of the species start energy, got ' + child.energy + ' of ' + startEnergy)
+    const capacity = child.emax === undefined ? startEnergy : child.emax
+    assert.ok(child.energy <= capacity, 'a newborn cannot hold more than its own reserve capacity: '
+      + child.energy + ' > ' + capacity)
+    assert.ok(child.energy >= capacity * 0.1 && child.energy <= capacity * 1.0,
+      'a newborn must start between 10% and 100% of its own reserve capacity, got '
+      + child.energy + ' of ' + capacity)
   }
+})
+
+test('the grazing curve pays exactly the maintenance requirement at the reference sward', () => {
+  // The 182 g/day calibration in docs/10 section 4 must hold as an ANALYTIC
+  // identity, not as a herd average. A population mean is dragged down by
+  // behaviour (animals that spend most of the day resting run at activity ~0.7),
+  // so measuring the calibration off the herd would report an accounting bug
+  // that is not there. The identity is about the curve itself:
+  //   grazingIntake(requirement, GRAZE_REFERENCE) === requirement
+  // and the requirement is derived from FMR, assimilation and grass energy.
+  const world = blankWorld()
+  const rabbit = spawnEntity(world, 'rabbit', 20, 15)
+  assert.ok(rabbit !== null, 'the probe rabbit must spawn')
+  const volume = engine.bodyOf(rabbit).V
+  const requirement = dryMatterRequirement(SPECIES.rabbit, volume)
+
+  // docs/10: 2 kg rabbit, FMR 1 276 kJ/day, 40% assimilation, 17.5 MJ/kg grass
+  // -> 182.3 g of dry matter per day, +/-20%.
+  assert.ok(volume > 1.9 && volume < 2.1,
+    'the adult rabbit body the calibration is stated for must still be ~2 kg, got ' + volume)
+  assert.ok(Math.abs(requirement - 0.1823) <= 0.1823 * 0.2,
+    'a 2 kg rabbit must need ~182 g dry matter/day, got ' + (requirement * 1000).toFixed(1) + ' g')
+
+  // Reference sward density from the intake curve itself (11-feed GRAZE_REFERENCE):
+  // at this biomass the Holling II curve returns exactly the requirement. That
+  // normalisation is the whole point of the curve - it makes "break even" the
+  // value at a *documented* sward, so no species row has to carry 182 g.
+  const REFERENCE_SWARD = 0.12
+  const atReference = grazingIntake(requirement, REFERENCE_SWARD)
+  assert.ok(Math.abs(atReference - requirement) <= requirement * 1e-9,
+    'grazingIntake(R, GRAZE_REFERENCE) must return R exactly, got ' + atReference + ' for ' + requirement)
+
+  // And the curve behaves: poorer sward pays less, richer sward pays more, and
+  // it saturates instead of running away with the meadow's biomass.
+  assert.ok(grazingIntake(requirement, REFERENCE_SWARD * 0.5) < requirement,
+    'a bare sward must pay less than the requirement')
+  assert.ok(grazingIntake(requirement, REFERENCE_SWARD * 10) > requirement,
+    'a lush sward must pay more than the requirement')
+  const ceiling = grazingIntake(requirement, 1e6)
+  assert.ok(ceiling > requirement * 4 && ceiling < requirement * 6,
+    'the intake curve must saturate at a small documented multiple of the requirement, got ' + (ceiling / requirement).toFixed(2))
+  assert.ok(grazingIntake(requirement, 0) === 0, 'no grass means no intake')
 })
 
 test('territory blocks breeding when the neighbourhood is already crowded', () => {

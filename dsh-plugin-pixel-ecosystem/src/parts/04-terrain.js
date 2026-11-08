@@ -16,8 +16,12 @@
       return (x, y) => {
         const fx = x / cellSize
         const fy = y / cellSize
-        const x0 = fx | 0
-        const y0 = fy | 0
+        // Indices are clamped, not trusted: a caller may sample outside the
+        // lattice (an offset coordinate, a brush near the edge) and an undefined
+        // lattice read makes a whole field NaN silently. That is exactly the bug
+        // that turned 58 water cells into NaN and poisoned the energy book.
+        const x0 = Math.min(cols - 2, Math.max(0, fx | 0))
+        const y0 = Math.min(rows - 2, Math.max(0, fy | 0))
         const tx = smooth(fx - x0)
         const ty = smooth(fy - y0)
         const i0 = y0 * cols + x0
@@ -293,7 +297,7 @@
         } else if (terrain === TERRAIN.WATER) {
           const x = i % world.width
           const y = (i / world.width) | 0
-          const rank = 0.3 + 0.5 * patch(x + 17, y + 29)
+          const rank = 0.3 + 0.5 * patch((x + 17) % world.width, (y + 29) % world.height)
           const soil = 0.4 + 0.6 * world.waterFertility[i]
           world.weed[i] = clamp(PRODUCERS.weed.bmax * rank * soil, 0, PRODUCERS.weed.bmax)
           world.detritus[i] = world.weed[i] * 0.25
