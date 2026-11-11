@@ -39,6 +39,9 @@ dist/
 /.scratch/
 /.agents/
 **/.scratch/
+# 评审截图与本地 npm 缓存（发版/测试用，不入库；见 HANDOVER §10.7）
+**/.review/
+/.npm-cache-dev/
 **/__pycache__/
 *.pyc
 **/.chrome-verify/
