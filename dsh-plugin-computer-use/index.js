@@ -82,6 +82,7 @@
  */
 
 import zlib from 'node:zlib'
+import { execFile } from 'node:child_process'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { configureLinuxDesktop, probeGnomeHelper, linuxDesktopHint } from './linux.js'
@@ -543,12 +544,50 @@ export function apply(ctx, config) {
     if (w.includes(name) && name !== '') return 40
     return 0
   }
+  // ── OS process table (driver-independent "is it running?") ────────────────
+  // Since 0.47 the driver's list_apps.running only covers apps that own a
+  // window: a tray-state process (WeChat minimized to the tray) reports
+  // running:false, and deciding "not running → launch" from it starts a second
+  // instance of a logged-in chat app. The process table is the ground truth.
+  const execFileText = (cmd, args) => new Promise((resolve, reject) => {
+    execFile(cmd, args, { encoding: 'utf8', timeout: 8000, windowsHide: true }, (err, stdout) => err ? reject(err) : resolve(stdout))
+  })
+  /** [{ pid, name }] — name is the lowercase exe basename without extension. */
+  const runningProcesses = async () => {
+    try {
+      if (process.platform === 'win32') {
+        const out = await execFileText('tasklist.exe', ['/FO', 'CSV', '/NH'])
+        const procs = []
+        for (const line of out.split(/\r?\n/)) {
+          const m = line.match(/^"([^"]+)","(\d+)"/)
+          if (m) procs.push({ pid: Number(m[2]), name: normApp(m[1]) })
+        }
+        return procs
+      }
+      const out = await execFileText('ps', ['-axo', 'pid=,comm='])
+      const procs = []
+      for (const line of out.split(/\r?\n/)) {
+        const m = line.trim().match(/^(\d+)\s+(.+)$/)
+        if (m) procs.push({ pid: Number(m[1]), name: normApp(m[2].split(/[\\/]/).pop()) })
+      }
+      return procs
+    } catch (e) {
+      ctx.logger.warn('computer-use: process table unavailable (' + String(e && e.message ? e.message : e).slice(0, 120) + ') — falling back to the driver running flag')
+      return []
+    }
+  }
+  /** The live process for an app: match the inventory exe first, then the name. */
+  const findRunningProcess = (procs, want, entry) => {
+    const exe = entry ? normApp(String(entry.launch_path ?? entry.bundle_id ?? '').split(/[\\/]/).pop()) : ''
+    const w = normApp(want)
+    return procs.find((p) => (exe !== '' && p.name === exe) || (w.length >= 3 && p.name === w))
+  }
+
   /**
    * The installed-app inventory entry for `want`, or null.
-   * Only consulted on the launch path (it is the slow call); its running flags
-   * are NOT used for the "already running?" decision — the official guidance is
-   * to reason about windows from `list_windows`, and that view is also the one
-   * a reuse decision actually needs.
+   * Only consulted on the launch path (it is the slow call); its running flag
+   * is window-biased since driver 0.47, so the "already running?" decision
+   * combines it with the OS process table (see findRunningProcess).
    */
   const findInstalledApp = async (want) => {
     let apps = []
@@ -674,16 +713,11 @@ export function apply(ctx, config) {
     // succeeded (a name-only launch on this driver can exit within seconds).
     let died = false
     if (Number(pid) > 0) {
-      try {
-        const r = await raw('list_apps', {})
-        // An errored inventory must not read as "the process died": unknown
-        // stays unknown (died=false) rather than telling the model the app
-        // exited when the real problem is the driver call.
-        if (!r.isError) {
-          const seen = structured(r).apps ?? []
-          died = !seen.some((x) => Math.round(Number(x.pid)) === Math.round(Number(pid)))
-        }
-      } catch {}
+      // Process table, not list_apps: since 0.47 the inventory only marks
+      // window-owning apps running, so a freshly launched windowless process
+      // would read as "died". An unavailable table stays unknown (died=false).
+      const procs = await runningProcesses()
+      if (procs.length > 0) died = !procs.some((x) => x.pid === Math.round(Number(pid)))
     }
     return { pid, target: null, died }
   }
@@ -771,7 +805,11 @@ export function apply(ctx, config) {
   const captureWindow = async (t, opts) => {
     const includeTree = !(opts && opts.tree === false)
     const build = () => {
-      const args = { pid: t.pid, window_id: t.windowId, include_accessibility_tree: includeTree }
+      // max_elements: the driver lowered its default walk cap from 5000 to 250;
+      // keep the full tree so element tokens stay reachable in deep UIs.
+      // tree_format: 0.47 defaults to markdown-only (no elements array); the
+      // plugin renders its own table from the structured elements.
+      const args = { pid: t.pid, window_id: t.windowId, include_accessibility_tree: includeTree, max_elements: 5000, tree_format: 'elements' }
       if (opts && opts.query) args.query = opts.query
       return args
     }
@@ -901,9 +939,14 @@ export function apply(ctx, config) {
   // shapes; when neither resolves, assume the session CANNOT be prompted — an
   // unnecessary ask under 'never' is auto-rejected and locks every tool, while
   // a skipped ask under 'ask' still surfaces in the next screenshot.
-  const approval = ctx.get('approval')
+  // Read the approval service at CALL time, not apply time: it can register
+  // after this plugin activates (composition-order race). A cached undefined
+  // hides the session's 'never' policy forever — the gate asks, the ask is
+  // auto-rejected, and every mutating tool self-locks (measured in PTC mode
+  // under danger-full-access: "the user rejected tool" with no user prompt).
   const sessionRefusesPrompt = (exec) => {
     const session = exec && exec.agent && exec.agent.session
+    const approval = ctx.get('approval')
     if (approval === undefined || session === undefined) return false
     try {
       // Most complete first: session fold + configured default in one answer.
@@ -1318,22 +1361,26 @@ export function apply(ctx, config) {
       // Order matters, and this is the order: PROCESS FIRST, window second.
       //
       // "Is a process for this app alive?" is the cheapest and most reliable
-      // signal (the driver derives list_apps.running from the process table and
-      // the foreground pid). The window layer is the fragile one — measured:
-      // list_windows can report zero windows for the whole lifetime of a
-      // long-lived host, and it is also session/DPI sensitive. Deciding "it is
-      // not running, so launch it" from a WINDOW lookup therefore relaunches an
-      // app that is plainly alive, which is precisely the reported bug. So:
-      // ask the process table first, and only launch when it says no.
+      // signal. The window layer is the fragile one — measured: list_windows
+      // can report zero windows for the whole lifetime of a long-lived host,
+      // and it is also session/DPI sensitive. Deciding "it is not running, so
+      // launch it" from a WINDOW lookup therefore relaunches an app that is
+      // plainly alive, which is precisely the reported bug. So: ask the process
+      // table first, and only launch when it says no. Since driver 0.47 the
+      // list_apps.running flag is window-biased (tray processes report false),
+      // so the OS process table is consulted directly as well.
 
       // 1) Already running? Then never launch. Reuse its window when there is
       //    one (restoring it if minimized); otherwise it is a tray-state app.
       const entry = await findInstalledApp(appName)
-      if (entry !== null && entry.running === true) {
-        let target = await windowFor(appName, entry.pid)
+      const live = findRunningProcess(await runningProcesses(), appName, entry)
+      const driverSaysRunning = entry !== null && entry.running === true
+      const runPid = driverSaysRunning ? entry.pid : (live !== undefined ? live.pid : undefined)
+      if (driverSaysRunning || live !== undefined) {
+        let target = await windowFor(appName, runPid)
         for (let waited = 0; target === null && waited < 2000; waited += 400) {
           await sleep(400, exec.signal)
-          target = await windowFor(appName, entry.pid)
+          target = await windowFor(appName, runPid)
         }
         if (target !== null) {
           last = target
@@ -1346,14 +1393,16 @@ export function apply(ctx, config) {
         // the tray icon, which restores the real window without starting
         // anything. activate_running=true opts into letting its launcher try.
         if (mayActivate) {
-          const activate = entry.kind === 'uwp'
+          const activate = entry === null
             ? await launchSelectorFor(appName)
-            : (typeof entry.launch_path === 'string' && entry.launch_path !== '' ? { launch_path: entry.launch_path } : (typeof entry.bundle_id === 'string' && entry.bundle_id !== '' ? { path: entry.bundle_id } : null))
+            : entry.kind === 'uwp'
+              ? await launchSelectorFor(appName)
+              : (typeof entry.launch_path === 'string' && entry.launch_path !== '' ? { launch_path: entry.launch_path } : (typeof entry.bundle_id === 'string' && entry.bundle_id !== '' ? { path: entry.bundle_id } : null))
           if (activate !== null) {
             await call('launch_app', { ...activate, start_minimized: true }).catch(() => null)
             for (let waited = 0; waited < 6000; waited += 600) {
               await sleep(600, exec.signal)
-              const t = await windowFor(appName, entry.pid)
+              const t = await windowFor(appName, runPid)
               if (t !== null) {
                 last = t
                 return await shotFor(last, { restoreMinimized: true, signal: exec.signal, summary: 'Activated the already-running "' + appName + '" through its own launcher (pid ' + t.pid + ') — no second instance.' })
@@ -1361,7 +1410,7 @@ export function apply(ctx, config) {
             }
           }
         }
-        return await captureDesktop('"' + appName + '" is ALREADY RUNNING (pid ' + entry.pid + ') but exposes no window — this is usually its tray state, so nothing was started. Ask the user to open it from the tray (clicking the tray icon restores the real window and keeps the session), then retry. If the app truly has no window and no tray icon, retry with activate_running=true to let its launcher try.')
+        return await captureDesktop('"' + appName + '" is ALREADY RUNNING (pid ' + runPid + ') but exposes no window — this is usually its tray state, so nothing was started. Ask the user to open it from the tray (clicking the tray icon restores the real window and keeps the session), then retry. If the app truly has no window and no tray icon, retry with activate_running=true to let its launcher try.')
       }
 
       // 2) Not running: launch it (aumid for Store apps, shortcut commandline
@@ -1606,7 +1655,7 @@ export function apply(ctx, config) {
   // Best-effort: push the model-frame cap into the driver for window captures
   // (the driver resizes window screenshots AND keeps x,y/zoom coordinates
   // consistent with the resized image; desktop captures are resized plugin-side).
-  getDriver().then(() => raw('set_config', { key: 'max_image_dimension', value: maxDim })).then(
+  getDriver().then(() => raw('set_config', { max_image_dimension: maxDim })).then(
     () => ctx.logger.info('computer-use: max_image_dimension=' + maxDim),
     () => {},
   )
