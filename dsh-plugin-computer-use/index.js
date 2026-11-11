@@ -901,9 +901,14 @@ export function apply(ctx, config) {
   // shapes; when neither resolves, assume the session CANNOT be prompted — an
   // unnecessary ask under 'never' is auto-rejected and locks every tool, while
   // a skipped ask under 'ask' still surfaces in the next screenshot.
-  const approval = ctx.get('approval')
+  // Read the approval service at CALL time, not apply time: it can register
+  // after this plugin activates (composition-order race). A cached undefined
+  // hides the session's 'never' policy forever — the gate asks, the ask is
+  // auto-rejected, and every mutating tool self-locks (measured in PTC mode
+  // under danger-full-access: "the user rejected tool" with no user prompt).
   const sessionRefusesPrompt = (exec) => {
     const session = exec && exec.agent && exec.agent.session
+    const approval = ctx.get('approval')
     if (approval === undefined || session === undefined) return false
     try {
       // Most complete first: session fold + configured default in one answer.
