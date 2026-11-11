@@ -74,10 +74,15 @@
 6. `pose.role === 'walk'` 且 `animal.running === true` → 升级为 `run`。
 
 未知 id 永远不会崩、不会卡成空白帧 —— 这是"引擎可以先加状态、渲染后补姿势"的前提。
-`tests/animation.test.mjs` 逐条钉住了这张表与回退链。
+`tests/animation.test.mjs` 钉住了**回退链**（装饰 id → 未命中回退 → 旧 `intent` → `fleeing` 强制 run）和几张代表姿势；
+**不是 39 条逐条覆盖** —— 加新 id 时请顺手加断言。
 
-> 待对齐：`state.id` 的最终词表以 behaviour 的 `10b-execution.js` 为准。渲染侧已把上面 38 个 id 的清单发给 behaviour；
-> 他们确定词表后，缺的 id 按最接近语义补进 `STATE_POSES`。
+> **已对齐（2026-11-08 定稿）**：`state.id` 的词表就是 `09-needs.js:68` 的 `INTENT_IDS` —— 只有
+> `flee / forage / hunt / scavenge / drink / rest / socialize / explore` 这 8 个，全部在上表内，命中即用；
+> 执行状态机（`10b-execution.js`）不会产出这 8 个以外的 id。
+> 表里另外 31 个 id（`graze` / `eat` / `stalk` / `feast` …）是给将来状态预留的语义锚点，也是旧 `intent`
+> 与装饰 id（`eat:grass`、`hoard_cache`）的回退目标 —— 姿势现在就有，只是当前引擎不会产生这些 `state.id`。
+> 所以"39"这个数要三处一致：§2 开头的覆盖声明、这张表本身、§7 的测试说明。
 
 ## 3. 两条渲染路径
 
@@ -213,7 +218,7 @@
 - `tests/render.test.mjs`：像素级契约 —— 一格一个不透明 ARGB、同 tick 幂等、水是唯一随 tick 变的图层（非冬季）、
   各图层可开关、边缘剪裁（阴影开/关两条断言）、冬夏地面差异、植物阴影随太阳摆动、体型→阴影大小、
   视口外生物不影响画面、只在冬季下雪、睡觉比站立更矮更少像素。
-- `tests/animation.test.mjs`：图集与槽位表一致、状态→帧组映射（38 个 id）、未知 id 回退、装饰 id 与旧 `intent` 兼容、
+- `tests/animation.test.mjs`：图集与槽位表一致、状态→帧组映射（39 个 id 的表，抽查代表 id）、未知 id 回退、装饰 id 与旧 `intent` 兼容、
   暂停姿不闪帧 / 移动姿循环。
 
 ## 8. 还需要别的 scope 配合的事
@@ -225,5 +230,6 @@
 3. **behaviour**：已对齐（8 个 id + `state.phase` + `entity.handling`，见 §2）。
    进度 0..1 由 `state.since/until` 现算，渲染侧目前用时间驱动点头/抖动；若以后需要"越接近完成越急躁"之类的效果，
    直接读这两个字段即可，不需要新字段。
-4. **sim-core**：`world.climate.yearPhase/dayPhase` 一旦落地，渲染自动改用它（现在有 time 兜底），
-   另外地图放大到 1024×640 后需要复测本文 §5 的数字（`createWorld` 目前仍夹到 512）。
+4. **sim-core**：`world.climate.yearPhase/dayPhase` 已落地（`13b-climate.js:40-42`），渲染优先用它、
+   没有 climate 时才退回 `world.time` 兜底；地图已是 1024×640 —— `createWorld` 夹的是 `GRID_W/GRID_H`（1024/640，
+   `05-world-create.js:128-129`），§5 那些数字本来就是 1024×640 上测的（默认世界 524 生物 / 1497 植物 / 21 尸体）。

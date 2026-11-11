@@ -196,6 +196,134 @@
           'bbbbd',
         ],
       },
+      // The four species below used to live only in the display atlas (18-atlas),
+      // which the panel switches to at 3x and up (21-store.js useAtlas). The map
+      // is laid out at 1x ("fit the window"), so before this the bear, the otter,
+      // the heron and the frog were drawn nowhere at all while their counts and
+      // minimap dots stayed on screen. One grid per species closes that hole.
+      bear: {
+        idle: [
+          'b.....b',
+          '.bbbbb.',
+          'bbbbbbb',
+          'kbbbbbd',
+          '.b...b.',
+        ],
+        walk: [
+          [
+            'b.....b',
+            '.bbbbb.',
+            'bbbbbbb',
+            'kbbbbbd',
+            'b.b.b..',
+          ],
+          [
+            'b.....b',
+            '.bbbbb.',
+            'bbbbbbb',
+            'kbbbbbd',
+            '.b.b.b.',
+          ],
+        ],
+        flee: [
+          'b.....b',
+          'bbbbbbb',
+          'bbbbbbb',
+          'kbbbbbd',
+          'b.....b',
+        ],
+      },
+      otter: {
+        idle: [
+          '.b..b.',
+          'kbbbbb',
+          'bbbbbb',
+          '.d..d.',
+        ],
+        walk: [
+          [
+            '.b..b.',
+            'kbbbbb',
+            'bbbbbb',
+            'b...b.',
+          ],
+          [
+            '.b..b.',
+            'kbbbbb',
+            'bbbbbb',
+            '.b...b',
+          ],
+        ],
+        flee: [
+          '.b..b.',
+          'kbbbbb',
+          'bbbbbb',
+          '.dd.dd',
+        ],
+      },
+      heron: {
+        // Head and beak top-left, an S-neck, a compact body, two long legs:
+        // at one pixel per cell the neck is what makes a heron read as a heron
+        // and not as a grey blob (compare the crow, which is all body).
+        idle: [
+          'kb...',
+          'bb...',
+          '..b..',
+          '..b..',
+          '.bbb.',
+          'b...b',
+        ],
+        walk: [
+          [
+            'kb...',
+            'bb...',
+            '..b..',
+            '..b..',
+            '.bbb.',
+            'b...b',
+          ],
+          [
+            'kb...',
+            'bb...',
+            '..b..',
+            '..b..',
+            '.bbb.',
+            '.b.b.',
+          ],
+        ],
+        flee: [
+          'kb..b',
+          'bbbbb',
+          '..b..',
+          '.bbb.',
+          '.bbb.',
+          '..b..',
+        ],
+      },
+      frog: {
+        idle: [
+          'k..k',
+          'bbbb',
+          '.dd.',
+        ],
+        walk: [
+          [
+            'k..k',
+            'bbbb',
+            'd.d.',
+          ],
+          [
+            'k..k',
+            'bbbb',
+            '.d.d',
+          ],
+        ],
+        flee: [
+          'k..k',
+          'bbbb',
+          'dd.d',
+        ],
+      },
     }
 
     /** Character → palette colour, per species. */
@@ -207,6 +335,10 @@
       crow: { b: PALETTE.crow.body, w: PALETTE.crow.wing, k: PALETTE.crow.eye },
       fish: { b: PALETTE.fish.body, f: PALETTE.fish.fin, d: PALETTE.fish.belly },
       pike: { b: PALETTE.pike.body, f: PALETTE.pike.fin, d: PALETTE.pike.dark },
+      bear: { b: PALETTE.bear.body, k: PALETTE.bear.eye, d: PALETTE.bear.belly },
+      otter: { b: PALETTE.otter.body, k: PALETTE.otter.eye, d: PALETTE.otter.belly },
+      heron: { b: PALETTE.heron.body, w: PALETTE.heron.wing, k: PALETTE.heron.eye },
+      frog: { b: PALETTE.frog.body, k: PALETTE.frog.eye, d: PALETTE.frog.belly },
     }
 
 
@@ -885,9 +1017,16 @@
       compileSprite(['b.b'], { b: PALETTE.corpse.bone }),
     ]
 
-    /** Faded body colours used to paint motion trails. */
+    /**
+     * Faded body colours used to paint motion trails.
+     *
+     * The list below must mirror SPECIES_IDS: a missing entry dims `undefined`,
+     * which packs to opaque black — that is how the four bridge species used to
+     * leave black speckles behind them. tests/sprite-coverage.test.mjs pins it.
+     */
     const TRAIL_COLORS = Object.fromEntries(SPECIES_IDS.map(id => [id, dimColor({
       rabbit: PALETTE.rabbit.body, deer: PALETTE.deer.body, fox: PALETTE.fox.body,
       wolf: PALETTE.wolf.body, crow: PALETTE.crow.body, fish: PALETTE.fish.body,
-      pike: PALETTE.pike.body,
+      pike: PALETTE.pike.body, bear: PALETTE.bear.body, otter: PALETTE.otter.body,
+      heron: PALETTE.heron.body, frog: PALETTE.frog.body,
     }[id], 0.42)]))

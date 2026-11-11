@@ -44,6 +44,14 @@
       crow: { body: rgb(44, 44, 54), wing: rgb(68, 68, 82), eye: rgb(210, 190, 90) },
       fish: { body: rgb(96, 160, 208), belly: rgb(190, 226, 240), fin: rgb(64, 122, 172) },
       pike: { body: rgb(86, 120, 78), dark: rgb(58, 86, 54), fin: rgb(120, 150, 104) },
+      // The four species added with the land/water bridge. They were drawn only
+      // by the display-resolution atlas, so the 1-px buffer pass had neither a
+      // grid nor a colour for them: at 1-2x they simply were not on the map, and
+      // their motion trails came out black (dimColor(undefined) packs 0x000000).
+      bear: { body: rgb(104, 74, 52), belly: rgb(160, 126, 92), eye: rgb(28, 20, 14) },
+      otter: { body: rgb(122, 86, 58), belly: rgb(200, 178, 146), eye: rgb(26, 20, 16) },
+      heron: { body: rgb(154, 164, 178), wing: rgb(112, 124, 140), eye: rgb(230, 196, 72) },
+      frog: { body: rgb(111, 174, 78), belly: rgb(190, 216, 138), eye: rgb(238, 226, 120) },
       corpse: { flesh: rgb(120, 82, 74), bone: rgb(206, 198, 180) },
     }
     /** Effect colours: pure visual feedback, never read back by the simulation. */

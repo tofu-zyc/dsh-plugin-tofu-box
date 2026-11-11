@@ -71,7 +71,7 @@ test('the same seed reproduces the same world after 400 ticks', () => {
   assert.equal(run(), run(), 'two runs of the same seed diverged')
 })
 
-test('a reload is faithful in state, and forks only through quantisation', { todo: 'documented trade-off: fields are saved at 8 bits, so a reload is not bit-identical' }, () => {
+test('a reload is faithful in state, and forks only through quantisation', () => {
   // Finding from the review: every hidden state that matters survives the round
   // trip (rng, nextId, clock, timers, state machine, belief), but the producer
   // fields are quantised to 8 bits, so the restored world's grass differs by up
@@ -195,17 +195,19 @@ test('the body survives a save round trip, not just the genes', () => {
   assert.deepEqual(mismatches, [], 'body state lost in the save: ' + mismatches.join(' | '))
 })
 
-test('a save from a foreign version is refused instead of half-loaded', { todo: 'confirmed: a corrupt entity list loads as an empty world' }, () => {
+test('a save from a foreign version is refused instead of half-loaded', () => {
   // Would catch: a version check that warns but still returns a world, which is
   // how a player silently loses a save to a mismatched build.
   const world = createWorld({ seed: 5, width: 48, height: 32 })
   const saved = serializeWorld(world)
   assert.throws(() => deserializeWorld({ ...saved, version: 1 }), /save version/i,
     'a v1 save must be refused by a v2 build')
-  // CONFIRMED DEFECT (see the review report): a save whose `entities` field is
-  // corrupt loads as a valid world with ZERO animals instead of throwing. That is
-  // the silent-drop behaviour docs/00-VISION G5 forbids, and from the player's
-  // side it looks like the whole terrarium vanished.
+  // Was a confirmed defect when this test was written: a save whose `entities`
+  // field was corrupt loaded as a valid world with ZERO animals instead of
+  // throwing — the silent-drop behaviour docs/00-VISION G5 forbids, which from
+  // the player's side looks like the whole terrarium vanished. The save-integrity
+  // round fixed it (tests/save-integrity.test.mjs), so this is a live assertion
+  // again rather than a todo.
   assert.throws(() => deserializeWorld({ ...saved, entities: 'not-an-array' }), /entit/i,
     'a corrupt entity list must be refused, not silently loaded as an empty world')
 })

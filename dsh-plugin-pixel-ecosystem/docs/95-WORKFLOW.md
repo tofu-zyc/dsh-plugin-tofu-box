@@ -13,11 +13,18 @@
 ```powershell
 cd dsh-plugin-pixel-ecosystem
 node tools/build-client.mjs        # 改完 part 之后必须重建
-node --test tests/*.test.mjs       # 全套 68 个测试
+node --test tests/*.test.mjs       # 全套 134 个测试（134 pass / 0 fail / 0 todo，约 22.5 s）
 node tools/build-client.mjs --check # 构建是否最新（pretest 会自动跑）
 ```
 
 顺序错误的后果：`tests/build.test.mjs` 会红，提示"client.js is stale"。
+
+0.3.10 新增的两个套件各有专职，不要把它们的断言合并成一条：
+
+- `tests/sprite-coverage.test.mjs`：**渲染两条路径的物种一致性** —— 11 个物种都必须有 1px 网格、配色、idle/walk/run 帧，
+  `frameFor` 对任何真实个体都不许返回 `null`，拖影颜色不许是纯黑，图集槽位要落在图内。加了第 12 个物种却没画美术，这里先红。
+- `tests/reproduction.test.mjs`：**繁殖机制本身** —— 11 个物种逐个断言"成年 + 吃饱 + 冷却结束"能产仔，
+  外加两条反例（幼体不产仔、储备不够不产仔）。它不证明种群能自持（那是 `balance.test.mjs` 和探针的事）。
 
 ## part 所有权
 

@@ -13,16 +13,36 @@
 有昼夜明暗，世界自动存进浏览器本地，关掉页面再回来还在。它就是给「AI 干活、你等结果的那几分钟」摸鱼用的，
 不联网、不改你的会话、不碰 Host。
 
-> **状态：0.3.9 在开发分支 `feat/terrarium-energy-core` 上，尚未发布到 npm。**
-> 0.2.3 是 npm 上的最后一个版本（美术换代）；0.3.x 是底层重写——能量账本 + 感知/信念/决策/执行的行为层，
-> 平衡不再靠调数值，而是靠热量收支算出来的。面板与交互在这一版修到可用（画布尺寸、输入、缩放、物种行语义），
-> 修复记录与验收数字见 [docs/FINAL-REPORT.md](docs/FINAL-REPORT.md) 第 8 节。
+> **状态：0.3.10 在开发分支 `feat/terrarium-energy-core` 上；0.3.9 和 0.3.10 都还没有发布到 npm。**
+> 0.2.3 仍是 npm 上的最后一个版本（美术换代）；0.3.x 是底层重写——能量账本 + 感知/信念/决策/执行的行为层，
+> 平衡不再靠调数值，而是靠热量收支算出来的。面板与交互在 0.3.9 / 0.3.10 修到可用（画布尺寸、输入、缩放、
+> 物种行语义、低缩放下 4 个物种整体消失、拖影颜色），修复记录与验收数字见
+> [docs/FINAL-REPORT.md](docs/FINAL-REPORT.md) 第 8 节。
 > 0.1.0 当时提交成功但仍在 npm 的 staged publishing 队列里等 maintainer 批准；
 > 在 `npm view dsh-plugin-pixel-ecosystem versions` 列出你要装的那个版本之前，只能 `link:` 或 git 直装（见下面「安装」）。
 > 本插件是独立插件，**不并入 `tofu-box` 伞包**（清单里标了 `dsh.umbrella: false`）。
 >
 > 兼容性：`engines.dsh` 声明为 `>=0.2.0-rc.2 <0.3.0-0`；Client 半只声明 `platform: web`。
 > 本文不声称做过浏览器里的视觉确认——那一步请按「测试」一节自己起服务、自己打开链接看。
+
+## ⚠️ 正文是 0.2.3 的历史内容 —— 0.3.x 请看 `docs/`
+
+> 从这一行往下，**§玩法 / §生态机制 / §测试 / §路线图 描述的是 0.2.3**（512×400 格、1 天 = 120 秒、五条需求、
+> 65 个测试、`VIABLE_PEAK` 契约）。这些数字和机制在 0.3.x 里**都已经换掉了**，照着玩会对不上。
+>
+> **0.3.10 的当前契约以 `docs/` 为准**，按这个顺序读：
+>
+> | 文档 | 讲什么 |
+> |---|---|
+> | [docs/00-VISION.md](docs/00-VISION.md) | 目标、三条产品原则、G1–G7 验收清单 |
+> | [docs/20-CORE-LOOP.md](docs/20-CORE-LOOP.md) | 每 tick 执行顺序、实体与世界字段契约、关键方程 |
+> | [docs/30-METABOLISM.md](docs/30-METABOLISM.md) | 能量账本与守恒残差 |
+> | [docs/40-BEHAVIOUR.md](docs/40-BEHAVIOUR.md) | 感知 → 信念 → 驱动力 → 审议 → 执行状态机 |
+> | [docs/70-VISUAL.md](docs/70-VISUAL.md) | 状态→帧映射、季节与昼夜、大地图性能 |
+> | [docs/80-UI.md](docs/80-UI.md) | 面板结构、检视器、画布尺寸不变式、存档 |
+> | [docs/90-ROADMAP.md](docs/90-ROADMAP.md) | P0–P6 的门禁，以及**当前真实状态**（哪条过了、哪条还缺） |
+>
+> 这一版改了什么、验收数字是多少，见 [docs/FINAL-REPORT.md](docs/FINAL-REPORT.md)（§8 是 0.3.x 的修复记录）。
 
 主面板的样子（示意图，不是截图）：
 
@@ -41,7 +61,7 @@
 
 ## 安装
 
-> 要接手开发这个插件？先读 [HANDOVER.md](HANDOVER.md)：状态、代码地图、验证方式、已知缺陷、下一步验收标准都在那里。
+> 要接手开发这个插件？**`HANDOVER.md` 是 0.2.1 的历史交接书**（讲的是旧引擎），0.3.x 请从 [docs/00-VISION.md](docs/00-VISION.md) 开始读，再看 [docs/90-ROADMAP.md](docs/90-ROADMAP.md) 的状态总览。
 
 包名 `dsh-plugin-pixel-ecosystem`，插件行 id 是 `pixel-ecosystem`。Client 半是手写浏览器模块，
 **没有构建步骤**，仓库里是什么 npm 里就是什么。

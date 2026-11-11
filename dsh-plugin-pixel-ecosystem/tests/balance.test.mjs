@@ -174,7 +174,10 @@ test('every species builds a breeding population in most seeds', () => {
   // that cohort counted, so a soak shorter than that cannot prove anything about
   // it. Judging a wolf on a 900 tick window would fail for a reason that is not a
   // bug, so slow species are held to the weaker claim they CAN be held to at this
-  // window: they survive. PE_SOAK=1 puts every species on the strong gate.
+  // window: they survive. PE_SOAK=1 lengthens the window but still only reaches
+  // the fast species (a bear needs 3240 s); the reproduction MECHANISM for every
+  // species is gated by tests/reproduction.test.mjs, and how many animals a world
+  // can carry is behaviour-probe's job, not this test's.
   const soakSeconds = TICKS * TICK
   const failures = []
   const survivalOnly = []
@@ -197,7 +200,10 @@ test('every species builds a breeding population in most seeds', () => {
   const strong = SPECIES_IDS.filter(id => !survivalOnly.includes(id))
   console.log((RELEASE_TIER ? 'release' : 'daily') + ' tier, soak ' + soakSeconds.toFixed(0) + ' s x '
     + SEEDS.length + ' seeds: breeding gate for [' + (strong.join(', ') || 'none') + ']'
-    + (survivalOnly.length > 0 ? '; survival-only for [' + survivalOnly.join(', ') + '] (PE_SOAK=1 widens it)' : ''))
+    + (survivalOnly.length > 0
+      ? '; survival-only for [' + survivalOnly.join(', ') + '] (window too short to see three maturities'
+        + ' — the mechanism for these is gated by tests/reproduction.test.mjs)'
+      : ''))
   assert.deepEqual(failures, [],
     'a species that cannot hold a population in most seeds has a broken chain: '
     + failures.join(' | '))

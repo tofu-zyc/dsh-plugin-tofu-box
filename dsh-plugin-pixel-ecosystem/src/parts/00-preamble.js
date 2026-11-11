@@ -39,7 +39,7 @@ window.__ModuleLoader__.load({
      * cached older module": without a visible stamp there is no way to tell a
      * stale bundle from a broken fix.
      */
-    const BUILD_VERSION = '0.3.9'
+    const BUILD_VERSION = '0.3.10'
 
     /** Locale namespace; equals the package name. */
     const NS = 'dsh-plugin-pixel-ecosystem'

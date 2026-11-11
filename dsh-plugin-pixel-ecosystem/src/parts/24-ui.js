@@ -78,7 +78,7 @@
       starved: '#c98a2b',
       frozen: '#4f8fd0',
       old: '#8a8f99',
-      disease: '#9a6bd0',
+      injury: '#9a6bd0',
       unknown: '#5d6470',
     }
 
@@ -592,7 +592,7 @@
             stage('plants', t('flow.plants'), flows.herbs, FLOW_COLORS.plants),
             stage('herbs', t('flow.herbivores'), flows.carns, FLOW_COLORS.herbs),
             stage('carns', t('flow.respire'), flows.respire, FLOW_COLORS.respire),
-            stage('plants', t('flow.plantRespire'), flows.plantRespire, FLOW_COLORS.respire))
+            stage('plantRespire', t('flow.plantRespire'), flows.plantRespire, FLOW_COLORS.respire))
         : h('div', { className: 'pe-blank' }, t('flow.waiting'))
       const budget = rows.filter(row => row.count > 0).map(row => h('div', { className: 'pe-srow', key: 'budget-' + row.id },
         h(PixelGlyph, { name: speciesGlyph(row.id), color: SPECIES[row.id]?.color, size: 12 }),

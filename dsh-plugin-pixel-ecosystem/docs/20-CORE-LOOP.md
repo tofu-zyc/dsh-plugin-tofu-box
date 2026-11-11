@@ -4,19 +4,34 @@
 
 ## 1. 每 tick 的执行顺序（顺序本身是设计的一部分）
 
+下面是 `13-fields.js` 里 `stepWorld`（`:492-510`）的**真实顺序**，照代码抄的，不是示意：
+
 ```
-stepWorld(world, dt)
+stepWorld(world, dt)                    // dt 夹到 ≤ 0.5 s；非正数/NaN 直接返回
+├─ settleTerrain(world)                 地形惰性稳定
+├─ tick += 1；time += dt
 ├─ stepClimate        (13b)  太阳角度 → 光照强度/温度/季节相位
-├─ stepCanopy         (13)   分片计算逐格光衰减（Beer-Lambert）
+├─ rebuildCanopy      (13)   world.canopyDirty 为真、或每 CANOPY_REBUILD_TICKS 一次：逐格光衰减（Beer-Lambert）
+├─ stepDetritus       (13)   尸体/粪便/凋落 → 碎屑 → 矿化 → 土壤养分
 ├─ stepProducers      (13)   逐格 GPP − 呼吸 − 凋落，分片刷新
-├─ stepDetritus       (13)   尸体/粪便 → 碎屑 → 矿化 → 土壤养分
-├─ stepEntities       (12)
-│   └─ 每只：perceive → updateDrives → deliberate → execute → metabolise → consume → move → reproduce/die
-├─ stepCaches         (13)   屯粮点衰减、被偷
-├─ stepEffects / stepHistory / handleImmigration
+├─ growTrees          (13)   木本植物生长/枯死
+├─ spawnAmbientEffects / stepEffects     粒子与效果
+├─ handleImmigration  (12)   移民安全网
+└─ stepEntities       (12)
+    └─ 每只：metabolise（09b，身体先扣账；死了就跳过）→ stepEntity
+        stepEntity 内部（`12-step-entity.js:15-170`）：
+        decayNeeds → updateDrives → perceive → decide（只在边界/中断）→ execute
+        → feed → moveToward → updateFatigue → 繁殖判定（成熟 × reserve 门 × cooldown）
 ```
 
 **为什么先植物后动物**：同一 tick 内植物先更新，动物吃到的是本 tick 的存量，避免"同一片草被两次结算"。
+
+**为什么代谢在行为之前**：`stepEntities` 先 `metabolise`（`13-fields.js:479`）再 `stepEntity`，注释写的是
+"The body pays for being alive before the animal gets to act on it" —— 饿死/冻死/老死都在这一步进 `dieOf`，
+行为层读到的永远是本 tick 的身体状态。
+
+**文档里曾出现、但代码里不存在的步骤**：`stepCanopy`（现在是 `rebuildCanopy`，且按脏标记/周期触发，不是每 tick 全量）、
+`stepCaches`（屯粮点衰减/被偷，属于 P5，`world.caches` 连创建者都没有）、`stepHistory`（从未实现）。
 
 ## 2. 实体状态（`entity`）
 
@@ -25,13 +40,29 @@ stepWorld(world, dt)
 | 字段 | 类型 | 单位 | 含义 |
 |---|---|---|---|
 | `body.E` | float | kJ | 储能（储备库） |
-| `body.Emax` | float | kJ | 储备上限 = `RESERVE_DENSITY × body.V` |
+| `body.Emax` | float | kJ | 储备上限 = `RESERVE_DAYS × FMR(species, V)`，即「4 个游戏日的维持功率」（`01-constants.js:91`、`09b-body.js:81-83`） |
 | `body.V` | float | kg 湿重 | 结构/体量（决定体型、力量、可储存量） |
 | `body.M` | float | 0..1 | 成熟度，到 1 才算成年 |
 | `body.health` | float | 0..1 | 健康；0 即死亡。饥饿/受冻/受伤扣它 |
 | `body.fatigue` | float | 0..1 | 疲劳；由活动累积，休息清除 |
 | `body.dead` | bool | | 死亡标记（替代现在的 `fate`） |
-| `body.cause` | string | | 死因：`starved`/`frozen`/`predation`/`old`/`disease` |
+| `body.cause` | string | | 死因：`starved`/`frozen`/`injury`/`predation`/`old`（见下方词表说明） |
+
+**死因词表以代码为准**（这份文档早先写成 `disease`，是 0.2.x 的展示口径，不是引擎写进 `body.cause` 的值）：
+
+| 值 | 出处 |
+|---|---|
+| `starved` / `frozen` / `injury` | `09b-body.js:371` —— 健康耗尽时的三选一（储备空 = 饿死、受冻 = 冻死、否则 = 伤重） |
+| `old` | `09b-body.js:375` —— `age > genes.lifespan` |
+| `predation` | `11-feed.js:195`（吃空猎物）、`12-step-entity.js:24`（上个 tick 已被咬死） |
+
+**展示层用的是同一张词表**（`21-store.js:24` 的 `CAUSE_KEYS` = `predation / starved / frozen / injury / old / unknown`）：
+面板的"预测死因"（`21-store.js:279` 的 `predictCause`）和"推断死因"的兜底（`21-store.js:335` 的 `classifyDeath`，读不到 `corpse.cause` 时才走）
+都只说这几个值，locale 键是 `cause.*`（`25-ui-locale.js`，中英各一份）。
+
+> 历史：0.3.9 之前 `CAUSE_KEYS` 里写的是 `disease` 而没有 `injury`，于是**受伤致死的个体会被
+> `CAUSE_KEYS.includes(corpse.cause)` 过滤掉**，物种表的死因条上直接看不到这类死亡（G5 要求的"失败可解释"
+> 破了洞）。0.3.10 已改成与引擎同一张词表，`tests/client.test.mjs` 会从 `CAUSE_KEYS` 反推所需 locale 键。
 
 ### 2.2 驱动力（**behaviour 拥有**，由身体导出）
 
@@ -70,21 +101,40 @@ drives = { hunger, thirst, cold, fatigue, fear, social, curiosity, libido }   //
 | `nutrient[]` | 0..1 | 土壤养分（限制因子） |
 | `detritus[]` | kg/m² | 碎屑池（尸体/粪便/凋落） |
 | `light[]` | 0..1 | 逐格实际受光（冠层衰减后） |
-| `caches[]` | | `{id,x,y,energy,owner,decay}` 屯粮点 |
+| `caches[]` | | `{id,x,y,energy,owner,decay}` 屯粮点 —— **尚未接线（P5）**：`05-world-create.js` 不创建这个字段，目前只有 `08b-perception.js:394-400`（读到 `undefined` 就跳过）和存档/统计会碰它 |
 
-## 4. 关键方程（sim-core 实现）
+## 4. 关键方程（设计意图 → 实现对照）
+
+### 4.1 个体代谢：这是**设计意图**，实现见 `09b-body.js`
+
+下面这段 DEB 形态的方程块**不是代码里跑的方程**，留在这里只当"我们借的是哪一套比例关系"的索引。
+早先它被当成实现来读，于是出现了"文档说 `pA/pAm`、代码里没有 `pAm`"这种对不上的情况。
 
 ```
-# 个体代谢（DEB-lite，Kleiber 标定）
+# 设计意图（DEB-lite 教科书形态，本仓库没有按这个实现）
 f    = B / (B + K)                                 # Holling II 食物可得性
 pA   = pAm * f * M_body^(2/3)                      # 同化功率 kJ/日
 pM   = m0  * M_body^(3/4) * Q10^((T-20)/10) * activityFactor
 if (pA > pM):  growth = κ_DEB*(pA-pM)/[EG];  dV/dt = growth;  dE/dt = pA-pM-EG*dV/dt
 else:          dE/dt = pA - pM                     # 吃储备
-E <= 0  → health 下降 → 死亡（cause=starved）
+```
 
-# 摄食（Holling II + 处理时间）
-intakeRate = a*B/(1 + a*h*B)                       # h = 处理时间，天然产生"抓到后停下吃"
+**实现（唯一权威，`09b-body.js`）**：
+
+| 环节 | 代码 | 实际做法 |
+|---|---|---|
+| 维持功率 | `09b-body.js:310-314` | `pM = FMR(V) × activity × q10(T)`，`FMR = a·M(g)^b`（Nagy 1999，kJ/游戏日） |
+| 体温缩放 | `09b-body.js:108-118` | 变温动物整段走 Q10；**恒温动物只在低于下临界温度 `20 − 7·log10(M+1)` 时多花**，温血天气不扣它的代谢 |
+| 生长 | `growBody`，`09b-body.js:397-416` | 目标结构由**年龄**给出：`target = 出生重 + (成体重−出生重)·age/maturity`；再两道闸：储备要高于 `GROWTH_RESERVE_FLOOR`(0.3)×Emax 才有钱长，每步合成最多 `GROWTH_RATE_CEILING`(4)×FMR 的能量 |
+| 生长代价 | `09b-body.js:409-414` | `ΔV = 可支配能量 / STRUCTURE_COST`（7000 kJ/kg 湿重），储备减少量恒等于结构增加量 —— 账面是**转移**，不是凭空的产生 |
+| 死亡 | `09b-body.js:362-373` | `health ≤ 0` → 按 `E ≤ 0 ? 'starved' : cold ? 'frozen' : 'injury'` 定死因；`age > lifespan` → `old` |
+
+### 4.2 其余三块（这三块是按式子实现的）
+
+```
+# 摄食（Holling II + 处理时间）—— 11-feed.js:40
+intake(B) = I_max * B / (K + B)                    # I_max = INTAKE_CEILING × 需求；K = (INTAKE_CEILING-1) × GRAZE_REFERENCE
+                                                  # h（处理时间）在捕食侧：抓到后 entity.handling 让它停下吃完
 
 # 植物（逐格）
 GPP  = mu * grass * f_light * f_water * f_nutrient * (1 - grass/Bmax)
@@ -96,7 +146,7 @@ dgrass/dt = GPP - resp - litter - 采食
 light[i] = sunlight * exp(-k * LAI[i])             # k ≈ 0.4–0.6
 ```
 
-常数初值（写在 `01-constants.js` 的 `BIO` 表里，集中一处，禁止散落）：
+### 4.3 常数（写在 `01-constants.js` 的 `BIO` 表里，集中一处，禁止散落）
 
 | 常数 | 值 | 来源 |
 |---|---|---|
@@ -105,8 +155,8 @@ light[i] = sunlight * exp(-k * LAI[i])             # k ≈ 0.4–0.6
 | 同化率 草食/肉食 | 0.40 / 0.80 | 生态学讲义 |
 | `Q10` | 2.5 | ≈ Ea 0.65 eV |
 | `k`（光衰减） | 0.5 | Beer-Lambert |
-| `κ_DEB` | 0.8 | DEB 惯例 |
-| `RESERVE_DENSITY` | 约 5 日 FMR | 真实动物体脂缓冲 |
+| `KAPPA_DEB` | 0.8 | DEB 惯例（**当前没有参与生长**：生长走 4.1 的年龄目标曲线） |
+| `RESERVE_DAYS` | **4** | 储备 = 4 个游戏日的 FMR（`01-constants.js:91`）；真实小兽体脂是 5–10 日，压到 4 是为了让第一代活在一次观看时长里 |
 
 ## 5. 存档 v2
 

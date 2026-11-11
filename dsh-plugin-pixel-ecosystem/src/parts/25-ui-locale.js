@@ -108,7 +108,7 @@
       'cause.starved': '饿死',
       'cause.frozen': '冻死',
       'cause.old': '老死',
-      'cause.disease': '病死',
+      'cause.injury': '受伤',
       'cause.unknown': '不明',
 
       // --- event ticker -----------------------------------------------------
@@ -259,7 +259,7 @@
       'cause.starved': 'Starved',
       'cause.frozen': 'Frozen',
       'cause.old': 'Old age',
-      'cause.disease': 'Disease',
+      'cause.injury': 'Injury',
       'cause.unknown': 'Unknown',
       'events.title': 'Events',
       'events.empty': 'No events yet. The world just woke up.',

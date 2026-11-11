@@ -39,7 +39,7 @@ window.__ModuleLoader__.load({
      * cached older module": without a visible stamp there is no way to tell a
      * stale bundle from a broken fix.
      */
-    const BUILD_VERSION = '0.3.9'
+    const BUILD_VERSION = '0.3.10'
 
     /** Locale namespace; equals the package name. */
     const NS = 'dsh-plugin-pixel-ecosystem'
@@ -2932,7 +2932,7 @@ window.__ModuleLoader__.load({
         fatigue: 0,
         /** Terminal flag; the entity list drops the animal on the same tick. */
         dead: false,
-        /** Why it died: starved | frozen | predation | old | disease | injury. */
+        /** Why it died: starved | frozen | injury | predation | old (CAUSE_KEYS). */
         cause: '',
         /** Assimilated energy waiting to enter the reserve (previous tick's meal). */
         gut: 0,
@@ -3235,7 +3235,7 @@ window.__ModuleLoader__.load({
      * body that died (so a fat animal feeds more than a starved one).
      * @param {object} world - the world.
      * @param {object} entity - the dying animal.
-     * @param {string} cause - starvation/freezing/predation/old age/disease.
+     * @param {string} cause - starvation/freezing/injury/predation/old age.
      * @returns {object|null} the carcass it left, or null when it was already dead.
      */
     function dieOf(world, entity, cause) {
@@ -6169,6 +6169,14 @@ window.__ModuleLoader__.load({
       crow: { body: rgb(44, 44, 54), wing: rgb(68, 68, 82), eye: rgb(210, 190, 90) },
       fish: { body: rgb(96, 160, 208), belly: rgb(190, 226, 240), fin: rgb(64, 122, 172) },
       pike: { body: rgb(86, 120, 78), dark: rgb(58, 86, 54), fin: rgb(120, 150, 104) },
+      // The four species added with the land/water bridge. They were drawn only
+      // by the display-resolution atlas, so the 1-px buffer pass had neither a
+      // grid nor a colour for them: at 1-2x they simply were not on the map, and
+      // their motion trails came out black (dimColor(undefined) packs 0x000000).
+      bear: { body: rgb(104, 74, 52), belly: rgb(160, 126, 92), eye: rgb(28, 20, 14) },
+      otter: { body: rgb(122, 86, 58), belly: rgb(200, 178, 146), eye: rgb(26, 20, 16) },
+      heron: { body: rgb(154, 164, 178), wing: rgb(112, 124, 140), eye: rgb(230, 196, 72) },
+      frog: { body: rgb(111, 174, 78), belly: rgb(190, 216, 138), eye: rgb(238, 226, 120) },
       corpse: { flesh: rgb(120, 82, 74), bone: rgb(206, 198, 180) },
     }
     /** Effect colours: pure visual feedback, never read back by the simulation. */
@@ -6769,6 +6777,134 @@ window.__ModuleLoader__.load({
           'bbbbd',
         ],
       },
+      // The four species below used to live only in the display atlas (18-atlas),
+      // which the panel switches to at 3x and up (21-store.js useAtlas). The map
+      // is laid out at 1x ("fit the window"), so before this the bear, the otter,
+      // the heron and the frog were drawn nowhere at all while their counts and
+      // minimap dots stayed on screen. One grid per species closes that hole.
+      bear: {
+        idle: [
+          'b.....b',
+          '.bbbbb.',
+          'bbbbbbb',
+          'kbbbbbd',
+          '.b...b.',
+        ],
+        walk: [
+          [
+            'b.....b',
+            '.bbbbb.',
+            'bbbbbbb',
+            'kbbbbbd',
+            'b.b.b..',
+          ],
+          [
+            'b.....b',
+            '.bbbbb.',
+            'bbbbbbb',
+            'kbbbbbd',
+            '.b.b.b.',
+          ],
+        ],
+        flee: [
+          'b.....b',
+          'bbbbbbb',
+          'bbbbbbb',
+          'kbbbbbd',
+          'b.....b',
+        ],
+      },
+      otter: {
+        idle: [
+          '.b..b.',
+          'kbbbbb',
+          'bbbbbb',
+          '.d..d.',
+        ],
+        walk: [
+          [
+            '.b..b.',
+            'kbbbbb',
+            'bbbbbb',
+            'b...b.',
+          ],
+          [
+            '.b..b.',
+            'kbbbbb',
+            'bbbbbb',
+            '.b...b',
+          ],
+        ],
+        flee: [
+          '.b..b.',
+          'kbbbbb',
+          'bbbbbb',
+          '.dd.dd',
+        ],
+      },
+      heron: {
+        // Head and beak top-left, an S-neck, a compact body, two long legs:
+        // at one pixel per cell the neck is what makes a heron read as a heron
+        // and not as a grey blob (compare the crow, which is all body).
+        idle: [
+          'kb...',
+          'bb...',
+          '..b..',
+          '..b..',
+          '.bbb.',
+          'b...b',
+        ],
+        walk: [
+          [
+            'kb...',
+            'bb...',
+            '..b..',
+            '..b..',
+            '.bbb.',
+            'b...b',
+          ],
+          [
+            'kb...',
+            'bb...',
+            '..b..',
+            '..b..',
+            '.bbb.',
+            '.b.b.',
+          ],
+        ],
+        flee: [
+          'kb..b',
+          'bbbbb',
+          '..b..',
+          '.bbb.',
+          '.bbb.',
+          '..b..',
+        ],
+      },
+      frog: {
+        idle: [
+          'k..k',
+          'bbbb',
+          '.dd.',
+        ],
+        walk: [
+          [
+            'k..k',
+            'bbbb',
+            'd.d.',
+          ],
+          [
+            'k..k',
+            'bbbb',
+            '.d.d',
+          ],
+        ],
+        flee: [
+          'k..k',
+          'bbbb',
+          'dd.d',
+        ],
+      },
     }
 
     /** Character → palette colour, per species. */
@@ -6780,6 +6916,10 @@ window.__ModuleLoader__.load({
       crow: { b: PALETTE.crow.body, w: PALETTE.crow.wing, k: PALETTE.crow.eye },
       fish: { b: PALETTE.fish.body, f: PALETTE.fish.fin, d: PALETTE.fish.belly },
       pike: { b: PALETTE.pike.body, f: PALETTE.pike.fin, d: PALETTE.pike.dark },
+      bear: { b: PALETTE.bear.body, k: PALETTE.bear.eye, d: PALETTE.bear.belly },
+      otter: { b: PALETTE.otter.body, k: PALETTE.otter.eye, d: PALETTE.otter.belly },
+      heron: { b: PALETTE.heron.body, w: PALETTE.heron.wing, k: PALETTE.heron.eye },
+      frog: { b: PALETTE.frog.body, k: PALETTE.frog.eye, d: PALETTE.frog.belly },
     }
 
 
@@ -7458,11 +7598,18 @@ window.__ModuleLoader__.load({
       compileSprite(['b.b'], { b: PALETTE.corpse.bone }),
     ]
 
-    /** Faded body colours used to paint motion trails. */
+    /**
+     * Faded body colours used to paint motion trails.
+     *
+     * The list below must mirror SPECIES_IDS: a missing entry dims `undefined`,
+     * which packs to opaque black — that is how the four bridge species used to
+     * leave black speckles behind them. tests/sprite-coverage.test.mjs pins it.
+     */
     const TRAIL_COLORS = Object.fromEntries(SPECIES_IDS.map(id => [id, dimColor({
       rabbit: PALETTE.rabbit.body, deer: PALETTE.deer.body, fox: PALETTE.fox.body,
       wolf: PALETTE.wolf.body, crow: PALETTE.crow.body, fish: PALETTE.fish.body,
-      pike: PALETTE.pike.body,
+      pike: PALETTE.pike.body, bear: PALETTE.bear.body, otter: PALETTE.otter.body,
+      heron: PALETTE.heron.body, frog: PALETTE.frog.body,
     }[id], 0.42)]))
     // ---------------------------------------------------------------------
     // Sprite atlas (generated pixel-art artwork, embedded as PNG)
@@ -8831,7 +8978,13 @@ window.__ModuleLoader__.load({
      * body.cause), so the store infers one from the last state it saw and the
      * panel labels it "inferred". A real cause wins the moment it exists.
      */
-    const CAUSE_KEYS = ['predation', 'starved', 'frozen', 'old', 'disease', 'unknown']
+    // Must mirror what the engine writes into body.cause (09b-body.js:371/375,
+    // 11-feed.js:195): 'injury' used to be missing here, so every animal that
+    // died of a failed escape was dropped from the species death-cause bar by
+    // the \`CAUSE_KEYS.includes\` filter below — a death the panel could not
+    // explain, which is exactly what G5 forbids. tests/client.test.mjs derives
+    // the required locale keys from this list, so both sides move together.
+    const CAUSE_KEYS = ['predation', 'starved', 'frozen', 'injury', 'old', 'unknown']
 
     // The inspector draws DRIVE_KEYS, which behaviour owns in 09-needs.js: one
     // list, so a channel that exists in the model cannot be missing from the
@@ -9091,7 +9244,9 @@ window.__ModuleLoader__.load({
       if (drives.cold >= 0.65) return 'frozen'
       if (drives.fear >= 0.6 && predatorsNear(observation, entity.species, entity.x, entity.y, 8) > 0) return 'predation'
       if (Number.isFinite(entity.genes.lifespan) && entity.age >= entity.genes.lifespan * 0.85) return 'old'
-      if (body.health !== null && body.health <= 0.25) return 'disease'
+      // Health only drains from starvation, cold and an untreated wound; the
+      // first two are caught above, so the honest remaining prognosis is the wound.
+      if (body.health !== null && body.health <= 0.25) return 'injury'
       return null
     }
 
@@ -9157,7 +9312,7 @@ window.__ModuleLoader__.load({
       if (rec.ratio <= 0.02) return 'starved'
       if (Number.isFinite(rec.lifespan) && rec.age >= rec.lifespan * 0.92) return 'old'
       if (rec.cold >= 0.6) return 'frozen'
-      if (rec.health !== null && rec.health <= 0.2) return 'disease'
+      if (rec.health !== null && rec.health <= 0.2) return 'injury'
       return 'unknown'
     }
 
@@ -11122,7 +11277,7 @@ window.__ModuleLoader__.load({
       starved: '#c98a2b',
       frozen: '#4f8fd0',
       old: '#8a8f99',
-      disease: '#9a6bd0',
+      injury: '#9a6bd0',
       unknown: '#5d6470',
     }
 
@@ -11636,7 +11791,7 @@ window.__ModuleLoader__.load({
             stage('plants', t('flow.plants'), flows.herbs, FLOW_COLORS.plants),
             stage('herbs', t('flow.herbivores'), flows.carns, FLOW_COLORS.herbs),
             stage('carns', t('flow.respire'), flows.respire, FLOW_COLORS.respire),
-            stage('plants', t('flow.plantRespire'), flows.plantRespire, FLOW_COLORS.respire))
+            stage('plantRespire', t('flow.plantRespire'), flows.plantRespire, FLOW_COLORS.respire))
         : h('div', { className: 'pe-blank' }, t('flow.waiting'))
       const budget = rows.filter(row => row.count > 0).map(row => h('div', { className: 'pe-srow', key: 'budget-' + row.id },
         h(PixelGlyph, { name: speciesGlyph(row.id), color: SPECIES[row.id]?.color, size: 12 }),
@@ -12654,7 +12809,7 @@ window.__ModuleLoader__.load({
       'cause.starved': '饿死',
       'cause.frozen': '冻死',
       'cause.old': '老死',
-      'cause.disease': '病死',
+      'cause.injury': '受伤',
       'cause.unknown': '不明',
 
       // --- event ticker -----------------------------------------------------
@@ -12805,7 +12960,7 @@ window.__ModuleLoader__.load({
       'cause.starved': 'Starved',
       'cause.frozen': 'Frozen',
       'cause.old': 'Old age',
-      'cause.disease': 'Disease',
+      'cause.injury': 'Injury',
       'cause.unknown': 'Unknown',
       'events.title': 'Events',
       'events.empty': 'No events yet. The world just woke up.',
@@ -13130,13 +13285,13 @@ window.__ModuleLoader__.load({
       SPRITE_GRIDS,
       PLANT_SPRITES,
       SPRITE_COLORS,
+      TRAIL_COLORS,
       ATLAS,
       ATLAS_SLOTS,
       ATLAS_SIZE,
       ATLAS_GAIT,
       SPRITE_ATLAS_PNG,
       TICK,
-      DAY_SECONDS,
       MAX_ENTITIES,
       createWorld,
       stepWorld,

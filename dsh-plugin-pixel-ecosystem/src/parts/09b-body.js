@@ -165,7 +165,7 @@
         fatigue: 0,
         /** Terminal flag; the entity list drops the animal on the same tick. */
         dead: false,
-        /** Why it died: starved | frozen | predation | old | disease | injury. */
+        /** Why it died: starved | frozen | injury | predation | old (CAUSE_KEYS). */
         cause: '',
         /** Assimilated energy waiting to enter the reserve (previous tick's meal). */
         gut: 0,
@@ -468,7 +468,7 @@
      * body that died (so a fat animal feeds more than a starved one).
      * @param {object} world - the world.
      * @param {object} entity - the dying animal.
-     * @param {string} cause - starvation/freezing/predation/old age/disease.
+     * @param {string} cause - starvation/freezing/injury/predation/old age.
      * @returns {object|null} the carcass it left, or null when it was already dead.
      */
     function dieOf(world, entity, cause) {

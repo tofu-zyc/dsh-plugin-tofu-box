@@ -15,7 +15,13 @@
      * body.cause), so the store infers one from the last state it saw and the
      * panel labels it "inferred". A real cause wins the moment it exists.
      */
-    const CAUSE_KEYS = ['predation', 'starved', 'frozen', 'old', 'disease', 'unknown']
+    // Must mirror what the engine writes into body.cause (09b-body.js:371/375,
+    // 11-feed.js:195): 'injury' used to be missing here, so every animal that
+    // died of a failed escape was dropped from the species death-cause bar by
+    // the \`CAUSE_KEYS.includes\` filter below — a death the panel could not
+    // explain, which is exactly what G5 forbids. tests/client.test.mjs derives
+    // the required locale keys from this list, so both sides move together.
+    const CAUSE_KEYS = ['predation', 'starved', 'frozen', 'injury', 'old', 'unknown']
 
     // The inspector draws DRIVE_KEYS, which behaviour owns in 09-needs.js: one
     // list, so a channel that exists in the model cannot be missing from the
@@ -275,7 +281,9 @@
       if (drives.cold >= 0.65) return 'frozen'
       if (drives.fear >= 0.6 && predatorsNear(observation, entity.species, entity.x, entity.y, 8) > 0) return 'predation'
       if (Number.isFinite(entity.genes.lifespan) && entity.age >= entity.genes.lifespan * 0.85) return 'old'
-      if (body.health !== null && body.health <= 0.25) return 'disease'
+      // Health only drains from starvation, cold and an untreated wound; the
+      // first two are caught above, so the honest remaining prognosis is the wound.
+      if (body.health !== null && body.health <= 0.25) return 'injury'
       return null
     }
 
@@ -341,7 +349,7 @@
       if (rec.ratio <= 0.02) return 'starved'
       if (Number.isFinite(rec.lifespan) && rec.age >= rec.lifespan * 0.92) return 'old'
       if (rec.cold >= 0.6) return 'frozen'
-      if (rec.health !== null && rec.health <= 0.2) return 'disease'
+      if (rec.health !== null && rec.health <= 0.2) return 'injury'
       return 'unknown'
     }
 
