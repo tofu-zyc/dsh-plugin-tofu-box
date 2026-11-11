@@ -1004,7 +1004,6 @@ window.__ModuleLoader__.load({
       async function saveCompat(providerId, modelId, kind, value) {
         const snapshot = await compatSnapshot(providerId);
         const entry = snapshot.entry;
-        const nsView = snapshot.nsView;
         if (kind === "imageLink") {
           // The drawing list lives in this plugin's own namespace; re-read it
           // right before writing so the plan and its revision come from one
@@ -1024,24 +1023,35 @@ window.__ModuleLoader__.load({
           if (!response.ok) throw new Error(response.error && response.error.message ? response.error.message : "保存失败");
           return;
         }
+        // Re-read the provider namespace right before writing: the plan and the
+        // revision it is applied against must come from the same document, or a
+        // concurrent write is either refused as stale or silently overwritten
+        // (the same discipline the drawing page's commit() uses).
+        const freshSettings = unwrap(await remote.settings.describe());
+        const freshNamespaces = Array.isArray(freshSettings.namespaces) ? freshSettings.namespaces : [];
+        const freshNs = freshNamespaces.find((item) => item && item.ns === entry.settingsNs);
+        if (!freshNs) throw new Error("该 provider 的设置命名空间未激活，无法保存");
         let write;
         if (kind === "supportsDeveloperRole" || kind === "adaptiveThinking") {
           if (value !== null && typeof value !== "boolean") throw new Error("取值必须是布尔值");
           const compatKey = kind === "supportsDeveloperRole" ? "supportsDeveloperRole" : snapshot.adaptiveKey;
           if (compatKey === null || compatKey === undefined) throw new Error("该路由不是 anthropic-messages，不能设置思考格式");
-          write = computeCompatWriteOps(entry, nsView, modelId, compatKey, value);
+          write = computeCompatWriteOps(entry, freshNs, modelId, compatKey, value);
         } else if (kind === "reasoningLevels") {
           const levels = Array.isArray(value) ? value : [];
           for (const level of levels) {
             if (REASONING_LEVELS.indexOf(level) < 0) throw new Error("未知的推理档位：" + level);
           }
-          const payload = reasoningEffortsPayload(levels, storedReasoningEfforts(entry, nsView, modelId));
-          write = computeWriteOps(entry, nsView, modelId, "reasoningEfforts", payload);
+          const payload = reasoningEffortsPayload(levels, storedReasoningEfforts(entry, freshNs, modelId));
+          write = computeWriteOps(entry, freshNs, modelId, "reasoningEfforts", payload);
         } else {
           throw new Error("未知的修改类型");
         }
         if (!write) throw new Error("该 provider 不接受这个字段");
-        const response = await remote.settings.mutate(write.ns, write.ops);
+        // settings/mutate declares three parameters (ns, ops, expectedRevision);
+        // the client bridge refuses a two-argument call outright, and the
+        // revision is what makes a stale editor fail instead of overwriting.
+        const response = await remote.settings.mutate(write.ns, write.ops, freshNs.revision);
         if (!response.ok) throw new Error(response.error && response.error.message ? response.error.message : "保存失败");
       }
 
