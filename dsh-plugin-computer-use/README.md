@@ -2,7 +2,20 @@
 
 让模型**看见窗口和桌面并操作鼠标键盘**——v2 起整个后端换装 [Cua Driver](https://cua.ai) 的**进程内 SDK**（`@trycua/cua-driver`，Rust 原生运行时随 npm 包按平台分发，直接加载进 dsh 宿主进程）：**无守护进程、无 MCP、无 PowerShell**，装上即用，跨 Windows / macOS / Linux。
 
-> 兼容性：`engines.dsh` = `>=0.2.0-rc.2 <0.3.0-0`，已在 dsh 0.2.1-rc.3 上实测运行。
+> 兼容性：`engines.dsh` = `>=0.2.0-rc.2 <0.3.0-0`，已在 dsh 0.2.1-rc.3 与 0.2.2-rc.1 上实测运行。
+
+## v2.6：PTC / 完全权限自锁修复 + Cua Driver 0.47
+
+**修「PTC 模式下写操作全被拒」。** 审批闸门在 `apply()` 时缓存 `ctx.get('approval')`，而审批服务可能晚于本插件注册（组合顺序竞态）——缓存到的 `undefined` 让闸门永远看不到会话的 `never` 策略，于是发出 ask；完全权限（danger-full-access）会话里 ask 被自动拒绝，8 个写操作工具全部自锁，报「the user rejected tool」却没有任何弹窗。PTC 模式 + 完全权限是最容易踩中的组合（只读工具不受影响）。v2.6 改为**调用时**读取审批服务，策略探测恢复生效。
+
+**Cua Driver 最低升到 0.47.10。** 上游的破坏性变化与适配：
+
+- `set_config` 删除 `{key, value}` 通用形式 → 改平铺键；
+- `get_window_state` 默认只回 markdown 树、不再回 `elements` 数组 → 显式 `tree_format: 'elements'`；元素树默认上限 5000 → 250 → 显式 `max_elements: 5000` 保持旧行为；
+- **`list_apps.running` 变成「有窗口才算在跑」**：托盘态进程（微信缩到托盘）报 `running: false`，旧版据此判「没在跑→启动」会拉起第二个已登录实例。v2.6 的「在跑吗」判定改查 **OS 进程表**（Windows `tasklist`，macOS/Linux `ps`），与驱动窗口视图解耦；启动后「进程是否立刻退出」的检测同样改走进程表。
+- click/type/press_key 等移除 `element_index`/`snapshot_id` 参数（插件一直走 `element_token` 透传，不受影响）。
+
+`callTool` 通用面、`ToolResult`/`ImageContent` 结构、命名会话与 `session_ended` 自愈、Wayland/遥测环境变量均不变。自测 46/46 通过（含微信托盘态只报告不重启、元素树输入回读）。
 
 ## v2.5：Ubuntu 26.04 / GNOME Wayland
 
@@ -13,15 +26,15 @@ GNOME/Mutter 还需要 **WinRects Shell 扩展**提供窗口几何、截图和�
 **从 npm 安装/更新**（在 Ubuntu 的图形桌面终端运行，替换自己的 profile）：
 
 ```sh
-dsh plugin --profile web add dsh-plugin-computer-use@2.5.2 --ignore-scripts
-npx --yes --package=dsh-plugin-computer-use@2.5.2 dsh-computer-use-wayland install
+dsh plugin --profile web add dsh-plugin-computer-use@2.6.0 --ignore-scripts
+npx --yes --package=dsh-plugin-computer-use@2.6.0 dsh-computer-use-wayland install
 # 注销并重新登录一次后：
-npx --yes --package=dsh-plugin-computer-use@2.5.2 dsh-computer-use-wayland status
+npx --yes --package=dsh-plugin-computer-use@2.6.0 dsh-computer-use-wayland status
 ```
 
 > `--ignore-scripts` 见下方「安装报 `ERR_PNPM_IGNORED_BUILDS`」，本插件依赖树里没有别的包需要跑构建脚本。
 
-如果已经使用 `tofu-box`，通过 `dsh plugin --profile web update tofu-box` 更新依赖，再执行上面的扩展安装/检查命令。伞包现有 `^2.5.2` 范围覆盖 2.5.2；无需另外添加单独的 computer-use 插件行。更新与安装扩展后重启 dsh。
+如果已经使用 `tofu-box`，通过 `dsh plugin --profile web update tofu-box` 更新依赖，再执行上面的扩展安装/检查命令。伞包 `^2.6.0` 范围覆盖 2.6.0；无需另外添加单独的 computer-use 插件行。更新与安装扩展后重启 dsh。
 
 ### 安装报 `ERR_PNPM_IGNORED_BUILDS` 时
 
@@ -38,10 +51,10 @@ arm64 等常见平台都有），不需要本地编译器，所以下面三种�
 
 ```sh
 # 1) 最简单：这次安装跳过全部 postinstall，koffi 直接用预编译二进制（推荐）
-dsh plugin --profile web add dsh-plugin-computer-use@2.5.2 --ignore-scripts
+dsh plugin --profile web add dsh-plugin-computer-use@2.6.0 --ignore-scripts
 
 # 2) 只批准 koffi 这一个脚本：会执行 cnoke --prebuild，需要网络或本地编译环境
-dsh plugin --profile web add dsh-plugin-computer-use@2.5.2 --allow-build=koffi
+dsh plugin --profile web add dsh-plugin-computer-use@2.6.0 --allow-build=koffi
 ```
 
 ```yaml
@@ -73,13 +86,13 @@ dsh plugin --profile web add "link:$(pwd)/dsh-plugin-computer-use"
 
 重启 dsh，然后先试 `computer_windows` 和 `computer_screenshot`。第一次需要前台输入时，允许系统弹出的远程桌面/键鼠控制授权。此授权属于驱动运行时，重启后可能再次询问。插件安装不会自动授予它。
 
-**用本地 tgz 安装**：下载/复制 `dsh-plugin-computer-use-2.5.2.tgz` 到 Ubuntu 后运行：
+**用本地 tgz 安装**：下载/复制 `dsh-plugin-computer-use-2.6.0.tgz` 到 Ubuntu 后运行：
 
 ```sh
-dsh plugin --profile web add ./dsh-plugin-computer-use-2.5.2.tgz --ignore-scripts
-npx --yes --package=./dsh-plugin-computer-use-2.5.2.tgz dsh-computer-use-wayland install
+dsh plugin --profile web add ./dsh-plugin-computer-use-2.6.0.tgz --ignore-scripts
+npx --yes --package=./dsh-plugin-computer-use-2.6.0.tgz dsh-computer-use-wayland install
 # 注销并重新登录后：
-npx --yes --package=./dsh-plugin-computer-use-2.5.2.tgz dsh-computer-use-wayland status
+npx --yes --package=./dsh-plugin-computer-use-2.6.0.tgz dsh-computer-use-wayland status
 ```
 
 如果通过 `tofu-box` 安装，应更新伞包中的依赖；不要叠装单独的 computer-use 行。也可直接对该 profile 下已安装包的 `scripts/wayland.mjs` 运行 `install` / `status`。
