@@ -1,12 +1,23 @@
 # 像素生态缸（Pixel Terrarium）设计稿
 
+> **⚠️ 本文已失效：自述版本 v0.2.1，描述的是 0.2.x 那套引擎。**
+> 0.2.x 是"`entity.energy` + `needs` 双账本"、512 × 400 格、1 天 = 120 秒、手调旋钮定平衡；
+> 0.3.x 起换成**能量账本**（`body.E / V / M`，单位 kJ）+ 感知/信念/决策/执行的行为层。
+> 所以本文里的接口契约、物种表数字、调参常量**都不再作数**，只保留两件事：查 0.2.x 的历史取舍、
+> 对照 0.3.x 到底改了什么（`docs/FINAL-REPORT.md`）。
+>
+> **当前契约以 `docs/` 为准**：[00-VISION](docs/00-VISION.md)（目标与三条原则）、
+> [20-CORE-LOOP](docs/20-CORE-LOOP.md)（字段与方程）、[30-METABOLISM](docs/30-METABOLISM.md)、
+> [40-BEHAVIOUR](docs/40-BEHAVIOUR.md)、[70-VISUAL](docs/70-VISUAL.md)、[80-UI](docs/80-UI.md)、
+> [90-ROADMAP](docs/90-ROADMAP.md)（各阶段真实状态）。
+
 > 目标：AI 干活、你等结果的那几分钟里，有个能随手玩两下的东西。
 > 侧边栏点一下图标，主面板就是一缸活着的像素生态：撒草、放兔子、放狼，
 > 看它们长、吃、追、生、死。后期往「文明 / 社会」方向长。
 
-状态：**v0.2.1 设计 + 实现基线**。本文是插件的**接口契约**：引擎 API、物种表、
-图集几何、locale key、slot 用法、调参常量都以这里为准。玩法说明见 [README.md](README.md)，
-交接状态与缺陷清单见 [HANDOVER.md](HANDOVER.md)。
+状态：**v0.2.1 设计 + 实现基线**（0.3.x 已取代，见上方横幅）。这篇在 0.2.x 时代是插件的**接口契约**：
+引擎 API、物种表、图集几何、locale key、slot 用法、调参常量都以这里为准 —— 现在以 `docs/` 为准。
+玩法说明见 [README.md](README.md)，交接状态与缺陷清单见 [HANDOVER.md](HANDOVER.md)（同为 0.2.1 历史文档）。
 
 ---
 

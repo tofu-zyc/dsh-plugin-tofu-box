@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-pixel-ecosystem",
-  "version": "0.2.3",
+  "version": "0.3.10",
   "engines": {
     "dsh": ">=0.2.0-rc.2 <0.3.0-0"
   },
@@ -52,6 +52,9 @@
     "umbrella": false
   },
   "scripts": {
+    "build": "node tools/build-client.mjs",
+    "check:client": "node tools/build-client.mjs --check",
+    "pretest": "node tools/build-client.mjs --check",
     "test": "node --test tests/*.test.mjs"
   },
   "files": [

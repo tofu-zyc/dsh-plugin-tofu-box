@@ -1,5 +1,13 @@
 # 交接文档（HANDOVER）
 
+> **⚠️ 本文已失效：自述版本 v0.2.1，是一份 0.2.x 的交接书。**
+> 它讲的状态、代码地图（5 800 行单文件 `client.js`）、65 个测试、512 × 400 世界、五种需求/八种意图、
+> `VIABLE_PEAK` 契约、四个调参旋钮 —— 在 0.3.x 里**都已经换掉了**。0.3.x 是**能量账本**
+> （`body.E / V / M`，单位 kJ）+ 感知/信念/决策/执行的行为层，源码已拆成 `src/parts/` 下 33 个 part。
+>
+> **0.3.x 请从 [docs/00-VISION.md](docs/00-VISION.md) 开始读**，再看 [docs/90-ROADMAP.md](docs/90-ROADMAP.md)
+> 的"状态总览"了解当前进度；本文只作为 0.2.x 的历史记录保留（README / DESIGN 同样已标注失效）。
+
 > 面向：接手 `dsh-plugin-pixel-ecosystem` 的下一个会话 / 下一个 agent。
 > 读完这一份就应该能直接开工，不需要重新读 5 800 行 `client.js`。
 > 用户视角的玩法说明在 [README.md](README.md)，设计契约在 [DESIGN.md](DESIGN.md)；
@@ -334,6 +342,13 @@ node .scratch/balance.mjs 777,31,4242 20000
 4. **验收**：三种子（777/31/4242）× 20 000 tick 下，捕食层（狐/狼/狗鱼/苍鹭/水獭/熊）平均 `H` ≤ 0.5；
    同时把 `VIABLE_PEAK` 里的水獭/苍鹭/熊从 5/5/3 提到 10/10/6 且三个种子仍然全绿；
    `node --test tests/*.test.mjs` 65 个测试不回归。
+
+> **这条建议已被推翻，勿照做。** `docs/00-VISION.md` 原则 2 规定"数字从物理推出，不从平衡推出"，
+> 全局手调量只允许四个（格距、日内秒数、年天数、产能系数 κ）；`docs/10-SCALE-AND-UNITS.md` §1 把这条写成硬约束。
+> 0.3.x 的现状是：`meatGain`、`NEED_WEIGHT`、`VIABLE_PEAK` 这几个名字在 `src/` 里**已经不存在**；
+> `catchRadius`、`huntReach` 还在，但它们是每物种的结构参数（`02-species.js` 的 `balance` 行、
+> `08b-perception.js:356` 的 `?? 1.6` 兜底），不是给人调平衡的旋钮。捕食者养不养得起由猎物产量与代谢算出来 ——
+> 要改就改世界（产能 κ / 密度），不要改物种。
 
 ### 8.2 美术换代（进行中，别和它抢 `tools/pixel/`）
 
