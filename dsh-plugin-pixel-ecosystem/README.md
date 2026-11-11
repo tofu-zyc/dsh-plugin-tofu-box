@@ -13,13 +13,12 @@
 有昼夜明暗，世界自动存进浏览器本地，关掉页面再回来还在。它就是给「AI 干活、你等结果的那几分钟」摸鱼用的，
 不联网、不改你的会话、不碰 Host。
 
-> **状态：0.3.10 在开发分支 `feat/terrarium-energy-core` 上；0.3.9 和 0.3.10 都还没有发布到 npm。**
-> 0.2.3 仍是 npm 上的最后一个版本（美术换代）；0.3.x 是底层重写——能量账本 + 感知/信念/决策/执行的行为层，
+> **状态：0.3.10 已发布到 npm —— 0.3.x 能量账本重写的首个 npm 版本。**
+> 0.3.x 是底层重写——能量账本 + 感知/信念/决策/执行的行为层，
 > 平衡不再靠调数值，而是靠热量收支算出来的。面板与交互在 0.3.9 / 0.3.10 修到可用（画布尺寸、输入、缩放、
 > 物种行语义、低缩放下 4 个物种整体消失、拖影颜色），修复记录与验收数字见
-> [docs/FINAL-REPORT.md](docs/FINAL-REPORT.md) 第 8 节。
-> 0.1.0 当时提交成功但仍在 npm 的 staged publishing 队列里等 maintainer 批准；
-> 在 `npm view dsh-plugin-pixel-ecosystem versions` 列出你要装的那个版本之前，只能 `link:` 或 git 直装（见下面「安装」）。
+> [docs/FINAL-REPORT.md](docs/FINAL-REPORT.md) 第 8 节，发布说明见仓库
+> `docs/RELEASE-pixel-ecosystem-0.3.10-20261111.md`。
 > 本插件是独立插件，**不并入 `tofu-box` 伞包**（清单里标了 `dsh.umbrella: false`）。
 >
 > 兼容性：`engines.dsh` 声明为 `>=0.2.0-rc.2 <0.3.0-0`；Client 半只声明 `platform: web`。
@@ -67,8 +66,8 @@
 **没有构建步骤**，仓库里是什么 npm 里就是什么。
 
 ```bash
-# 1) npm（版本进入 npm 的 staged publishing 队列后，要 maintainer 批准才会出现在版本列表里）
-dsh plugin --profile <你的profile> add dsh-plugin-pixel-ecosystem@0.2.3
+# 1) npm（若版本还在 staged publishing 队列里，要 maintainer 批准才会出现在版本列表里）
+dsh plugin --profile <你的profile> add dsh-plugin-pixel-ecosystem@0.3.10
 
 # 2) 本插件是独立插件，**不在 tofu-box 伞包里**（清单里 dsh.umbrella: false），
 #    所以没有"装伞包顺带装它"这条路，只能单独装。
@@ -509,8 +508,8 @@ pwsh -File tools\dev-dsh.ps1 rc-dev --no-open --port 0      # 启动冒烟
 
 ## 已知限制
 
-- **0.1.0 已提交 npm，等待 maintainer 批准**（staged publishing）；在此之前用 `link:` 或 git 直装。
-  本插件不进 `tofu-box` 伞包。
+- **0.3.10 已发布到 npm**（0.3.x 的首个 npm 版本）；从 0.2.x 升级时旧存档（v1）会被拒绝并提示，
+  需要开新世界。本插件不进 `tofu-box` 伞包。
 - 只声明了 `platform: web`：浏览器里的视觉确认还没做（见上面「测试」）；桌面端（Electron）、
   Linux / macOS 都没有验证过。
 - 世界只活在**当前浏览器的 localStorage** 里：换浏览器、清站点数据、换 profile 就是新世界；

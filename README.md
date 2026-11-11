@@ -52,7 +52,7 @@ dsh plugin --profile web add \
   dsh-plugin-billing-card
 ```
 
-当前 npm 版本：`tofu-box 1.2.1` / `model-tuning 3.0.0` / `read-image-preview 1.6.0` / `shell-selector 0.1.0` / `computer-use 2.5.0` / `mcp-ui 1.0.3` / `billing-card 0.2.0`。`pixel-ecosystem 0.2.3` 单独发布（不并入伞包；0.3.x 能量账本重写还在开发分支上、未发 npm），伞包仍是 1.2.3。本次发布的下线插件清单、从 v2 升级的步骤与安装/卸载说明见 [docs/RELEASE-model-tuning-v3-20261017.md](docs/RELEASE-model-tuning-v3-20261017.md)；billing-card 0.2.0 / tofu-box 1.2.1 的发布说明见 [docs/RELEASE-billing-card-20261019.md](docs/RELEASE-billing-card-20261019.md)（0.1.0 见 [docs/RELEASE-billing-card-20261017.md](docs/RELEASE-billing-card-20261017.md)）。
+当前 npm 版本：`tofu-box 1.2.3` / `model-tuning 3.0.1` / `read-image-preview 1.7.1` / `shell-selector 0.1.1` / `computer-use 2.5.2` / `mcp-ui 1.0.4` / `billing-card 0.3.1`。`pixel-ecosystem 0.3.10` 单独发布（不并入伞包；0.3.x 能量账本重写的首个 npm 版本），发布说明见 [docs/RELEASE-pixel-ecosystem-0.3.10-20261111.md](docs/RELEASE-pixel-ecosystem-0.3.10-20261111.md)。model-tuning v3 的下线插件清单、从 v2 升级的步骤与安装/卸载说明见 [docs/RELEASE-model-tuning-v3-20261017.md](docs/RELEASE-model-tuning-v3-20261017.md)；billing-card 0.2.0 / tofu-box 1.2.1 的发布说明见 [docs/RELEASE-billing-card-20261019.md](docs/RELEASE-billing-card-20261019.md)（0.1.0 见 [docs/RELEASE-billing-card-20261017.md](docs/RELEASE-billing-card-20261017.md)）。
 
 装完重启 dsh 就能用。注册配置打进包里了（`dsh.bundle.patch`），不需要动 cordis 文件。卸载把 `add` 换成 `remove`。也可以从 git 直装（未发版 / 想追 HEAD 时）：`git+https://github.com/tofu-zyc/dsh-plugin-tofu-box.git#path:dsh-plugin-<name>`，伞包同理 `#path:tofu-box`；npm 版走 semver，git 版 `update` 永远追 HEAD。首次安装 computer-use 时 pnpm 可能拦下 koffi 的构建脚本并让 dsh 报错——按提示在 profile 的 `pnpm-workspace.yaml` 写 `allowBuilds: koffi: false`（koffi 用预编译二进制，不需要构建）后重试即可。
 
