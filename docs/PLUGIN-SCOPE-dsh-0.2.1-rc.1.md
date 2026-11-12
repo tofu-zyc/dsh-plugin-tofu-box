@@ -13,7 +13,7 @@
 | model-tuning | **高**。「模型参数」页的大部分字段官方 Models 页已覆盖；标题路由官方配置层已支持；绘图官方没有 | 已收窄为 v3：交还参数页、**删掉标题功能**，只保留官方没有的兼容开关/目录推理覆盖/绘图 |
 | read-image-preview | 中。图库展示与原图灯箱官方已有；缩放平移、标注裁剪、发到输入框、抓屏与管理官方没有 | 保留，图库替换方式需持续跟官方 |
 | shell-selector | 低。官方终端卡片只管超时/输出上限；`pwshPath` 有配置字段但无 UI | 保留（壳选择 + 方言提示） |
-| mcp-ui | 无。官方 mcp-client 只能手写 patch，没有任何 MCP 配置 UI | 保留 |
+| mcp-ui | 无。官方 mcp-client 只能手写 patch，没有任何 MCP 配置 UI | ~~保留~~ **2026-11-12 已退役删除**（0.2.2-rc.2 官方 mcp-manager 提供 MCP 管理 UI，触发本节预设的退场条件） |
 | computer-use | 低。官方只有 experimental 提供方包：无 bundle、不能从插件页安装、无审批闸门 | 保留，跟踪上游产品化 |
 | codex-login | 低。官方有 OAuth 授权 seam 与 provider-card 席位，但没有登录 UI | **已删除（2026-11-04）**；原判定「保留，实验性」，因长期没有真实账号验证而下线 |
 
@@ -107,11 +107,13 @@
 
 处置：保留。页面上写清与官方终端卡片的分工（官方管超时/输出，我们管选壳）。写的是官方 `shell` 命名空间，沿用现有实现即可。
 
-### 2.4 mcp-ui
+### 2.4 mcp-ui（**2026-11-12 已退役删除，本节仅存档**）
 
 官方 `mcp/mcp-client` 只支持在 `cordis.patch.yml` 里手写 server 行；`packages/client/` 下没有任何 MCP 配置界面，`ui-plugin-manager` 的通用 `plugins.row.config` 席位也没有 mcp-client 的贡献者。判定：**C 全保留**。
 
 风险：官方已具备「任意行配置页」机制（`plugins.row.config`）。若上游给 mcp-client 补一个伴随 UI，本插件可直接退场。另外增删改路径至今没有实机验证（0 server 状态），这次适配应补上验证。
+
+**后续（2026-11-12）**：dsh 0.2.2-rc.2 新增官方 `mcp-manager`（web-app bundle 的 `mcp-manager` 行，运行时管理 MCP 服务器 + 设置 UI），退场条件成立，插件已退役删除；已配置的服务器是 patch 里独立的 mcp-client 行，不受卸载影响。
 
 ### 2.5 computer-use
 
@@ -166,7 +168,7 @@ model-tuning 3.0.0 的最终边界：
 | --- | --- |
 | read-image-preview | 不改功能；补一条 rc 升级检查项（官方图库/灯箱新增能力）；README 标注「替换图库是观看入口，不是跟官方抢功能」 |
 | shell-selector | 不改功能；页面文案明确与官方「终端」卡片的分工 |
-| mcp-ui | 补实机验证：隔离 profile 里加/改/删一个 MCP server，确认热生效与卸载后仍可加载 |
+| mcp-ui | ~~补实机验证~~ **2026-11-12 已退役删除**（官方 mcp-manager 取代，验证不再需要） |
 | computer-use | 不改；只做激活冒烟（避免操作用户桌面） |
 | codex-login | **2026-11-04 已删除**（原定：不改、保持 private，等真实账号验证） |
 

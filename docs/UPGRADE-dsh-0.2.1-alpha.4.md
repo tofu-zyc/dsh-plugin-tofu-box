@@ -1,5 +1,7 @@
 # dsh 0.2.1-alpha.4 插件兼容性检查（分支 `upgrade/dsh-0.2.1-alpha.4`）
 
+> **状态更新（2026-11-12）**：`mcp-ui` 已退役删除——dsh 0.2.2-rc.2 起官方 `mcp-manager` 提供 MCP 管理 UI。本文保留当时的决策与验证记录；退役说明见 [RELEASE-tofu-box-1.3.0-20261112.md](RELEASE-tofu-box-1.3.0-20261112.md)。
+
 ## 0. 结论速览
 
 - 上游最新预发布 **0.2.1-alpha.4**（2026-10-15，npm `alpha` tag）；`latest`/`next` 仍是 0.2.0-rc.2。
