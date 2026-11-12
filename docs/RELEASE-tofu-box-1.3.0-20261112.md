@@ -42,11 +42,16 @@ web-app bundle 新增 `mcp-manager` 行（`@deepseek-ai/dsh-mcp-manager`）—�
   rc-dev patch 本就无 managed 块（0 server），无迁移残留。
 - 退役前兼容性审计（今早）已确认 mcp-ui 在 0.2.2-rc.2 上仍可运行——退役是产品决定，不是兼容性修复。
 
-## registry 动作（需用户确认后执行）
+## registry 动作（用户 2026-11-12 确认「全部执行」，已完成）
 
-- [ ] `npm deprecate dsh-plugin-mcp-ui@* "<退役提示>"`
-- [ ] `./publish.ps1 -Publish tofu-box`（1.3.0；staged publishing 下用 `npm view tofu-box versions --json` 确认出现后再验证安装）
+- [x] `npm deprecate dsh-plugin-mcp-ui@*`：**1.0.2 / 1.0.3 / 1.0.4 三个版本全部标记 deprecated**，
+  `npm view dsh-plugin-mcp-ui deprecated` 回读确认。提示文案：「已退役：dsh 0.2.2-rc.2 起官方自带 mcp-manager（设置 → MCP）。已配置的服务器不受影响，请卸载本插件改用官方管理。Retired: official mcp-manager ships since dsh 0.2.2-rc.2; existing servers keep working. Remove this plugin and use the official Settings → MCP page.」
+- [x] `publish.ps1 -Publish tofu-box`（发布身份 tofuzyc）：`+ tofu-box@1.3.0`。staged publishing 处理约 2 分钟后
+  `npm view tofu-box versions --json` 出现 1.3.0，`dist-tags.latest = 1.3.0`。
+- [x] 发布后核对：从 registry `npm pack tofu-box@1.3.0 --dry-run` 拉取清单——8 个文件（LICENSE / README.md / package.json + 5 份 patch 副本，无 mcp-ui.yml），
+  shasum `d1b384dcf641489cb1b197a221e5b3daee02f8d6` 与 dry-run / 发布输出一致。
+- [x] 退役提交 push 到 origin/main。
 
 ## 找回
 
-`git checkout <退役提交>^ -- dsh-plugin-mcp-ui`（或从 npm 1.0.4 tarball）。
+`git log --oneline -- dsh-plugin-mcp-ui` 找到退役删除提交（2026-11-12，chore(mcp-ui)），然后 `git checkout <该提交>^ -- dsh-plugin-mcp-ui`；或直接从 npm 1.0.4 tarball 取回。
